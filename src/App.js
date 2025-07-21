@@ -30,7 +30,8 @@ const firebaseConfig = {
   measurementId: "G-XS3VFNW6Y3"
 };
 
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-profile-db';
+// 앱의 고유 ID를 환경에 상관없이 상수로 고정하여 데이터베이스 경로를 통일합니다.
+const appId = 'profile-db-app-junyoungoh';
 
 // Firebase 앱 초기화
 const app = initializeApp(firebaseConfig);
@@ -290,7 +291,6 @@ export default function App() {
         }, (err) => {
             console.error("Firestore 구독 오류: ", err);
             setError("데이터를 불러오는 데 실패했습니다. 액세스 코드가 올바른지 확인하거나 권한을 확인해주세요.");
-            setIsLoading(false);
         });
 
         return () => unsubscribe();
@@ -346,7 +346,7 @@ export default function App() {
             await updateDoc(profileDocRef, dataToUpdate);
         } catch (err) {
             console.error("프로필 업데이트 오류: ", err);
-            setError("프로필을 업데이트하는 데 실패했습니다.");
+            setError("프로필 업데이트 중 오류가 발생했습니다. 다시 시도해주세요.");
         }
     };
 
