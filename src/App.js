@@ -17,7 +17,7 @@ import {
     setLogLevel,
     updateDoc
 } from 'firebase/firestore';
-import { Search, UserPlus, Trash2, LogOut, Users, KeyRound, LoaderCircle, Edit, Save, X, ShieldAlert } from 'lucide-react';
+import { Search, UserPlus, Trash2, LogOut, Users, KeyRound, Loader2, Edit, Save, X, ShieldAlert } from 'lucide-react';
 
 // Firebase 구성 정보가 사용자의 값으로 업데이트되었습니다.
 const firebaseConfig = {
@@ -212,7 +212,7 @@ const LoginScreen = ({ onLogin, authStatus, error }) => {
                                 disabled={authStatus !== 'authenticated'}
                                 className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors disabled:bg-indigo-300 disabled:cursor-not-allowed"
                             >
-                                {authStatus === 'authenticating' && <LoaderCircle className="animate-spin mr-2" />}
+                                {authStatus === 'authenticating' && <Loader2 className="animate-spin mr-2" />}
                                 {authStatus === 'authenticated' ? '접속하기' : '인증 중...'}
                             </button>
                         </div>
@@ -246,7 +246,6 @@ export default function App() {
                 setAuthStatus('authenticated');
             } else {
                 try {
-                    // 사용자가 제공한 Firebase 프로젝트를 사용하므로 항상 익명 로그인을 시도합니다.
                     await signInAnonymously(auth);
                     setAuthStatus('authenticated');
                 } catch (e) {
@@ -269,11 +268,10 @@ export default function App() {
     }, [accessCode]);
 
     useEffect(() => {
-        // 인증이 완료되고, accessCode가 있어야 DB를 구독
         if (authStatus !== 'authenticated' || !profilesCollectionRef) {
-            if (accessCode) { // accessCode는 있는데 아직 인증 안된 경우 로딩 표시
+            if (accessCode) { 
                 setIsLoading(true);
-            } else { // accessCode가 없으면 로딩 완료
+            } else { 
                 setIsLoading(false);
             }
             setProfiles([]);
@@ -428,7 +426,7 @@ export default function App() {
 
                     {isLoading ? (
                         <div className="flex justify-center items-center py-20">
-                            <LoaderCircle className="animate-spin text-indigo-500" size={48} />
+                            <Loader2 className="animate-spin text-indigo-500" size={48} />
                             <p className="ml-4 text-gray-600">프로필을 불러오는 중...</p>
                         </div>
                     ) : (
