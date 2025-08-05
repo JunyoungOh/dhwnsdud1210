@@ -16,7 +16,7 @@ import {
     setLogLevel,
     updateDoc
 } from 'firebase/firestore';
-import { Search, UserPlus, Trash2, LogOut, Users, KeyRound, Loader2, Edit, Save, X, ShieldAlert, Calendar } from 'lucide-react';
+import { Search, UserPlus, Trash2, LogOut, Users, KeyRound, Loader2, Edit, Save, X, ShieldAlert, Calendar, Zap } from 'lucide-react';
 
 // Firebase 구성 정보
 const firebaseConfig = {
@@ -106,21 +106,40 @@ const ProfileCard = ({ profile, onDelete, onUpdate }) => {
     return (
         <>
             {showDeleteConfirm && <ConfirmationModal message={`'${profile.name}' 프로필을 정말로 삭제하시겠습니까?`} onConfirm={confirmDelete} onCancel={() => setShowDeleteConfirm(false)} />}
-            <div className={`bg-white rounded-xl shadow-md overflow-hidden transform hover:-translate-y-1 transition-transform duration-300 relative group ${profile.isToday ? 'ring-2 ring-indigo-500' : ''}`}>
+            <div className={`bg-white rounded-xl shadow-md overflow-hidden transform hover:-translate-y-1 transition-transform duration-300 relative group ${profile.isToday || profile.isUpcoming ? 'ring-2 ring-indigo-500' : ''}`}>
                 <div className="p-6">
                     <div className="flex justify-between items-start">
                         <div>
                             <div className="uppercase tracking-wide text-sm text-indigo-500 font-semibold">{profile.name}</div>
-                            <p className="block mt-1 text-lg leading-tight font-medium text-black whitespace-pre-wrap">{profile.career}</p>
+                            
+                            {/* 오늘/다가오는 일정 프로필의 경우, 일정을 두 번째 줄에 표시 */}
+                            {(profile.isToday || profile.isUpcoming) && profile.eventDate ? (
+                                <>
+                                    <p className="block mt-1 text-md leading-tight font-semibold text-indigo-600 flex items-center">
+                                        {profile.isToday && <Calendar size={14} className="mr-2 flex-shrink-0" />}
+                                        {profile.isUpcoming && <Zap size={14} className="mr-2 flex-shrink-0" />}
+                                        {new Date(profile.eventDate).toLocaleString('ko-KR', {
+                                            month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                                        })}
+                                    </p>
+                                    <p className="block mt-2 text-lg leading-tight font-medium text-black whitespace-pre-wrap">{profile.career}</p>
+                                </>
+                            ) : (
+                                // 그 외 프로필은 기존대로 경력을 두 번째 줄에 표시
+                                <p className="block mt-1 text-lg leading-tight font-medium text-black whitespace-pre-wrap">{profile.career}</p>
+                            )}
+
                         </div>
                         <div className="text-gray-500 text-sm font-bold">{profile.age ? `${profile.age}세` : '나이 미입력'}</div>
                     </div>
                     <p className="mt-4 text-gray-600 whitespace-pre-wrap">{profile.otherInfo}</p>
-                    {profile.eventDate && (
+                    
+                    {/* 오늘/다가오는 일정이 아닌 프로필에만 하단에 일정 정보 표시 */}
+                    {profile.eventDate && !profile.isToday && !profile.isUpcoming && (
                         <div className="mt-4 pt-4 border-t border-gray-200">
-                             <p className={`text-sm font-semibold flex items-center ${profile.isToday ? 'text-indigo-600' : 'text-gray-800'}`}>
+                             <p className="text-sm font-semibold flex items-center text-gray-800">
                                 <Calendar size={14} className="mr-2" />
-                                {profile.isToday ? '오늘 일정!' : '예정된 일정'}
+                                예정된 일정
                             </p>
                             <p className="text-sm text-gray-600 mt-1">
                                 {new Date(profile.eventDate).toLocaleString('ko-KR', {
@@ -313,21 +332,33 @@ export default function App() {
         }
     };
 
-    const { todayProfiles, searchResults, nonTodayProfiles } = useMemo(() => {
-        const todayString = new Date().toLocaleDateString();
+    const { todayProfiles, upcomingProfiles, searchResults, otherProfiles } = useMemo(() => {
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const threeDaysLater = new Date(todayStart);
+        threeDaysLater.setDate(threeDaysLater.getDate() + 4); 
+
         const today = [];
+        const upcoming = [];
         const others = [];
 
         profiles.forEach(p => {
-            const isToday = p.eventDate ? new Date(p.eventDate).toLocaleDateString() === todayString : false;
-            if (isToday) {
-                today.push({ ...p, isToday: true });
+            if (p.eventDate) {
+                const eventDate = new Date(p.eventDate);
+                if (eventDate >= todayStart && eventDate < new Date(new Date(todayStart).setDate(todayStart.getDate() + 1))) {
+                    today.push({ ...p, isToday: true });
+                } else if (eventDate > now && eventDate < threeDaysLater) {
+                    upcoming.push({ ...p, isUpcoming: true });
+                } else {
+                    others.push(p);
+                }
             } else {
-                others.push({ ...p, isToday: false });
+                others.push(p);
             }
         });
 
-        today.sort((a, b) => a.name.localeCompare(b.name));
+        today.sort((a, b) => new Date(a.eventDate) - new Date(b.eventDate));
+        upcoming.sort((a, b) => new Date(a.eventDate) - new Date(b.eventDate));
         others.sort((a, b) => a.name.localeCompare(b.name));
         
         let searchRes = [];
@@ -352,16 +383,16 @@ export default function App() {
             }
         }
 
-        return { todayProfiles: today, searchResults: searchRes, nonTodayProfiles: others };
+        return { todayProfiles: today, upcomingProfiles: upcoming, searchResults: searchRes, otherProfiles: others };
     }, [profiles, searchTerm]);
 
     const { currentProfiles, totalPages } = useMemo(() => {
         const indexOfLastProfile = currentPage * PROFILES_PER_PAGE;
         const indexOfFirstProfile = indexOfLastProfile - PROFILES_PER_PAGE;
-        const current = nonTodayProfiles.slice(indexOfFirstProfile, indexOfLastProfile);
-        const pages = Math.ceil(nonTodayProfiles.length / PROFILES_PER_PAGE);
+        const current = otherProfiles.slice(indexOfFirstProfile, indexOfLastProfile);
+        const pages = Math.ceil(otherProfiles.length / PROFILES_PER_PAGE);
         return { currentProfiles: current, totalPages: pages };
-    }, [currentPage, nonTodayProfiles]);
+    }, [currentPage, otherProfiles]);
 
     useEffect(() => {
         setCurrentPage(1);
@@ -386,9 +417,8 @@ export default function App() {
                 </div>
             </header>
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                {/* 오늘 일정 섹션 */}
                 {todayProfiles.length > 0 && (
-                    <div className="mb-8">
+                    <div className="mb-12">
                         <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center">
                             <Calendar className="mr-3 text-indigo-600" />
                             오늘의 일정
@@ -398,8 +428,19 @@ export default function App() {
                         </div>
                     </div>
                 )}
+                
+                {upcomingProfiles.length > 0 && (
+                    <div className="mb-12">
+                        <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center">
+                            <Zap className="mr-3 text-yellow-500" />
+                            다가오는 일정 (3일 이내)
+                        </h2>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {upcomingProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onDelete={handleDeleteProfile} onUpdate={handleUpdateProfile} />)}
+                        </div>
+                    </div>
+                )}
 
-                {/* 검색 및 검색 결과 섹션 */}
                 <div className="mb-8">
                     <div className="relative">
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -421,7 +462,6 @@ export default function App() {
                     )}
                 </div>
 
-                {/* 새 프로필 추가 섹션 */}
                 <div className="bg-white p-6 rounded-xl shadow-md mb-8">
                     <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
                         <UserPlus size={24} className="mr-2 text-indigo-500" />새 프로필 추가
@@ -443,7 +483,6 @@ export default function App() {
                 
                 {error && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded" role="alert"><p>{error}</p></div>}
                 
-                {/* 전체 프로필 섹션 (검색하지 않을 때만 보임) */}
                 {!searchTerm.trim() && (
                     <div>
                          <h2 className="text-2xl font-bold text-gray-800 mb-4">
