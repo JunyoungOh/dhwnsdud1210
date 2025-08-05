@@ -16,7 +16,7 @@ import {
     setLogLevel,
     updateDoc
 } from 'firebase/firestore';
-import { Search, UserPlus, Trash2, LogOut, Users, KeyRound, Loader2, Edit, Save, X, ShieldAlert } from 'lucide-react';
+import { Search, UserPlus, Trash2, LogOut, Users, KeyRound, Loader2, Edit, Save, X, ShieldAlert, Calendar } from 'lucide-react';
 
 // Firebase 구성 정보
 const firebaseConfig = {
@@ -90,6 +90,10 @@ const ProfileCard = ({ profile, onDelete, onUpdate }) => {
                     <textarea name="career" value={editedProfile.career} onChange={handleInputChange} placeholder="경력" className="w-full p-2 border rounded-lg h-20"></textarea>
                     <input name="age" type="number" value={editedProfile.age || ''} onChange={handleInputChange} placeholder="나이" className="w-full p-2 border rounded-lg" />
                     <textarea name="otherInfo" value={editedProfile.otherInfo} onChange={handleInputChange} placeholder="기타 정보" className="w-full p-2 border rounded-lg h-20"></textarea>
+                    <div>
+                        <label htmlFor="eventDate" className="block text-sm font-medium text-gray-700 mb-1">일정 (선택)</label>
+                        <input id="eventDate" name="eventDate" type="datetime-local" value={editedProfile.eventDate || ''} onChange={handleInputChange} className="w-full p-2 border rounded-lg" />
+                    </div>
                 </div>
                 <div className="mt-4 flex justify-end space-x-2">
                     <button onClick={handleEditToggle} className="p-2 text-gray-500 hover:text-gray-800"><X size={20} /></button>
@@ -102,7 +106,7 @@ const ProfileCard = ({ profile, onDelete, onUpdate }) => {
     return (
         <>
             {showDeleteConfirm && <ConfirmationModal message={`'${profile.name}' 프로필을 정말로 삭제하시겠습니까?`} onConfirm={confirmDelete} onCancel={() => setShowDeleteConfirm(false)} />}
-            <div className="bg-white rounded-xl shadow-md overflow-hidden transform hover:-translate-y-1 transition-transform duration-300 relative group">
+            <div className={`bg-white rounded-xl shadow-md overflow-hidden transform hover:-translate-y-1 transition-transform duration-300 relative group ${profile.isToday ? 'ring-2 ring-indigo-500' : ''}`}>
                 <div className="p-6">
                     <div className="flex justify-between items-start">
                         <div>
@@ -112,6 +116,19 @@ const ProfileCard = ({ profile, onDelete, onUpdate }) => {
                         <div className="text-gray-500 text-sm font-bold">{profile.age ? `${profile.age}세` : '나이 미입력'}</div>
                     </div>
                     <p className="mt-4 text-gray-600 whitespace-pre-wrap">{profile.otherInfo}</p>
+                    {profile.eventDate && (
+                        <div className="mt-4 pt-4 border-t border-gray-200">
+                             <p className={`text-sm font-semibold flex items-center ${profile.isToday ? 'text-indigo-600' : 'text-gray-800'}`}>
+                                <Calendar size={14} className="mr-2" />
+                                {profile.isToday ? '오늘 일정!' : '예정된 일정'}
+                            </p>
+                            <p className="text-sm text-gray-600 mt-1">
+                                {new Date(profile.eventDate).toLocaleString('ko-KR', {
+                                    year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                                })}
+                            </p>
+                        </div>
+                    )}
                 </div>
                 <div className="absolute top-3 right-3 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={handleEditToggle} className="text-gray-400 hover:text-blue-500"><Edit size={18} /></button>
@@ -158,6 +175,32 @@ const LoginScreen = ({ onLogin, authStatus, error }) => {
     );
 };
 
+// 페이지네이션 컴포넌트
+const Pagination = ({ totalPages, currentPage, setCurrentPage }) => {
+    const pageNumbers = [];
+    for (let i = 1; i <= totalPages; i++) {
+        pageNumbers.push(i);
+    }
+
+    return (
+        <nav className="mt-8 flex justify-center">
+            <ul className="inline-flex items-center -space-x-px">
+                {pageNumbers.map(number => (
+                    <li key={number}>
+                        <button
+                            onClick={() => setCurrentPage(number)}
+                            className={`py-2 px-4 leading-tight border border-gray-300 ${currentPage === number ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 hover:bg-gray-100'}`}
+                        >
+                            {number}
+                        </button>
+                    </li>
+                ))}
+            </ul>
+        </nav>
+    );
+};
+
+
 // 메인 애플리케이션 컴포넌트
 export default function App() {
     const [accessCode, setAccessCode] = useState(localStorage.getItem('profileDbAccessCode') || null);
@@ -166,11 +209,14 @@ export default function App() {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
     const [authStatus, setAuthStatus] = useState('authenticating');
+    const [currentPage, setCurrentPage] = useState(1);
+    const PROFILES_PER_PAGE = 9;
 
     const [newName, setNewName] = useState('');
     const [newCareer, setNewCareer] = useState('');
     const [newAge, setNewAge] = useState('');
     const [newOtherInfo, setNewOtherInfo] = useState('');
+    const [newEventDate, setNewEventDate] = useState('');
     
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -206,7 +252,6 @@ export default function App() {
         const q = query(profilesCollectionRef);
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
             const profilesData = querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-            profilesData.sort((a, b) => a.name.localeCompare(b.name));
             setProfiles(profilesData);
             setIsLoading(false);
         }, (err) => {
@@ -233,8 +278,14 @@ export default function App() {
         if (!newName.trim() || !newCareer.trim() || !profilesCollectionRef) return;
         
         try {
-            await addDoc(profilesCollectionRef, { name: newName, career: newCareer, age: newAge ? Number(newAge) : null, otherInfo: newOtherInfo });
-            setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo('');
+            await addDoc(profilesCollectionRef, { 
+                name: newName, 
+                career: newCareer, 
+                age: newAge ? Number(newAge) : null, 
+                otherInfo: newOtherInfo,
+                eventDate: newEventDate || null
+            });
+            setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewEventDate('');
         } catch (err) {
             console.error("프로필 추가 오류: ", err);
             setError("프로필 추가에 실패했습니다.");
@@ -262,32 +313,59 @@ export default function App() {
         }
     };
 
-    const filteredProfiles = useMemo(() => {
-        const term = searchTerm.trim();
-        if (!term) return profiles;
+    const { todayProfiles, searchResults, nonTodayProfiles } = useMemo(() => {
+        const todayString = new Date().toLocaleDateString();
+        const today = [];
+        const others = [];
 
-        // "20대", "30대" 등 연령대 검색 기능 추가
-        const ageGroupMatch = term.match(/^(\d{1,2})대$/);
-        if (ageGroupMatch) {
-            const decadeStart = parseInt(ageGroupMatch[1], 10);
-            if (decadeStart >= 10) { // 10대 이상만 처리
-                const minAge = decadeStart;
-                const maxAge = decadeStart + 9;
-                return profiles.filter(profile => 
-                    profile.age && profile.age >= minAge && profile.age <= maxAge
+        profiles.forEach(p => {
+            const isToday = p.eventDate ? new Date(p.eventDate).toLocaleDateString() === todayString : false;
+            if (isToday) {
+                today.push({ ...p, isToday: true });
+            } else {
+                others.push({ ...p, isToday: false });
+            }
+        });
+
+        today.sort((a, b) => a.name.localeCompare(b.name));
+        others.sort((a, b) => a.name.localeCompare(b.name));
+        
+        let searchRes = [];
+        const term = searchTerm.trim();
+        if (term) {
+            const ageGroupMatch = term.match(/^(\d{1,2})대$/);
+            if (ageGroupMatch) {
+                const decadeStart = parseInt(ageGroupMatch[1], 10);
+                if (decadeStart >= 10) {
+                    const minAge = decadeStart;
+                    const maxAge = decadeStart + 9;
+                    searchRes = profiles.filter(p => p.age && p.age >= minAge && p.age <= maxAge);
+                }
+            } else {
+                const lowercasedTerm = term.toLowerCase();
+                searchRes = profiles.filter(p =>
+                    (p.name && p.name.toLowerCase().includes(lowercasedTerm)) ||
+                    (p.career && p.career.toLowerCase().includes(lowercasedTerm)) ||
+                    (p.age && p.age.toString().includes(lowercasedTerm)) ||
+                    (p.otherInfo && p.otherInfo.toLowerCase().includes(lowercasedTerm))
                 );
             }
         }
 
-        // 기존의 텍스트 검색 기능
-        const lowercasedTerm = term.toLowerCase();
-        return profiles.filter(p =>
-            (p.name && p.name.toLowerCase().includes(lowercasedTerm)) ||
-            (p.career && p.career.toLowerCase().includes(lowercasedTerm)) ||
-            (p.age && p.age.toString().includes(lowercasedTerm)) ||
-            (p.otherInfo && p.otherInfo.toLowerCase().includes(lowercasedTerm))
-        );
+        return { todayProfiles: today, searchResults: searchRes, nonTodayProfiles: others };
     }, [profiles, searchTerm]);
+
+    const { currentProfiles, totalPages } = useMemo(() => {
+        const indexOfLastProfile = currentPage * PROFILES_PER_PAGE;
+        const indexOfFirstProfile = indexOfLastProfile - PROFILES_PER_PAGE;
+        const current = nonTodayProfiles.slice(indexOfFirstProfile, indexOfLastProfile);
+        const pages = Math.ceil(nonTodayProfiles.length / PROFILES_PER_PAGE);
+        return { currentProfiles: current, totalPages: pages };
+    }, [currentPage, nonTodayProfiles]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm]);
 
     if (!accessCode) {
         return <LoginScreen onLogin={handleLogin} authStatus={authStatus} error={error} />;
@@ -308,6 +386,42 @@ export default function App() {
                 </div>
             </header>
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                {/* 오늘 일정 섹션 */}
+                {todayProfiles.length > 0 && (
+                    <div className="mb-8">
+                        <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center">
+                            <Calendar className="mr-3 text-indigo-600" />
+                            오늘의 일정
+                        </h2>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {todayProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onDelete={handleDeleteProfile} onUpdate={handleUpdateProfile} />)}
+                        </div>
+                    </div>
+                )}
+
+                {/* 검색 및 검색 결과 섹션 */}
+                <div className="mb-8">
+                    <div className="relative">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input type="text" placeholder="이름, 경력, 기타 정보로 검색... (예: 20대)" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
+                    </div>
+                    {searchTerm.trim() && (
+                         <div className="mt-8">
+                             <h2 className="text-2xl font-bold text-gray-800 mb-4">검색 결과</h2>
+                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {searchResults.length > 0 ? (
+                                    searchResults.map(profile => <ProfileCard key={profile.id} profile={profile} onDelete={handleDeleteProfile} onUpdate={handleUpdateProfile} />)
+                                ) : (
+                                    <div className="col-span-full text-center py-12 text-gray-500 bg-white rounded-xl shadow-md">
+                                        <p>"{searchTerm}"에 대한 검색 결과가 없습니다.</p>
+                                    </div>
+                                )}
+                             </div>
+                         </div>
+                    )}
+                </div>
+
+                {/* 새 프로필 추가 섹션 */}
                 <div className="bg-white p-6 rounded-xl shadow-md mb-8">
                     <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
                         <UserPlus size={24} className="mr-2 text-indigo-500" />새 프로필 추가
@@ -319,25 +433,46 @@ export default function App() {
                         </div>
                         <div><textarea placeholder="경력 (필수)" value={newCareer} onChange={e => setNewCareer(e.target.value)} required className="w-full p-3 border rounded-lg h-24"></textarea></div>
                         <div><textarea placeholder="기타 정보" value={newOtherInfo} onChange={e => setNewOtherInfo(e.target.value)} className="w-full p-3 border rounded-lg h-24"></textarea></div>
+                        <div>
+                           <label htmlFor="newEventDate" className="block text-sm font-medium text-gray-700 mb-1">일정 (선택)</label>
+                           <input id="newEventDate" type="datetime-local" value={newEventDate} onChange={e => setNewEventDate(e.target.value)} className="w-full p-3 border rounded-lg" />
+                        </div>
                         <div className="text-right"><button type="submit" className="bg-indigo-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-indigo-700">추가하기</button></div>
                     </form>
                 </div>
+                
                 {error && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded" role="alert"><p>{error}</p></div>}
-                <div>
-                    <div className="relative mb-6">
-                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input type="text" placeholder="이름, 경력, 기타 정보로 검색... (예: 20대)" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
+                
+                {/* 전체 프로필 섹션 (검색하지 않을 때만 보임) */}
+                {!searchTerm.trim() && (
+                    <div>
+                         <h2 className="text-2xl font-bold text-gray-800 mb-4">
+                            전체 프로필
+                        </h2>
+                        {isLoading ? (
+                            <div className="flex justify-center items-center py-20"><Loader2 className="animate-spin text-indigo-500" size={48} /><p className="ml-4 text-gray-600">프로필을 불러오는 중...</p></div>
+                        ) : (
+                            <>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    {currentProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onDelete={handleDeleteProfile} onUpdate={handleUpdateProfile} />)}
+                                    
+                                    {profiles.length === 0 && !isLoading && (
+                                        <div className="col-span-full text-center py-12 text-gray-500 bg-white rounded-xl shadow-md">
+                                            <p>데이터베이스가 비어 있습니다.</p>
+                                        </div>
+                                    )}
+                                </div>
+                                {totalPages > 1 && (
+                                    <Pagination
+                                        totalPages={totalPages}
+                                        currentPage={currentPage}
+                                        setCurrentPage={setCurrentPage}
+                                    />
+                                )}
+                            </>
+                        )}
                     </div>
-                    {isLoading ? (
-                        <div className="flex justify-center items-center py-20"><Loader2 className="animate-spin text-indigo-500" size={48} /><p className="ml-4 text-gray-600">프로필을 불러오는 중...</p></div>
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {filteredProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onDelete={handleDeleteProfile} onUpdate={handleUpdateProfile} />)}
-                            {profiles.length > 0 && filteredProfiles.length === 0 && <div className="col-span-full text-center py-12 text-gray-500"><p>"{searchTerm}"에 대한 검색 결과가 없습니다.</p></div>}
-                            {profiles.length === 0 && !isLoading && <div className="col-span-full text-center py-12 text-gray-500 bg-white rounded-xl shadow-md"><p>데이터베이스가 비어 있습니다.</p></div>}
-                        </div>
-                    )}
-                </div>
+                )}
             </main>
         </div>
     );
