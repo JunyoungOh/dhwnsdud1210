@@ -86,7 +86,7 @@ const ProfileCard = ({ profile, onDelete, onUpdate }) => {
 
     if (isEditing) {
         return (
-            <div className="bg-white rounded-xl shadow-lg p-6 ring-2 ring-indigo-500">
+            <div className="bg-white rounded-xl shadow-lg p-6 ring-2 ring-yellow-400">
                 <div className="space-y-4">
                     <input name="name" value={editedProfile.name} onChange={handleInputChange} placeholder="이름" className="w-full p-2 border rounded-lg text-lg font-semibold" />
                     <textarea name="career" value={editedProfile.career} onChange={handleInputChange} placeholder="경력" className="w-full p-2 border rounded-lg h-20"></textarea>
@@ -108,14 +108,14 @@ const ProfileCard = ({ profile, onDelete, onUpdate }) => {
     return (
         <>
             {showDeleteConfirm && <ConfirmationModal message={`'${profile.name}' 프로필을 정말로 삭제하시겠습니까?`} onConfirm={confirmDelete} onCancel={() => setShowDeleteConfirm(false)} />}
-            <div className={`bg-white rounded-xl shadow-md overflow-hidden transform hover:-translate-y-1 transition-transform duration-300 relative group ${profile.isToday || profile.isUpcoming ? 'ring-2 ring-indigo-500' : ''}`}>
+            <div className={`bg-white rounded-xl shadow-md overflow-hidden transform hover:-translate-y-1 transition-transform duration-300 relative group ${profile.isToday || profile.isUpcoming ? 'ring-2 ring-yellow-400' : ''}`}>
                 <div className="p-6">
                     <div className="flex justify-between items-start">
                         <div>
-                            <div className="uppercase tracking-wide text-sm text-indigo-500 font-semibold">{profile.name}</div>
+                            <div className="uppercase tracking-wide text-sm text-yellow-700 font-semibold">{profile.name}</div>
                             {(profile.isToday || profile.isUpcoming) && profile.eventDate ? (
                                 <>
-                                    <p className="block mt-1 text-md leading-tight font-semibold text-indigo-600 flex items-center">
+                                    <p className="block mt-1 text-md leading-tight font-semibold text-yellow-500 flex items-center">
                                         {profile.isToday && <Calendar size={14} className="mr-2 flex-shrink-0" />}
                                         {profile.isUpcoming && <Zap size={14} className="mr-2 flex-shrink-0" />}
                                         {new Date(profile.eventDate).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
@@ -163,7 +163,7 @@ const LoginScreen = ({ onLogin, authStatus, error }) => {
             <div className="w-full max-w-md">
                 <div className="bg-white border rounded-2xl shadow-lg p-8">
                     <div className="text-center">
-                        <Users className="mx-auto h-12 w-auto text-indigo-600" />
+                        <Users className="mx-auto h-12 w-auto text-yellow-400" />
                         <h2 className="mt-6 text-3xl font-extrabold text-gray-900">프로필 데이터베이스</h2>
                         <p className="mt-2 text-sm text-gray-600">팀원들과 공유할 액세스 코드를 입력하세요.</p>
                     </div>
@@ -174,7 +174,7 @@ const LoginScreen = ({ onLogin, authStatus, error }) => {
                             <input id="access-code" type="text" required className="w-full pl-10 pr-3 py-3 border rounded-lg" placeholder="액세스 코드" value={accessCode} onChange={(e) => setAccessCode(e.target.value)} />
                         </div>
                         <div>
-                            <button type="submit" disabled={authStatus !== 'authenticated'} className="w-full flex justify-center py-3 px-4 border rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300">
+                            <button type="submit" disabled={authStatus !== 'authenticated'} className="w-full flex justify-center py-3 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
                                 {authStatus === 'authenticating' && <Loader2 className="animate-spin mr-2" />}
                                 {authStatus === 'authenticated' ? '접속하기' : '인증 중...'}
                             </button>
@@ -200,7 +200,7 @@ const Pagination = ({ totalPages, currentPage, setCurrentPage }) => {
                     <li key={number}>
                         <button
                             onClick={() => setCurrentPage(number)}
-                            className={`py-2 px-4 leading-tight border border-gray-300 ${currentPage === number ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 hover:bg-gray-100'}`}
+                            className={`py-2 px-4 leading-tight border border-gray-300 ${currentPage === number ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-white text-gray-600 hover:bg-gray-100'}`}
                         >
                             {number}
                         </button>
@@ -221,7 +221,7 @@ export default function App() {
     const [error, setError] = useState('');
     const [authStatus, setAuthStatus] = useState('authenticating');
     const [currentPage, setCurrentPage] = useState(1);
-    const PROFILES_PER_PAGE = 8; // 페이지당 프로필 수를 조정
+    const PROFILES_PER_PAGE = 8;
 
     const [newName, setNewName] = useState('');
     const [newCareer, setNewCareer] = useState('');
@@ -229,40 +229,6 @@ export default function App() {
     const [newOtherInfo, setNewOtherInfo] = useState('');
     const [newEventDate, setNewEventDate] = useState('');
     
-    /*
-    // 푸시 알림 기능 일시정지
-    useEffect(() => {
-        const requestNotificationPermission = async () => {
-            try {
-                const permission = await Notification.requestPermission();
-                if (permission === 'granted') {
-                    console.log('Notification permission granted.');
-                    const currentToken = await getToken(messaging, { vapidKey: 'YOUR_VAPID_KEY_FROM_FIREBASE' }); 
-                    if (currentToken) {
-                        console.log('FCM Token:', currentToken);
-                    } else {
-                        console.log('No registration token available.');
-                    }
-                } else {
-                    console.log('Unable to get permission to notify.');
-                }
-            } catch (err) {
-                console.error('An error occurred while retrieving token. ', err);
-            }
-        };
-
-        if (authStatus === 'authenticated') {
-            requestNotificationPermission();
-        }
-
-        onMessage(messaging, (payload) => {
-            console.log('Message received. ', payload);
-            alert(`[알림] ${payload.notification.title}: ${payload.notification.body}`);
-        });
-
-    }, [authStatus]);
-    */
-
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
             if (!user) {
@@ -433,11 +399,11 @@ export default function App() {
             <header className="bg-white shadow-sm sticky top-0 z-20">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
                     <div className="flex items-center space-x-3">
-                        <Users className="h-8 w-8 text-indigo-600" />
+                        <Users className="h-8 w-8 text-yellow-400" />
                         <h1 className="text-2xl font-bold text-gray-800">프로필 데이터베이스</h1>
                         <span className="text-sm text-gray-500 bg-gray-200 px-2 py-1 rounded-md font-mono">{accessCode}</span>
                     </div>
-                    <button onClick={handleLogout} className="flex items-center space-x-2 text-sm text-gray-600 hover:text-indigo-600">
+                    <button onClick={handleLogout} className="flex items-center space-x-2 text-sm text-gray-600 hover:text-yellow-500">
                         <LogOut size={16} /><span>로그아웃</span>
                     </button>
                 </div>
@@ -446,7 +412,7 @@ export default function App() {
                 {todayProfiles.length > 0 && (
                     <div className="mb-12">
                         <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center">
-                            <Calendar className="mr-3 text-indigo-600" />
+                            <Calendar className="mr-3 text-yellow-500" />
                             오늘의 일정
                         </h2>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -490,7 +456,7 @@ export default function App() {
 
                 <div className="bg-white p-6 rounded-xl shadow-md mb-8">
                     <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-                        <UserPlus size={24} className="mr-2 text-indigo-500" />새 프로필 추가
+                        <UserPlus size={24} className="mr-2 text-yellow-400" />새 프로필 추가
                     </h2>
                     <form onSubmit={handleAddProfile} className="space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -503,7 +469,7 @@ export default function App() {
                            <label htmlFor="newEventDate" className="block text-sm font-medium text-gray-700 mb-1">일정 (선택)</label>
                            <input id="newEventDate" type="datetime-local" value={newEventDate} onChange={e => setNewEventDate(e.target.value)} className="w-full p-3 border rounded-lg" />
                         </div>
-                        <div className="text-right"><button type="submit" className="bg-indigo-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-indigo-700">추가하기</button></div>
+                        <div className="text-right"><button type="submit" className="bg-yellow-400 text-white font-bold py-2 px-6 rounded-lg hover:bg-yellow-500">추가하기</button></div>
                     </form>
                 </div>
                 
@@ -515,7 +481,7 @@ export default function App() {
                             전체 프로필
                         </h2>
                         {isLoading ? (
-                            <div className="flex justify-center items-center py-20"><Loader2 className="animate-spin text-indigo-500" size={48} /><p className="ml-4 text-gray-600">프로필을 불러오는 중...</p></div>
+                            <div className="flex justify-center items-center py-20"><Loader2 className="animate-spin text-yellow-400" size={48} /><p className="ml-4 text-gray-600">프로필을 불러오는 중...</p></div>
                         ) : (
                             <>
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
