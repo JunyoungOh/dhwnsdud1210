@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
+// import { getMessaging, getToken, onMessage } from "firebase/messaging"; // 푸시 알림 기능 일시정지
 import { 
     getAuth, 
     signInAnonymously, 
@@ -36,6 +37,7 @@ const appId = 'profile-db-app-junyoungoh';
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
+// const messaging = getMessaging(app); // 푸시 알림 기능 일시정지
 setLogLevel('debug');
 
 // 확인 모달 컴포넌트
@@ -111,30 +113,22 @@ const ProfileCard = ({ profile, onDelete, onUpdate }) => {
                     <div className="flex justify-between items-start">
                         <div>
                             <div className="uppercase tracking-wide text-sm text-indigo-500 font-semibold">{profile.name}</div>
-                            
-                            {/* 오늘/다가오는 일정 프로필의 경우, 일정을 두 번째 줄에 표시 */}
                             {(profile.isToday || profile.isUpcoming) && profile.eventDate ? (
                                 <>
                                     <p className="block mt-1 text-md leading-tight font-semibold text-indigo-600 flex items-center">
                                         {profile.isToday && <Calendar size={14} className="mr-2 flex-shrink-0" />}
                                         {profile.isUpcoming && <Zap size={14} className="mr-2 flex-shrink-0" />}
-                                        {new Date(profile.eventDate).toLocaleString('ko-KR', {
-                                            month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                                        })}
+                                        {new Date(profile.eventDate).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                     </p>
                                     <p className="block mt-2 text-lg leading-tight font-medium text-black whitespace-pre-wrap">{profile.career}</p>
                                 </>
                             ) : (
-                                // 그 외 프로필은 기존대로 경력을 두 번째 줄에 표시
                                 <p className="block mt-1 text-lg leading-tight font-medium text-black whitespace-pre-wrap">{profile.career}</p>
                             )}
-
                         </div>
                         <div className="text-gray-500 text-sm font-bold">{profile.age ? `${profile.age}세` : '나이 미입력'}</div>
                     </div>
                     <p className="mt-4 text-gray-600 whitespace-pre-wrap">{profile.otherInfo}</p>
-                    
-                    {/* 오늘/다가오는 일정이 아닌 프로필에만 하단에 일정 정보 표시 */}
                     {profile.eventDate && !profile.isToday && !profile.isUpcoming && (
                         <div className="mt-4 pt-4 border-t border-gray-200">
                              <p className="text-sm font-semibold flex items-center text-gray-800">
@@ -142,9 +136,7 @@ const ProfileCard = ({ profile, onDelete, onUpdate }) => {
                                 예정된 일정
                             </p>
                             <p className="text-sm text-gray-600 mt-1">
-                                {new Date(profile.eventDate).toLocaleString('ko-KR', {
-                                    year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                                })}
+                                {new Date(profile.eventDate).toLocaleString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                             </p>
                         </div>
                     )}
@@ -229,7 +221,7 @@ export default function App() {
     const [error, setError] = useState('');
     const [authStatus, setAuthStatus] = useState('authenticating');
     const [currentPage, setCurrentPage] = useState(1);
-    const PROFILES_PER_PAGE = 9;
+    const PROFILES_PER_PAGE = 8; // 페이지당 프로필 수를 조정
 
     const [newName, setNewName] = useState('');
     const [newCareer, setNewCareer] = useState('');
@@ -237,6 +229,40 @@ export default function App() {
     const [newOtherInfo, setNewOtherInfo] = useState('');
     const [newEventDate, setNewEventDate] = useState('');
     
+    /*
+    // 푸시 알림 기능 일시정지
+    useEffect(() => {
+        const requestNotificationPermission = async () => {
+            try {
+                const permission = await Notification.requestPermission();
+                if (permission === 'granted') {
+                    console.log('Notification permission granted.');
+                    const currentToken = await getToken(messaging, { vapidKey: 'YOUR_VAPID_KEY_FROM_FIREBASE' }); 
+                    if (currentToken) {
+                        console.log('FCM Token:', currentToken);
+                    } else {
+                        console.log('No registration token available.');
+                    }
+                } else {
+                    console.log('Unable to get permission to notify.');
+                }
+            } catch (err) {
+                console.error('An error occurred while retrieving token. ', err);
+            }
+        };
+
+        if (authStatus === 'authenticated') {
+            requestNotificationPermission();
+        }
+
+        onMessage(messaging, (payload) => {
+            console.log('Message received. ', payload);
+            alert(`[알림] ${payload.notification.title}: ${payload.notification.body}`);
+        });
+
+    }, [authStatus]);
+    */
+
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
             if (!user) {
@@ -423,7 +449,7 @@ export default function App() {
                             <Calendar className="mr-3 text-indigo-600" />
                             오늘의 일정
                         </h2>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             {todayProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onDelete={handleDeleteProfile} onUpdate={handleUpdateProfile} />)}
                         </div>
                     </div>
@@ -435,7 +461,7 @@ export default function App() {
                             <Zap className="mr-3 text-yellow-500" />
                             다가오는 일정 (3일 이내)
                         </h2>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             {upcomingProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onDelete={handleDeleteProfile} onUpdate={handleUpdateProfile} />)}
                         </div>
                     </div>
@@ -449,7 +475,7 @@ export default function App() {
                     {searchTerm.trim() && (
                          <div className="mt-8">
                              <h2 className="text-2xl font-bold text-gray-800 mb-4">검색 결과</h2>
-                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 {searchResults.length > 0 ? (
                                     searchResults.map(profile => <ProfileCard key={profile.id} profile={profile} onDelete={handleDeleteProfile} onUpdate={handleUpdateProfile} />)
                                 ) : (
@@ -492,7 +518,7 @@ export default function App() {
                             <div className="flex justify-center items-center py-20"><Loader2 className="animate-spin text-indigo-500" size={48} /><p className="ml-4 text-gray-600">프로필을 불러오는 중...</p></div>
                         ) : (
                             <>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                     {currentProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onDelete={handleDeleteProfile} onUpdate={handleUpdateProfile} />)}
                                     
                                     {profiles.length === 0 && !isLoading && (
