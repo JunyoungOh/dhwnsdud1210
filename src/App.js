@@ -112,7 +112,7 @@ const ProfileCard = ({ profile, onDelete, onUpdate }) => {
                 <div className="p-6">
                     <div className="flex justify-between items-start">
                         <div>
-                            <div className="uppercase tracking-wide text-sm text-yellow-700 font-semibold">{profile.name}</div>
+                            <div className="text-lg text-yellow-700 font-semibold">{profile.name}</div>
                             {(profile.isToday || profile.isUpcoming) && profile.eventDate ? (
                                 <>
                                     <p className="block mt-1 text-md leading-tight font-semibold text-yellow-500 flex items-center">
@@ -120,10 +120,10 @@ const ProfileCard = ({ profile, onDelete, onUpdate }) => {
                                         {profile.isUpcoming && <Zap size={14} className="mr-2 flex-shrink-0" />}
                                         {new Date(profile.eventDate).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                     </p>
-                                    <p className="block mt-2 text-lg leading-tight font-medium text-black whitespace-pre-wrap">{profile.career}</p>
+                                    <p className="block mt-2 text-md leading-tight font-medium text-black whitespace-pre-wrap">{profile.career}</p>
                                 </>
                             ) : (
-                                <p className="block mt-1 text-lg leading-tight font-medium text-black whitespace-pre-wrap">{profile.career}</p>
+                                <p className="block mt-1 text-md leading-tight font-medium text-black whitespace-pre-wrap">{profile.career}</p>
                             )}
                         </div>
                         <div className="text-gray-500 text-sm font-bold">{profile.age ? `${profile.age}세` : '나이 미입력'}</div>
