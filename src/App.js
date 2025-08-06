@@ -415,7 +415,7 @@ export default function App() {
                             <Calendar className="mr-3 text-yellow-500" />
                             오늘의 일정
                         </h2>
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 gap-6 max-w-3xl mx-auto">
                             {todayProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onDelete={handleDeleteProfile} onUpdate={handleUpdateProfile} />)}
                         </div>
                     </div>
@@ -427,7 +427,7 @@ export default function App() {
                             <Zap className="mr-3 text-yellow-500" />
                             다가오는 일정 (3일 이내)
                         </h2>
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 gap-6 max-w-3xl mx-auto">
                             {upcomingProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onDelete={handleDeleteProfile} onUpdate={handleUpdateProfile} />)}
                         </div>
                     </div>
@@ -441,7 +441,7 @@ export default function App() {
                     {searchTerm.trim() && (
                          <div className="mt-8">
                              <h2 className="text-2xl font-bold text-gray-800 mb-4">검색 결과</h2>
-                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                             <div className="grid grid-cols-1 gap-6 max-w-3xl mx-auto">
                                 {searchResults.length > 0 ? (
                                     searchResults.map(profile => <ProfileCard key={profile.id} profile={profile} onDelete={handleDeleteProfile} onUpdate={handleUpdateProfile} />)
                                 ) : (
@@ -484,7 +484,7 @@ export default function App() {
                             <div className="flex justify-center items-center py-20"><Loader2 className="animate-spin text-yellow-400" size={48} /><p className="ml-4 text-gray-600">프로필을 불러오는 중...</p></div>
                         ) : (
                             <>
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                <div className="grid grid-cols-1 gap-6 max-w-3xl mx-auto">
                                     {currentProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onDelete={handleDeleteProfile} onUpdate={handleUpdateProfile} />)}
                                     
                                     {profiles.length === 0 && !isLoading && (
