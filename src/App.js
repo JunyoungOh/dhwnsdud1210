@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
+import { getMessaging, getToken, onMessage } from "firebase/messaging";
 import { 
     getAuth, 
     signInAnonymously, 
@@ -36,6 +37,7 @@ const appId = 'profile-db-app-junyoungoh';
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
+const messaging = getMessaging(app);
 setLogLevel('debug');
 
 // 확인 모달 컴포넌트
@@ -111,30 +113,22 @@ const ProfileCard = ({ profile, onDelete, onUpdate }) => {
                     <div className="flex justify-between items-start">
                         <div>
                             <div className="uppercase tracking-wide text-sm text-indigo-500 font-semibold">{profile.name}</div>
-                            
-                            {/* 오늘/다가오는 일정 프로필의 경우, 일정을 두 번째 줄에 표시 */}
                             {(profile.isToday || profile.isUpcoming) && profile.eventDate ? (
                                 <>
                                     <p className="block mt-1 text-md leading-tight font-semibold text-indigo-600 flex items-center">
                                         {profile.isToday && <Calendar size={14} className="mr-2 flex-shrink-0" />}
                                         {profile.isUpcoming && <Zap size={14} className="mr-2 flex-shrink-0" />}
-                                        {new Date(profile.eventDate).toLocaleString('ko-KR', {
-                                            month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                                        })}
+                                        {new Date(profile.eventDate).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                     </p>
                                     <p className="block mt-2 text-lg leading-tight font-medium text-black whitespace-pre-wrap">{profile.career}</p>
                                 </>
                             ) : (
-                                // 그 외 프로필은 기존대로 경력을 두 번째 줄에 표시
                                 <p className="block mt-1 text-lg leading-tight font-medium text-black whitespace-pre-wrap">{profile.career}</p>
                             )}
-
                         </div>
                         <div className="text-gray-500 text-sm font-bold">{profile.age ? `${profile.age}세` : '나이 미입력'}</div>
                     </div>
                     <p className="mt-4 text-gray-600 whitespace-pre-wrap">{profile.otherInfo}</p>
-                    
-                    {/* 오늘/다가오는 일정이 아닌 프로필에만 하단에 일정 정보 표시 */}
                     {profile.eventDate && !profile.isToday && !profile.isUpcoming && (
                         <div className="mt-4 pt-4 border-t border-gray-200">
                              <p className="text-sm font-semibold flex items-center text-gray-800">
@@ -142,9 +136,7 @@ const ProfileCard = ({ profile, onDelete, onUpdate }) => {
                                 예정된 일정
                             </p>
                             <p className="text-sm text-gray-600 mt-1">
-                                {new Date(profile.eventDate).toLocaleString('ko-KR', {
-                                    year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                                })}
+                                {new Date(profile.eventDate).toLocaleString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                             </p>
                         </div>
                     )}
@@ -237,6 +229,41 @@ export default function App() {
     const [newOtherInfo, setNewOtherInfo] = useState('');
     const [newEventDate, setNewEventDate] = useState('');
     
+    // 푸시 알림 권한 요청 및 토큰 발급 로직
+    useEffect(() => {
+        const requestNotificationPermission = async () => {
+            try {
+                const permission = await Notification.requestPermission();
+                if (permission === 'granted') {
+                    console.log('Notification permission granted.');
+                    // VAPID 키는 Firebase 콘솔 > 프로젝트 설정 > 클라우드 메시징 > 웹 푸시 인증서에서 생성
+                    const currentToken = await getToken(messaging, { vapidKey: 'BISKOk17u6pUukTRG0zuthw3lM27ZcY861y8kzNxY3asx3jKnzQPTTkFXxcWluBvRWjWDthTHtwWszW-hVL_vZM' }); 
+                    if (currentToken) {
+                        console.log('FCM Token:', currentToken);
+                        // TODO: 이 토큰을 Firestore에 사용자 정보와 함께 저장해야 합니다. (3단계에서 진행)
+                    } else {
+                        console.log('No registration token available. Request permission to generate one.');
+                    }
+                } else {
+                    console.log('Unable to get permission to notify.');
+                }
+            } catch (err) {
+                console.error('An error occurred while retrieving token. ', err);
+            }
+        };
+
+        if (authStatus === 'authenticated') {
+            requestNotificationPermission();
+        }
+
+        // 앱이 포그라운드에 있을 때 메시지 수신
+        onMessage(messaging, (payload) => {
+            console.log('Message received. ', payload);
+            alert(`[알림] ${payload.notification.title}: ${payload.notification.body}`);
+        });
+
+    }, [authStatus]);
+
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
             if (!user) {
