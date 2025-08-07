@@ -232,13 +232,25 @@ const ManageTab = ({ profiles, handleEdit, handleDelete, handleFormSubmit, formS
     const [searchTerm, setSearchTerm] = useState('');
     
     const searchedProfiles = useMemo(() => {
-        const term = searchTerm.trim().toLowerCase();
+        const term = searchTerm.trim();
         if (!term) return [];
+        
+        const ageGroupMatch = term.match(/^(\d{1,2})대$/);
+        if (ageGroupMatch) {
+            const decadeStart = parseInt(ageGroupMatch[1], 10);
+            if (decadeStart >= 10) {
+                const minAge = decadeStart;
+                const maxAge = decadeStart + 9;
+                return profiles.filter(p => p.age && p.age >= minAge && p.age <= maxAge);
+            }
+        }
+        
+        const lowercasedTerm = term.toLowerCase();
         return profiles.filter(p =>
-            (p.name && p.name.toLowerCase().includes(term)) ||
-            (p.career && p.career.toLowerCase().includes(term)) ||
-            (p.otherInfo && p.otherInfo.toLowerCase().includes(term)) ||
-            (p.age && p.age.toString().includes(term))
+            (p.name && p.name.toLowerCase().includes(lowercasedTerm)) ||
+            (p.career && p.career.toLowerCase().includes(lowercasedTerm)) ||
+            (p.otherInfo && p.otherInfo.toLowerCase().includes(lowercasedTerm)) ||
+            (p.age && p.age.toString().includes(lowercasedTerm))
         );
     }, [searchTerm, profiles]);
 
@@ -247,7 +259,7 @@ const ManageTab = ({ profiles, handleEdit, handleDelete, handleFormSubmit, formS
             <section>
                 <div className="relative mb-6">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input type="text" placeholder="이름, 경력, 기타 정보로 검색..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
+                    <input type="text" placeholder="이름, 경력, 기타 정보로 검색... (예: 20대)" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
                 </div>
                 {searchTerm.trim() && (
                     <div>
