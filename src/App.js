@@ -207,24 +207,8 @@ const Pagination = ({ totalPages, currentPage, setCurrentPage }) => {
 };
 
 // 대시보드 컴포넌트
-const Dashboard = ({ ageData, companyData, onCompanyClick }) => {
-    const [recharts, setRecharts] = useState(null);
-
-    useEffect(() => {
-        if (window.Recharts) {
-            setRecharts(window.Recharts);
-            return;
-        }
-        const intervalId = setInterval(() => {
-            if (window.Recharts) {
-                setRecharts(window.Recharts);
-                clearInterval(intervalId);
-            }
-        }, 100);
-        return () => clearInterval(intervalId);
-    }, []);
-
-    if (!recharts) {
+const Dashboard = ({ ageData, companyData, onCompanyClick, isLibraryLoaded }) => {
+    if (!isLibraryLoaded) {
         return (
             <div className="mb-12">
                 <h2 className="text-2xl font-bold text-gray-800 mb-4">대시보드</h2>
@@ -242,7 +226,7 @@ const Dashboard = ({ ageData, companyData, onCompanyClick }) => {
         );
     }
 
-    const { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } = recharts;
+    const { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } = window.Recharts;
     const COLORS = ['#FFBB28', '#FF8042', '#0088FE', '#00C49F', '#FF0000', '#8884d8'];
 
     return (
@@ -291,6 +275,7 @@ export default function App() {
     const [error, setError] = useState('');
     const [authStatus, setAuthStatus] = useState('authenticating');
     const [currentPage, setCurrentPage] = useState(1);
+    const [rechartsLoaded, setRechartsLoaded] = useState(false);
     const PROFILES_PER_PAGE = 8;
 
     const [newName, setNewName] = useState('');
@@ -299,6 +284,25 @@ export default function App() {
     const [newOtherInfo, setNewOtherInfo] = useState('');
     const [newEventDate, setNewEventDate] = useState('');
     
+    useEffect(() => {
+        if (window.Recharts) {
+            setRechartsLoaded(true);
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = "https://unpkg.com/recharts/umd/Recharts.min.js";
+        script.async = true;
+        script.onload = () => setRechartsLoaded(true);
+        script.onerror = () => setError("차트 라이브러리를 불러오는데 실패했습니다.");
+        document.body.appendChild(script);
+
+        return () => {
+            if (document.body.contains(script)) {
+                document.body.removeChild(script);
+            }
+        };
+    }, []);
+
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
             if (!user) {
@@ -505,7 +509,7 @@ export default function App() {
                 </div>
             </header>
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                <Dashboard ageData={ageChartData} companyData={companyChartData} onCompanyClick={setSearchTerm} />
+                <Dashboard ageData={ageChartData} companyData={companyChartData} onCompanyClick={setSearchTerm} isLibraryLoaded={rechartsLoaded} />
 
                 {todayProfiles.length > 0 && (
                     <div className="mb-12">
