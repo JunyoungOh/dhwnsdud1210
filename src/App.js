@@ -206,65 +206,6 @@ const Pagination = ({ totalPages, currentPage, setCurrentPage }) => {
     );
 };
 
-// 대시보드 컴포넌트
-const Dashboard = ({ ageData, companyData, onCompanyClick, isLibraryLoaded }) => {
-    if (!isLibraryLoaded) {
-        return (
-            <div className="mb-12">
-                <h2 className="text-2xl font-bold text-gray-800 mb-4">대시보드</h2>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <div className="bg-white p-6 rounded-xl shadow-md flex justify-center items-center h-[350px]">
-                        <Loader2 className="animate-spin text-yellow-400" size={32} />
-                        <p className="ml-4 text-gray-500">차트 로딩 중...</p>
-                    </div>
-                    <div className="bg-white p-6 rounded-xl shadow-md flex justify-center items-center h-[350px]">
-                        <Loader2 className="animate-spin text-yellow-400" size={32} />
-                        <p className="ml-4 text-gray-500">차트 로딩 중...</p>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    const { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } = window.Recharts;
-    const COLORS = ['#FFBB28', '#FF8042', '#0088FE', '#00C49F', '#FF0000', '#8884d8'];
-
-    return (
-        <div className="mb-12">
-            <h2 className="text-2xl font-bold text-gray-800 mb-4">대시보드</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <div className="bg-white p-6 rounded-xl shadow-md">
-                    <h3 className="font-semibold text-lg mb-4">세대별 분포</h3>
-                    {ageData.length > 0 ? (
-                        <ResponsiveContainer width="100%" height={300}>
-                            <PieChart>
-                                <Pie data={ageData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} fill="#8884d8" label>
-                                    {ageData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
-                                </Pie>
-                                <Tooltip />
-                                <Legend />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    ) : <div className="flex justify-center items-center h-[300px] text-gray-500">나이 데이터가 없습니다.</div>}
-                </div>
-                <div className="bg-white p-6 rounded-xl shadow-md">
-                    <h3 className="font-semibold text-lg mb-4">주요 경력 분포</h3>
-                     {companyData.some(d => d.count > 0) ? (
-                        <ResponsiveContainer width="100%" height={300}>
-                            <BarChart data={companyData} layout="vertical" margin={{ top: 5, right: 20, left: 50, bottom: 5 }}>
-                                <XAxis type="number" />
-                                <YAxis type="category" dataKey="name" width={80} />
-                                <Tooltip />
-                                <Bar dataKey="count" fill="#FFBB28" onClick={(data) => onCompanyClick(data.name)} style={{ cursor: 'pointer' }} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    ) : <div className="flex justify-center items-center h-[300px] text-gray-500">경력 데이터가 없습니다.</div>}
-                </div>
-            </div>
-        </div>
-    );
-};
-
 
 // 메인 애플리케이션 컴포넌트
 export default function App() {
@@ -275,7 +216,6 @@ export default function App() {
     const [error, setError] = useState('');
     const [authStatus, setAuthStatus] = useState('authenticating');
     const [currentPage, setCurrentPage] = useState(1);
-    const [rechartsLoaded, setRechartsLoaded] = useState(false);
     const PROFILES_PER_PAGE = 8;
 
     const [newName, setNewName] = useState('');
@@ -284,25 +224,6 @@ export default function App() {
     const [newOtherInfo, setNewOtherInfo] = useState('');
     const [newEventDate, setNewEventDate] = useState('');
     
-    useEffect(() => {
-        if (window.Recharts) {
-            setRechartsLoaded(true);
-            return;
-        }
-        const script = document.createElement('script');
-        script.src = "https://unpkg.com/recharts/umd/Recharts.min.js";
-        script.async = true;
-        script.onload = () => setRechartsLoaded(true);
-        script.onerror = () => setError("차트 라이브러리를 불러오는데 실패했습니다.");
-        document.body.appendChild(script);
-
-        return () => {
-            if (document.body.contains(script)) {
-                document.body.removeChild(script);
-            }
-        };
-    }, []);
-
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
             if (!user) {
@@ -398,7 +319,7 @@ export default function App() {
         }
     };
 
-    const { todayProfiles, upcomingProfiles, searchResults, otherProfiles, ageChartData, companyChartData } = useMemo(() => {
+    const { todayProfiles, upcomingProfiles, searchResults, otherProfiles } = useMemo(() => {
         const now = new Date();
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const threeDaysLater = new Date(todayStart);
@@ -449,33 +370,7 @@ export default function App() {
             }
         }
         
-        const ageCounts = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
-        profiles.forEach(p => {
-            if (p.age) {
-                if (p.age < 20) ageCounts['10대']++;
-                else if (p.age < 30) ageCounts['20대']++;
-                else if (p.age < 40) ageCounts['30대']++;
-                else if (p.age < 50) ageCounts['40대']++;
-                else ageCounts['50대 이상']++;
-            }
-        });
-        const ageChartData = Object.entries(ageCounts).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
-
-        const companyKeywords = ['네이버', '카카오', '쿠팡', '라인', '우아한형제들', '당근', '토스'];
-        const companyCounts = {};
-        companyKeywords.forEach(key => companyCounts[key] = 0);
-        profiles.forEach(p => {
-            if (p.career) {
-                companyKeywords.forEach(key => {
-                    if (p.career.includes(key)) {
-                        companyCounts[key]++;
-                    }
-                });
-            }
-        });
-        const companyChartData = Object.entries(companyCounts).map(([name, count]) => ({ name, count }));
-
-        return { todayProfiles: today, upcomingProfiles: upcoming, searchResults: searchRes, otherProfiles: others, ageChartData, companyChartData };
+        return { todayProfiles: today, upcomingProfiles: upcoming, searchResults: searchRes, otherProfiles: others };
     }, [profiles, searchTerm]);
 
     const { currentProfiles, totalPages } = useMemo(() => {
@@ -509,8 +404,6 @@ export default function App() {
                 </div>
             </header>
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                <Dashboard ageData={ageChartData} companyData={companyChartData} onCompanyClick={setSearchTerm} isLibraryLoaded={rechartsLoaded} />
-
                 {todayProfiles.length > 0 && (
                     <div className="mb-12">
                         <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center">
