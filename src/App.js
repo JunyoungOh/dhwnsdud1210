@@ -208,22 +208,23 @@ const Pagination = ({ totalPages, currentPage, setCurrentPage }) => {
 
 // 대시보드 컴포넌트
 const Dashboard = ({ ageData, companyData, onCompanyClick }) => {
-    const [isLibraryLoaded, setLibraryLoaded] = useState(!!window.Recharts);
+    const [recharts, setRecharts] = useState(null);
 
     useEffect(() => {
-        if (isLibraryLoaded) return;
-
+        if (window.Recharts) {
+            setRecharts(window.Recharts);
+            return;
+        }
         const intervalId = setInterval(() => {
             if (window.Recharts) {
-                setLibraryLoaded(true);
+                setRecharts(window.Recharts);
                 clearInterval(intervalId);
             }
         }, 100);
-
         return () => clearInterval(intervalId);
-    }, [isLibraryLoaded]);
+    }, []);
 
-    if (!isLibraryLoaded) {
+    if (!recharts) {
         return (
             <div className="mb-12">
                 <h2 className="text-2xl font-bold text-gray-800 mb-4">대시보드</h2>
@@ -241,8 +242,8 @@ const Dashboard = ({ ageData, companyData, onCompanyClick }) => {
         );
     }
 
-    const { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } = window.Recharts;
-    const COLORS = ['#FFBB28', '#FF8042', '#0088FE', '#00C49F', '#FF0000'];
+    const { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } = recharts;
+    const COLORS = ['#FFBB28', '#FF8042', '#0088FE', '#00C49F', '#FF0000', '#8884d8'];
 
     return (
         <div className="mb-12">
@@ -250,26 +251,30 @@ const Dashboard = ({ ageData, companyData, onCompanyClick }) => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <div className="bg-white p-6 rounded-xl shadow-md">
                     <h3 className="font-semibold text-lg mb-4">세대별 분포</h3>
-                    <ResponsiveContainer width="100%" height={300}>
-                        <PieChart>
-                            <Pie data={ageData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} fill="#8884d8" label>
-                                {ageData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
-                            </Pie>
-                            <Tooltip />
-                            <Legend />
-                        </PieChart>
-                    </ResponsiveContainer>
+                    {ageData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height={300}>
+                            <PieChart>
+                                <Pie data={ageData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} fill="#8884d8" label>
+                                    {ageData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                                </Pie>
+                                <Tooltip />
+                                <Legend />
+                            </PieChart>
+                        </ResponsiveContainer>
+                    ) : <div className="flex justify-center items-center h-[300px] text-gray-500">나이 데이터가 없습니다.</div>}
                 </div>
                 <div className="bg-white p-6 rounded-xl shadow-md">
                     <h3 className="font-semibold text-lg mb-4">주요 경력 분포</h3>
-                    <ResponsiveContainer width="100%" height={300}>
-                        <BarChart data={companyData} layout="vertical" margin={{ top: 5, right: 20, left: 50, bottom: 5 }}>
-                            <XAxis type="number" />
-                            <YAxis type="category" dataKey="name" width={80} />
-                            <Tooltip />
-                            <Bar dataKey="count" fill="#FFBB28" onClick={(data) => onCompanyClick(data.name)} style={{ cursor: 'pointer' }} />
-                        </BarChart>
-                    </ResponsiveContainer>
+                     {companyData.some(d => d.count > 0) ? (
+                        <ResponsiveContainer width="100%" height={300}>
+                            <BarChart data={companyData} layout="vertical" margin={{ top: 5, right: 20, left: 50, bottom: 5 }}>
+                                <XAxis type="number" />
+                                <YAxis type="category" dataKey="name" width={80} />
+                                <Tooltip />
+                                <Bar dataKey="count" fill="#FFBB28" onClick={(data) => onCompanyClick(data.name)} style={{ cursor: 'pointer' }} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    ) : <div className="flex justify-center items-center h-[300px] text-gray-500">경력 데이터가 없습니다.</div>}
                 </div>
             </div>
         </div>
