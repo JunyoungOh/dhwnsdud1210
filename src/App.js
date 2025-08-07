@@ -143,9 +143,13 @@ const DashboardTab = ({ profiles, handleEdit, handleDelete }) => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {todayProfiles.map(profile => (
                     <div key={profile.id} className="bg-white p-4 rounded-lg shadow border-l-4 border-red-400 relative">
-                      <h3 className="font-bold text-red-600">{profile.name}</h3>
-                      <p className="text-sm text-gray-600 whitespace-pre-wrap">{profile.career}</p>
-                      <div className="absolute top-2 right-2 space-x-2"><button onClick={() => handleEdit(profile)} className="text-blue-500 hover:underline text-xs">수정</button><button onClick={() => handleDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button></div>
+                        <div className="flex items-baseline space-x-2">
+                           <h3 className="font-bold text-red-600">{profile.name}</h3>
+                           <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
+                        </div>
+                        <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
+                        {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
+                        <div className="absolute top-2 right-2 space-x-2"><button onClick={() => handleEdit(profile)} className="text-blue-500 hover:underline text-xs">수정</button><button onClick={() => handleDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button></div>
                     </div>
                   ))}
                 </div>
@@ -158,8 +162,12 @@ const DashboardTab = ({ profiles, handleEdit, handleDelete }) => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {upcomingProfiles.map(profile => (
                     <div key={profile.id} className="bg-white p-4 rounded-lg shadow border-l-4 border-blue-400 relative">
-                      <h3 className="font-bold text-blue-600">{profile.name}</h3>
-                      <p className="text-sm text-gray-600 whitespace-pre-wrap">{profile.career}</p>
+                      <div className="flex items-baseline space-x-2">
+                         <h3 className="font-bold text-blue-600">{profile.name}</h3>
+                         <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
+                      </div>
+                      <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
+                      {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
                        <div className="absolute top-2 right-2 space-x-2"><button onClick={() => handleEdit(profile)} className="text-blue-500 hover:underline text-xs">수정</button><button onClick={() => handleDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button></div>
                     </div>
                   ))}
@@ -201,8 +209,12 @@ const DashboardTab = ({ profiles, handleEdit, handleDelete }) => {
                 <div className="space-y-4">
                   {filteredByCompanyProfiles.map(profile => (
                     <div key={profile.id} className="p-4 bg-gray-50 rounded-lg border relative">
-                      <h3 className="text-lg font-semibold text-yellow-600">{profile.name}</h3>
-                      <p className="text-gray-700 whitespace-pre-wrap">{profile.career}</p>
+                        <div className="flex items-baseline space-x-2">
+                           <h3 className="text-lg font-semibold text-yellow-600">{profile.name}</h3>
+                           <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
+                        </div>
+                        <p className="text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
+                        {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
                        <div className="absolute top-2 right-2 space-x-2"><button onClick={() => handleEdit(profile)} className="text-blue-500 hover:underline text-xs">수정</button><button onClick={() => handleDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button></div>
                     </div>
                   ))}
@@ -243,8 +255,12 @@ const ManageTab = ({ profiles, handleEdit, handleDelete, handleFormSubmit, formS
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
                                 <div key={profile.id} className="bg-white p-4 rounded-lg shadow relative">
-                                    <h3 className="font-bold text-yellow-600">{profile.name}</h3>
-                                    <p className="text-sm text-gray-600 whitespace-pre-wrap">{profile.career}</p>
+                                    <div className="flex items-baseline space-x-2">
+                                       <h3 className="font-bold text-yellow-600">{profile.name}</h3>
+                                       <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
+                                    </div>
+                                    <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
+                                    {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
                                     <div className="absolute top-2 right-2 space-x-2"><button onClick={() => handleEdit(profile)} className="text-blue-500 hover:underline text-xs">수정</button><button onClick={() => handleDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button></div>
                                 </div>
                             )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
@@ -275,8 +291,12 @@ const ManageTab = ({ profiles, handleEdit, handleDelete, handleFormSubmit, formS
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {profiles.sort((a,b) => a.name.localeCompare(b.name)).map(profile => (
                         <div key={profile.id} className="bg-white p-4 rounded-lg shadow relative">
-                            <h3 className="font-bold text-yellow-600">{profile.name}</h3>
-                            <p className="text-sm text-gray-600 whitespace-pre-wrap">{profile.career}</p>
+                            <div className="flex items-baseline space-x-2">
+                               <h3 className="font-bold text-yellow-600">{profile.name}</h3>
+                               <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
+                            </div>
+                            <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
+                            {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
                             <div className="absolute top-2 right-2 space-x-2"><button onClick={() => handleEdit(profile)} className="text-blue-500 hover:underline text-xs">수정</button><button onClick={() => handleDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button></div>
                         </div>
                     ))}
