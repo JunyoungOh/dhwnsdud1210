@@ -3,7 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc } from 'firebase/firestore';
 import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
-import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert } from 'lucide-react';
+import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save } from 'lucide-react';
 
 // Firebase 구성 정보
 const firebaseConfig = {
@@ -80,9 +80,71 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
     </div>
 );
 
+// 프로필 카드 컴포넌트 (수정 기능 내장)
+const ProfileCard = ({ profile, onUpdate, onDelete }) => {
+    const [isEditing, setIsEditing] = useState(false);
+    const [editedProfile, setEditedProfile] = useState(profile);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+    const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        setEditedProfile(prev => ({ ...prev, [name]: name === 'age' ? (value ? Number(value) : '') : value }));
+    };
+
+    const handleSave = () => {
+        onUpdate(profile.id, editedProfile);
+        setIsEditing(false);
+    };
+
+    const handleDeleteRequest = () => {
+        setShowDeleteConfirm(true);
+    };
+
+    const confirmDelete = () => {
+        onDelete(profile.id);
+        setShowDeleteConfirm(false);
+    };
+
+    if (isEditing) {
+        return (
+            <div className="bg-white p-4 rounded-lg shadow-lg border-l-4 border-yellow-400 relative space-y-3">
+                <input name="name" value={editedProfile.name} onChange={handleInputChange} placeholder="이름" className="w-full p-2 border rounded text-sm font-bold" />
+                <input name="expertise" value={editedProfile.expertise || ''} onChange={handleInputChange} placeholder="전문영역" className="w-full p-2 border rounded text-sm" />
+                <textarea name="career" value={editedProfile.career} onChange={handleInputChange} placeholder="경력" className="w-full p-2 border rounded text-sm h-20" />
+                <input name="age" type="number" value={editedProfile.age || ''} onChange={handleInputChange} placeholder="나이" className="w-full p-2 border rounded text-sm" />
+                <textarea name="otherInfo" value={editedProfile.otherInfo || ''} onChange={handleInputChange} placeholder="기타 정보" className="w-full p-2 border rounded text-sm h-20" />
+                <input name="eventDate" type="datetime-local" value={editedProfile.eventDate || ''} onChange={handleInputChange} className="w-full p-2 border rounded text-sm" />
+                <div className="flex justify-end space-x-2">
+                    <button onClick={() => setIsEditing(false)} className="p-2 text-gray-500 hover:text-gray-800"><X size={20} /></button>
+                    <button onClick={handleSave} className="p-2 text-green-600 hover:text-green-800"><Save size={20} /></button>
+                </div>
+            </div>
+        );
+    }
+    
+    return (
+        <>
+            {showDeleteConfirm && <ConfirmationModal message={`'${profile.name}' 프로필을 정말로 삭제하시겠습니까?`} onConfirm={confirmDelete} onCancel={() => setShowDeleteConfirm(false)} />}
+            <div className="bg-white p-4 rounded-lg shadow relative group">
+                <div className="flex items-baseline space-x-2">
+                    <h3 className="font-bold text-yellow-600">{profile.name}</h3>
+                    <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
+                </div>
+                {profile.expertise && <p className="text-sm font-semibold text-gray-600 mt-1">{profile.expertise}</p>}
+                <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
+                {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
+                <div className="absolute top-2 right-2 space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:underline text-xs">수정</button>
+                    <button onClick={handleDeleteRequest} className="text-red-500 hover:underline text-xs">삭제</button>
+                </div>
+            </div>
+        </>
+    );
+};
+
 
 // 대시보드 탭 컴포넌트
-const DashboardTab = ({ profiles, handleEdit, handleDelete }) => {
+const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
     const [selectedCompany, setSelectedCompany] = useState(null);
 
     const { todayProfiles, upcomingProfiles } = useMemo(() => {
@@ -111,7 +173,7 @@ const DashboardTab = ({ profiles, handleEdit, handleDelete }) => {
     }, [profiles]);
 
     const ageData = useMemo(() => {
-        const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
+        const groups = { '10대': 0, '20대': 0, '30대': 0, '4대': 0, '50대 이상': 0 };
         profiles.forEach(({ age }) => {
             if (!age) return;
             if (age < 20) groups['10대']++;
@@ -141,17 +203,7 @@ const DashboardTab = ({ profiles, handleEdit, handleDelete }) => {
               <section>
                 <h2 className="text-xl font-bold mb-4 flex items-center"><Calendar className="mr-2 text-red-500" />오늘의 일정</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {todayProfiles.map(profile => (
-                    <div key={profile.id} className="bg-white p-4 rounded-lg shadow border-l-4 border-red-400 relative">
-                        <div className="flex items-baseline space-x-2">
-                           <h3 className="font-bold text-red-600">{profile.name}</h3>
-                           <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
-                        </div>
-                        <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
-                        {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
-                        <div className="absolute top-2 right-2 space-x-2"><button onClick={() => handleEdit(profile)} className="text-blue-500 hover:underline text-xs">수정</button><button onClick={() => handleDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button></div>
-                    </div>
-                  ))}
+                  {todayProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={() => onDelete(profile.id, profile.name)} />)}
                 </div>
               </section>
             )}
@@ -160,17 +212,7 @@ const DashboardTab = ({ profiles, handleEdit, handleDelete }) => {
               <section>
                 <h2 className="text-xl font-bold mb-4 flex items-center"><Zap className="mr-2 text-blue-500" />다가오는 일정</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {upcomingProfiles.map(profile => (
-                    <div key={profile.id} className="bg-white p-4 rounded-lg shadow border-l-4 border-blue-400 relative">
-                      <div className="flex items-baseline space-x-2">
-                         <h3 className="font-bold text-blue-600">{profile.name}</h3>
-                         <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
-                      </div>
-                      <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
-                      {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
-                       <div className="absolute top-2 right-2 space-x-2"><button onClick={() => handleEdit(profile)} className="text-blue-500 hover:underline text-xs">수정</button><button onClick={() => handleDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button></div>
-                    </div>
-                  ))}
+                  {upcomingProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={() => onDelete(profile.id, profile.name)} />)}
                 </div>
               </section>
             )}
@@ -207,17 +249,7 @@ const DashboardTab = ({ profiles, handleEdit, handleDelete }) => {
               <section className="bg-white p-6 rounded-xl shadow-md">
                 <h2 className="text-xl font-bold text-gray-800 mb-4">"{selectedCompany}" 경력자</h2>
                 <div className="space-y-4">
-                  {filteredByCompanyProfiles.map(profile => (
-                    <div key={profile.id} className="p-4 bg-gray-50 rounded-lg border relative">
-                        <div className="flex items-baseline space-x-2">
-                           <h3 className="text-lg font-semibold text-yellow-600">{profile.name}</h3>
-                           <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
-                        </div>
-                        <p className="text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
-                        {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
-                       <div className="absolute top-2 right-2 space-x-2"><button onClick={() => handleEdit(profile)} className="text-blue-500 hover:underline text-xs">수정</button><button onClick={() => handleDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button></div>
-                    </div>
-                  ))}
+                  {filteredByCompanyProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={() => onDelete(profile.id, profile.name)} />)}
                 </div>
               </section>
             )}
@@ -226,9 +258,9 @@ const DashboardTab = ({ profiles, handleEdit, handleDelete }) => {
 };
 
 // 프로필 관리 탭 컴포넌트
-const ManageTab = ({ profiles, handleEdit, handleDelete, handleFormSubmit, formState, setFormState }) => {
-    const { editingProfile, newName, newCareer, newAge, newOtherInfo, newEventDate } = formState;
-    const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, resetForm } = setFormState;
+const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, formState, setFormState }) => {
+    const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise } = formState;
+    const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise } = setFormState;
     const [searchTerm, setSearchTerm] = useState('');
     
     const searchedProfiles = useMemo(() => {
@@ -250,7 +282,8 @@ const ManageTab = ({ profiles, handleEdit, handleDelete, handleFormSubmit, formS
             (p.name && p.name.toLowerCase().includes(lowercasedTerm)) ||
             (p.career && p.career.toLowerCase().includes(lowercasedTerm)) ||
             (p.otherInfo && p.otherInfo.toLowerCase().includes(lowercasedTerm)) ||
-            (p.age && p.age.toString().includes(lowercasedTerm))
+            (p.age && p.age.toString().includes(lowercasedTerm)) ||
+            (p.expertise && p.expertise.toLowerCase().includes(lowercasedTerm))
         );
     }, [searchTerm, profiles]);
 
@@ -259,22 +292,14 @@ const ManageTab = ({ profiles, handleEdit, handleDelete, handleFormSubmit, formS
             <section>
                 <div className="relative mb-6">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input type="text" placeholder="이름, 경력, 기타 정보로 검색... (예: 20대)" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
+                    <input type="text" placeholder="이름, 경력, 전문영역 등으로 검색... (예: 20대)" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
                 </div>
                 {searchTerm.trim() && (
                     <div>
                         <h2 className="text-xl font-bold mb-4">검색 결과</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
-                                <div key={profile.id} className="bg-white p-4 rounded-lg shadow relative">
-                                    <div className="flex items-baseline space-x-2">
-                                       <h3 className="font-bold text-yellow-600">{profile.name}</h3>
-                                       <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
-                                    </div>
-                                    <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
-                                    {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
-                                    <div className="absolute top-2 right-2 space-x-2"><button onClick={() => handleEdit(profile)} className="text-blue-500 hover:underline text-xs">수정</button><button onClick={() => handleDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button></div>
-                                </div>
+                                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={() => onDelete(profile.id, profile.name)} />
                             )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
                         </div>
                     </div>
@@ -282,18 +307,18 @@ const ManageTab = ({ profiles, handleEdit, handleDelete, handleFormSubmit, formS
             </section>
             
             <section className="bg-white p-6 rounded-xl shadow-md">
-                <h2 className="text-xl font-bold mb-4 flex items-center"><UserPlus className="mr-2 text-yellow-500"/>{editingProfile ? '프로필 수정' : '새 프로필 추가'}</h2>
+                <h2 className="text-xl font-bold mb-4 flex items-center"><UserPlus className="mr-2 text-yellow-500"/>새 프로필 추가</h2>
                 <form onSubmit={handleFormSubmit} className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <input type="text" placeholder="이름" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-2 border rounded" />
                         <input type="number" placeholder="나이" value={newAge} onChange={e => setNewAge(e.target.value)} className="w-full p-2 border rounded" />
                     </div>
+                    <input type="text" placeholder="전문영역" value={newExpertise} onChange={e => setNewExpertise(e.target.value)} className="w-full p-2 border rounded" />
                     <textarea placeholder="경력" value={newCareer} onChange={e => setNewCareer(e.target.value)} className="w-full p-2 border rounded h-24" />
                     <textarea placeholder="기타 정보" value={newOtherInfo} onChange={e => setNewOtherInfo(e.target.value)} className="w-full p-2 border rounded h-24" />
                     <input type="datetime-local" value={newEventDate} onChange={e => setNewEventDate(e.target.value)} className="w-full p-2 border rounded" />
-                    <div className="flex justify-end space-x-4">
-                        {editingProfile && (<button type="button" onClick={resetForm} className="text-gray-600">취소</button>)}
-                        <button type="submit" className="bg-yellow-400 text-white px-4 py-2 rounded hover:bg-yellow-500">{editingProfile ? '수정 완료' : '추가하기'}</button>
+                    <div className="flex justify-end">
+                        <button type="submit" className="bg-yellow-400 text-white px-4 py-2 rounded hover:bg-yellow-500">추가하기</button>
                     </div>
                 </form>
             </section>
@@ -302,15 +327,7 @@ const ManageTab = ({ profiles, handleEdit, handleDelete, handleFormSubmit, formS
                 <h2 className="text-xl font-bold text-gray-800 mb-4">전체 프로필 목록</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {profiles.sort((a,b) => a.name.localeCompare(b.name)).map(profile => (
-                        <div key={profile.id} className="bg-white p-4 rounded-lg shadow relative">
-                            <div className="flex items-baseline space-x-2">
-                               <h3 className="font-bold text-yellow-600">{profile.name}</h3>
-                               <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
-                            </div>
-                            <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
-                            {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
-                            <div className="absolute top-2 right-2 space-x-2"><button onClick={() => handleEdit(profile)} className="text-blue-500 hover:underline text-xs">수정</button><button onClick={() => handleDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button></div>
-                        </div>
+                        <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={() => onDelete(profile.id, profile.name)} />
                     ))}
                 </div>
             </section>
@@ -324,7 +341,6 @@ export default function App() {
   const [profiles, setProfiles] = useState([]);
   const [authStatus, setAuthStatus] = useState('authenticating');
   const [activeTab, setActiveTab] = useState(TAB_PAGE.DASHBOARD);
-  const [editingProfile, setEditingProfile] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
 
   const [newName, setNewName] = useState('');
@@ -332,6 +348,7 @@ export default function App() {
   const [newAge, setNewAge] = useState('');
   const [newOtherInfo, setNewOtherInfo] = useState('');
   const [newEventDate, setNewEventDate] = useState('');
+  const [newExpertise, setNewExpertise] = useState('');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -373,35 +390,21 @@ export default function App() {
       localStorage.setItem('profileDbAccessCode', code);
   };
   
-  const resetForm = () => {
-      setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewEventDate('');
-      setEditingProfile(null);
-  };
-
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!newName.trim() || !newCareer.trim() || !profilesCollectionRef) return;
-    const profileData = { name: newName, career: newCareer, age: newAge ? Number(newAge) : null, otherInfo: newOtherInfo, eventDate: newEventDate || null };
+    const profileData = { name: newName, career: newCareer, age: newAge ? Number(newAge) : null, otherInfo: newOtherInfo, eventDate: newEventDate || null, expertise: newExpertise || null };
     try {
-        if (editingProfile) {
-            await updateDoc(doc(profilesCollectionRef, editingProfile.id), profileData);
-        } else {
-            await addDoc(profilesCollectionRef, profileData);
-        }
-        resetForm();
+        await addDoc(profilesCollectionRef, profileData);
+        setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewEventDate(''); setNewExpertise('');
     } catch (err) {
       console.error("프로필 저장 오류: ", err);
     }
   };
   
-  const handleEdit = (profile) => {
-      setEditingProfile(profile);
-      setNewName(profile.name);
-      setNewCareer(profile.career);
-      setNewAge(profile.age || '');
-      setNewOtherInfo(profile.otherInfo || '');
-      setNewEventDate(profile.eventDate || '');
-      setActiveTab(TAB_PAGE.MANAGE);
+  const handleUpdate = async (profileId, updatedData) => {
+    const { id, isToday, isUpcoming, ...dataToUpdate } = updatedData;
+    await updateDoc(doc(profilesCollectionRef, profileId), dataToUpdate);
   };
 
   const handleDeleteRequest = (profileId, profileName) => {
@@ -415,8 +418,8 @@ export default function App() {
       setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
   };
 
-  const formState = { editingProfile, newName, newCareer, newAge, newOtherInfo, newEventDate };
-  const setFormState = { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, resetForm };
+  const formState = { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise };
+  const setFormState = { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise };
 
   if (!accessCode) {
     return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
@@ -448,8 +451,8 @@ export default function App() {
       </div>
 
       <main className="p-6 space-y-12">
-        {activeTab === TAB_PAGE.DASHBOARD && <DashboardTab profiles={profiles} handleEdit={handleEdit} handleDelete={handleDeleteRequest} />}
-        {activeTab === TAB_PAGE.MANAGE && <ManageTab profiles={profiles} handleEdit={handleEdit} handleDelete={handleDeleteRequest} handleFormSubmit={handleFormSubmit} formState={formState} setFormState={setFormState} />}
+        {activeTab === TAB_PAGE.DASHBOARD && <DashboardTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} />}
+        {activeTab === TAB_PAGE.MANAGE && <ManageTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} handleFormSubmit={handleFormSubmit} formState={formState} setFormState={setFormState} />}
       </main>
     </div>
   );
