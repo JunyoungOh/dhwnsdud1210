@@ -1,20 +1,16 @@
 <!DOCTYPE html>
 <html lang="ko">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>프로필 대시보드</title>
-    <!-- Tailwind CSS CDN (개발 중만 추천) -->
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>프로필 데이터베이스</title>
+    <!-- 디자인 설명서 -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Lucide Icons (for <Users />, <LogOut />, 등) -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- Favicon -->
-    <link rel="icon" href="/favicon.ico" />
+    <!-- 차트 라이브러리 (필수!) -->
+    <script src="https://unpkg.com/recharts/umd/Recharts.min.js"></script>
   </head>
-  <body class="bg-gray-50 font-sans text-gray-800">
+  <body class="bg-gray-100">
+    <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
-
-    <!-- React App Entry Point -->
-    <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
