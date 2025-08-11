@@ -1,9 +1,9 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc, writeBatch } from 'firebase/firestore';
 import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
-import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save } from 'lucide-react';
+import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save, UploadCloud } from 'lucide-react';
 
 // Firebase 구성 정보
 const firebaseConfig = {
@@ -257,7 +257,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
 };
 
 // 프로필 관리 탭 컴포넌트
-const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, formState, setFormState }) => {
+const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState }) => {
     const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority } = formState;
     const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority } = setFormState;
     const [searchTerm, setSearchTerm] = useState('');
@@ -322,6 +322,8 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, formState, 
                     </div>
                 </form>
             </section>
+
+            <ExcelUploader onBulkAdd={handleBulkAdd} />
             
             <section>
                 <h2 className="text-xl font-bold text-gray-800 mb-4">전체 프로필 목록</h2>
@@ -332,6 +334,86 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, formState, 
                 </div>
             </section>
         </>
+    );
+};
+
+const ExcelUploader = ({ onBulkAdd }) => {
+    const [file, setFile] = useState(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const [message, setMessage] = useState('');
+
+    const handleFileChange = (e) => {
+        setFile(e.target.files[0]);
+        setMessage('');
+    };
+
+    const handleUpload = async () => {
+        if (!file) {
+            setMessage('파일을 먼저 선택해주세요.');
+            return;
+        }
+        setIsUploading(true);
+        setMessage('파일을 읽는 중...');
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = window.XLSX.read(data, { type: 'array' });
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                const json = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                
+                if (json.length < 2) {
+                    setMessage('엑셀 파일에 데이터가 없습니다 (2행부터 읽습니다).');
+                    setIsUploading(false);
+                    return;
+                }
+
+                const newProfiles = json.slice(1).map(row => ({
+                    name: row[2] || '',      // C열
+                    career: row[3] || '',    // D열
+                    age: row[5] ? Number(row[5]) : null, // F열
+                    expertise: row[7] || '', // H열
+                    priority: row[9] ? String(row[9]) : '',   // J열
+                    otherInfo: row[13] || '',// N열
+                    eventDate: null,
+                })).filter(p => p.name && p.career); // 이름과 경력은 필수
+
+                setMessage(`${newProfiles.length}개의 프로필을 업로드하는 중...`);
+                await onBulkAdd(newProfiles);
+
+                setMessage(`${newProfiles.length}개의 프로필을 성공적으로 추가했습니다!`);
+                setFile(null);
+            } catch (error) {
+                console.error("엑셀 처리 오류:", error);
+                setMessage('엑셀 파일을 처리하는 중 오류가 발생했습니다.');
+            } finally {
+                setIsUploading(false);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    };
+
+    return (
+        <section className="bg-white p-6 rounded-xl shadow-md">
+            <h2 className="text-xl font-bold mb-4 flex items-center"><UploadCloud className="mr-2 text-yellow-500"/>엑셀로 일괄 등록</h2>
+            <div className="space-y-4">
+                <p className="text-sm text-gray-600">
+                    정해진 양식의 엑셀 파일을 업로드하여 여러 프로필을 한 번에 추가할 수 있습니다.
+                </p>
+                 <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md border">
+                    <p className="font-semibold">엑셀 양식 안내:</p>
+                    <p>2행부터 각 행을 한 프로필로 읽습니다.</p>
+                    <p>각 열의 C=이름, D=경력, F=나이, H=전문영역, J=우선순위, N=기타정보 로 입력됩니다.</p>
+                </div>
+                <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100"/>
+                <button onClick={handleUpload} disabled={!file || isUploading} className="w-full flex justify-center items-center py-2 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
+                    {isUploading ? <Loader2 className="animate-spin" /> : '업로드 및 추가'}
+                </button>
+                {message && <p className="text-sm text-center text-gray-600">{message}</p>}
+            </div>
+        </section>
     );
 };
 
@@ -350,6 +432,13 @@ export default function App() {
   const [newEventDate, setNewEventDate] = useState('');
   const [newExpertise, setNewExpertise] = useState('');
   const [newPriority, setNewPriority] = useState('');
+
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
+    script.async = true;
+    document.body.appendChild(script);
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -402,6 +491,16 @@ export default function App() {
       console.error("프로필 저장 오류: ", err);
     }
   };
+
+  const handleBulkAdd = async (newProfiles) => {
+      if (!profilesCollectionRef || newProfiles.length === 0) return;
+      const batch = writeBatch(db);
+      newProfiles.forEach(profile => {
+          const docRef = doc(profilesCollectionRef);
+          batch.set(docRef, profile);
+      });
+      await batch.commit();
+  };
   
   const handleUpdate = async (profileId, updatedData) => {
     const { id, ...dataToUpdate } = updatedData;
@@ -453,7 +552,7 @@ export default function App() {
 
       <main className="p-6 space-y-12">
         {activeTab === TAB_PAGE.DASHBOARD && <DashboardTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} />}
-        {activeTab === TAB_PAGE.MANAGE && <ManageTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} handleFormSubmit={handleFormSubmit} formState={formState} setFormState={setFormState} />}
+        {activeTab === TAB_PAGE.MANAGE && <ManageTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} handleFormSubmit={handleFormSubmit} handleBulkAdd={handleBulkAdd} formState={formState} setFormState={setFormState} />}
       </main>
     </div>
   );
