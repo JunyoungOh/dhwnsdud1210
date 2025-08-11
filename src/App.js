@@ -144,7 +144,20 @@ const ProfileCard = ({ profile, onUpdate, onDelete }) => {
 
 // 대시보드 탭 컴포넌트
 const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
-    const [selectedCompany, setSelectedCompany] = useState(null);
+    const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
+    const [searchTerm, setSearchTerm] = useState('');
+
+    const handlePieClick = (type, data) => {
+        if (data.value === 0) return;
+        setActiveFilter({ type, value: data.name });
+    };
+
+    const handleBarClick = (type, data) => {
+        const value = data.name;
+        const count = data.count || data.value;
+        if (count === 0) return;
+        setActiveFilter({ type, value });
+    };
 
     const { todayProfiles, upcomingProfiles } = useMemo(() => {
         const now = new Date();
@@ -191,76 +204,25 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
         }));
     }, [profiles]);
 
-    const filteredByCompanyProfiles = useMemo(() => {
-        if (!selectedCompany) return [];
-        return profiles.filter(p => p.career?.includes(selectedCompany));
-    }, [profiles, selectedCompany]);
-
-    return (
-        <>
-            {todayProfiles.length > 0 && (
-              <section>
-                <h2 className="text-xl font-bold mb-4 flex items-center"><Calendar className="mr-2 text-red-500" />오늘의 일정</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {todayProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />)}
-                </div>
-              </section>
-            )}
-
-            {upcomingProfiles.length > 0 && (
-              <section>
-                <h2 className="text-xl font-bold mb-4 flex items-center"><Zap className="mr-2 text-blue-500" />다가오는 일정</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {upcomingProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />)}
-                </div>
-              </section>
-            )}
-
-            <section className="bg-white p-6 rounded-xl shadow-md">
-              <h2 className="text-xl font-bold text-gray-800 mb-4">세대별 분포</h2>
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} fill="#8884d8" dataKey="value" label>
-                    {ageData.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip formatter={(value) => `${value}명`} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            </section>
-
-            <section className="bg-white p-6 rounded-xl shadow-md">
-              <h2 className="text-xl font-bold text-gray-800 mb-4">IT 기업 경력 분포</h2>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={keywordData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" />
-                  <YAxis allowDecimals={false}/>
-                  <Tooltip formatter={(value) => `${value}명`} />
-                  <Legend />
-                  <Bar dataKey="count" fill="#FFBB28" onClick={(data) => setSelectedCompany(data.name)} cursor="pointer" />
-                </BarChart>
-              </ResponsiveContainer>
-              <p className="text-sm text-gray-500 mt-2 text-center">바를 클릭하면 아래에 해당 프로필이 표시됩니다.</p>
-            </section>
-
-            {selectedCompany && (
-              <section className="bg-white p-6 rounded-xl shadow-md">
-                <h2 className="text-xl font-bold text-gray-800 mb-4">"{selectedCompany}" 경력자</h2>
-                <div className="space-y-4">
-                  {filteredByCompanyProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />)}
-                </div>
-              </section>
-            )}
-        </>
-    );
-};
-
-// 프로필 관리 탭 컴포넌트
-const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState }) => {
-    const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority } = formState;
-    const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority } = setFormState;
-    const [searchTerm, setSearchTerm] = useState('');
+    const expertiseData = useMemo(() => {
+        const expertiseCount = {};
+        profiles.forEach(p => {
+            if (p.expertise) {
+                expertiseCount[p.expertise] = (expertiseCount[p.expertise] || 0) + 1;
+            }
+        });
+        return Object.entries(expertiseCount).map(([name, count]) => ({ name, count }));
+    }, [profiles]);
+    
+    const priorityData = useMemo(() => {
+        const priorities = { '3 (상)': 0, '2 (중)': 0, '1 (하)': 0 };
+        profiles.forEach(p => {
+            if (p.priority === '3') priorities['3 (상)']++;
+            else if (p.priority === '2') priorities['2 (중)']++;
+            else if (p.priority === '1') priorities['1 (하)']++;
+        });
+        return Object.entries(priorities).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
+    }, [profiles]);
     
     const searchedProfiles = useMemo(() => {
         const term = searchTerm.trim();
@@ -285,6 +247,189 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
             (p.expertise && p.expertise.toLowerCase().includes(lowercasedTerm))
         );
     }, [searchTerm, profiles]);
+
+    const filteredProfiles = useMemo(() => {
+        if (!activeFilter.type) return [];
+        switch (activeFilter.type) {
+            case 'age':
+                const ageGroup = activeFilter.value;
+                return profiles.filter(p => {
+                    if (!p.age) return false;
+                    if (ageGroup === '10대') return p.age < 20;
+                    if (ageGroup === '20대') return p.age >= 20 && p.age < 30;
+                    if (ageGroup === '30대') return p.age >= 30 && p.age < 40;
+                    if (ageGroup === '40대') return p.age >= 40 && p.age < 50;
+                    if (ageGroup === '50대 이상') return p.age >= 50;
+                    return false;
+                });
+            case 'priority':
+                const priorityValue = activeFilter.value.split(' ')[0];
+                return profiles.filter(p => p.priority === priorityValue);
+            case 'company':
+                return profiles.filter(p => p.career?.includes(activeFilter.value));
+            case 'expertise':
+                return profiles.filter(p => p.expertise === activeFilter.value);
+            default:
+                return [];
+        }
+    }, [profiles, activeFilter]);
+
+    return (
+        <>
+            <section>
+                <div className="relative mb-6">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input type="text" placeholder="대시보드 내 프로필 검색..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
+                </div>
+                {searchTerm.trim() && (
+                    <div className="mb-8">
+                        <h2 className="text-xl font-bold mb-4">검색 결과</h2>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
+                                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />
+                            )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
+                        </div>
+                    </div>
+                 )}
+            </section>
+
+            {todayProfiles.length > 0 && (
+              <section>
+                <h2 className="text-xl font-bold mb-4 flex items-center"><Calendar className="mr-2 text-red-500" />오늘의 일정</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {todayProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />)}
+                </div>
+              </section>
+            )}
+
+            {upcomingProfiles.length > 0 && (
+              <section>
+                <h2 className="text-xl font-bold mb-4 flex items-center"><Zap className="mr-2 text-blue-500" />다가오는 일정</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {upcomingProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />)}
+                </div>
+              </section>
+            )}
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <section className="bg-white p-6 rounded-xl shadow-md">
+                  <h2 className="text-xl font-bold text-gray-800 mb-4">세대별 분포</h2>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} fill="#8884d8" dataKey="value" label onClick={(data) => handlePieClick('age', data.payload)}>
+                        {ageData.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} cursor="pointer" />)}
+                      </Pie>
+                      <Tooltip formatter={(value) => `${value}명`} />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </section>
+                
+                <section className="bg-white p-6 rounded-xl shadow-md">
+                  <h2 className="text-xl font-bold text-gray-800 mb-4">우선순위별 분포</h2>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                        <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} fill="#82ca9d" dataKey="value" label onClick={(data) => handlePieClick('priority', data.payload)}>
+                            {priorityData.map((_, index) => <Cell key={`cell-${index}`} fill={['#FF4444', '#FFBB28', '#00C49F'][index % 3]} cursor="pointer" />)}
+                        </Pie>
+                        <Tooltip formatter={(value) => `${value}명`} />
+                        <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </section>
+            </div>
+
+            <section className="bg-white p-6 rounded-xl shadow-md">
+              <h2 className="text-xl font-bold text-gray-800 mb-4">IT 기업 경력 분포</h2>
+              <ResponsiveContainer width="100%" height={350}>
+                <BarChart data={keywordData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
+                  <YAxis allowDecimals={false}/>
+                  <Tooltip formatter={(value) => `${value}명`} />
+                  <Legend />
+                  <Bar dataKey="count" fill="#FFBB28" onClick={(data) => handleBarClick('company', data)} cursor="pointer" />
+                </BarChart>
+              </ResponsiveContainer>
+            </section>
+            
+            <section className="bg-white p-6 rounded-xl shadow-md">
+              <h2 className="text-xl font-bold text-gray-800 mb-4">전문영역 분포</h2>
+              <ResponsiveContainer width="100%" height={350}>
+                <BarChart data={expertiseData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
+                  <YAxis allowDecimals={false}/>
+                  <Tooltip formatter={(value) => `${value}명`} />
+                  <Legend />
+                  <Bar dataKey="count" fill="#00C49F" onClick={(data) => handleBarClick('expertise', data)} cursor="pointer" />
+                </BarChart>
+              </ResponsiveContainer>
+            </section>
+
+            {activeFilter.type && (
+              <section className="bg-white p-6 rounded-xl shadow-md">
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-bold text-gray-800">"{activeFilter.value}" 필터 결과</h2>
+                    <button onClick={() => setActiveFilter({ type: null, value: null })} className="text-sm text-gray-500 hover:text-gray-800">필터 해제</button>
+                </div>
+                <div className="space-y-4">
+                  {filteredProfiles.length > 0 ? (
+                    filteredProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />)
+                  ) : (
+                    <p className="text-gray-500 text-center">해당 조건의 프로필이 없습니다.</p>
+                  )}
+                </div>
+              </section>
+            )}
+        </>
+    );
+};
+
+// 프로필 관리 탭 컴포넌트
+const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState }) => {
+    const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority } = formState;
+    const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority } = setFormState;
+    const [searchTerm, setSearchTerm] = useState('');
+    const [currentPage, setCurrentPage] = useState(1);
+    const PROFILES_PER_PAGE = 9;
+    
+    const searchedProfiles = useMemo(() => {
+        const term = searchTerm.trim();
+        if (!term) return [];
+        
+        const ageGroupMatch = term.match(/^(\d{1,2})대$/);
+        if (ageGroupMatch) {
+            const decadeStart = parseInt(ageGroupMatch[1], 10);
+            if (decadeStart >= 10) {
+                const minAge = decadeStart;
+                const maxAge = decadeStart + 9;
+                return profiles.filter(p => p.age && p.age >= minAge && p.age <= maxAge);
+            }
+        }
+        
+        const lowercasedTerm = term.toLowerCase();
+        return profiles.filter(p =>
+            (p.name && p.name.toLowerCase().includes(lowercasedTerm)) ||
+            (p.career && p.career.toLowerCase().includes(lowercasedTerm)) ||
+            (p.otherInfo && p.otherInfo.toLowerCase().includes(lowercasedTerm)) ||
+            (p.age && p.age.toString().includes(lowercasedTerm)) ||
+            (p.expertise && p.expertise.toLowerCase().includes(lowercasedTerm))
+        );
+    }, [searchTerm, profiles]);
+
+    const { currentProfiles, totalPages } = useMemo(() => {
+        const sortedProfiles = [...profiles].sort((a,b) => a.name.localeCompare(b.name));
+        const indexOfLastProfile = currentPage * PROFILES_PER_PAGE;
+        const indexOfFirstProfile = indexOfLastProfile - PROFILES_PER_PAGE;
+        const current = sortedProfiles.slice(indexOfFirstProfile, indexOfLastProfile);
+        const pages = Math.ceil(sortedProfiles.length / PROFILES_PER_PAGE);
+        return { currentProfiles: current, totalPages: pages };
+    }, [currentPage, profiles]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm]);
 
     return (
         <>
@@ -328,12 +473,47 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
             <section>
                 <h2 className="text-xl font-bold text-gray-800 mb-4">전체 프로필 목록</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {profiles.sort((a,b) => a.name.localeCompare(b.name)).map(profile => (
+                    {currentProfiles.map(profile => (
                        <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />
                     ))}
                 </div>
+                {totalPages > 1 && (
+                    <Pagination
+                        totalPages={totalPages}
+                        currentPage={currentPage}
+                        setCurrentPage={setCurrentPage}
+                    />
+                )}
             </section>
         </>
+    );
+};
+
+const Pagination = ({ totalPages, currentPage, setCurrentPage }) => {
+    const pageNumbers = [];
+    for (let i = 1; i <= totalPages; i++) {
+        pageNumbers.push(i);
+    }
+
+    if (totalPages <= 1) {
+        return null;
+    }
+
+    return (
+        <nav className="mt-8 flex justify-center">
+            <ul className="inline-flex items-center -space-x-px">
+                {pageNumbers.map(number => (
+                    <li key={number}>
+                        <button
+                            onClick={() => setCurrentPage(number)}
+                            className={`py-2 px-4 leading-tight border border-gray-300 ${currentPage === number ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-white text-gray-600 hover:bg-gray-100'}`}
+                        >
+                            {number}
+                        </button>
+                    </li>
+                ))}
+            </ul>
+        </nav>
     );
 };
 
@@ -380,10 +560,8 @@ const ExcelUploader = ({ onBulkAdd }) => {
                     eventDate: null,
                 })).filter(p => p.name && p.career); // 이름과 경력은 필수
 
-                setMessage(`${newProfiles.length}개의 프로필을 업로드하는 중...`);
-                await onBulkAdd(newProfiles);
-
-                setMessage(`${newProfiles.length}개의 프로필을 성공적으로 추가했습니다!`);
+                const resultMessage = await onBulkAdd(newProfiles);
+                setMessage(resultMessage);
                 setFile(null);
             } catch (error) {
                 console.error("엑셀 처리 오류:", error);
@@ -406,6 +584,7 @@ const ExcelUploader = ({ onBulkAdd }) => {
                     <p className="font-semibold">엑셀 양식 안내:</p>
                     <p>2행부터 각 행을 한 프로필로 읽습니다.</p>
                     <p>각 열의 C=이름, D=경력, F=나이, H=전문영역, J=우선순위, N=기타정보 로 입력됩니다.</p>
+                    <p className="font-bold mt-1">※ 기존 프로필과 이름이 겹칠 경우, 덮어쓰기됩니다.</p>
                 </div>
                 <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100"/>
                 <button onClick={handleUpload} disabled={!file || isUploading} className="w-full flex justify-center items-center py-2 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
@@ -493,13 +672,28 @@ export default function App() {
   };
 
   const handleBulkAdd = async (newProfiles) => {
-      if (!profilesCollectionRef || newProfiles.length === 0) return;
+      if (!profilesCollectionRef || newProfiles.length === 0) return '업로드할 프로필이 없습니다.';
+      
+      const existingProfilesMap = new Map(profiles.map(p => [p.name, p.id]));
       const batch = writeBatch(db);
+      let updatedCount = 0;
+      let addedCount = 0;
+
       newProfiles.forEach(profile => {
-          const docRef = doc(profilesCollectionRef);
-          batch.set(docRef, profile);
+          const existingId = existingProfilesMap.get(profile.name);
+          if (existingId) {
+              const docRef = doc(profilesCollectionRef, existingId);
+              batch.set(docRef, profile);
+              updatedCount++;
+          } else {
+              const docRef = doc(profilesCollectionRef);
+              batch.set(docRef, profile);
+              addedCount++;
+          }
       });
+
       await batch.commit();
+      return `${addedCount}건 추가, ${updatedCount}건 업데이트 완료.`;
   };
   
   const handleUpdate = async (profileId, updatedData) => {
