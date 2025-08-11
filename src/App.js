@@ -84,7 +84,12 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
 const ProfileCard = ({ profile, onUpdate, onDelete }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [editedProfile, setEditedProfile] = useState(profile);
-    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    
+    const priorityColors = {
+      '3': 'bg-red-100 text-red-800',
+      '2': 'bg-yellow-100 text-yellow-800',
+      '1': 'bg-green-100 text-green-800',
+    };
 
     const handleInputChange = (e) => {
         const { name, value } = e.target;
@@ -96,22 +101,16 @@ const ProfileCard = ({ profile, onUpdate, onDelete }) => {
         setIsEditing(false);
     };
 
-    const handleDeleteRequest = () => {
-        setShowDeleteConfirm(true);
-    };
-
-    const confirmDelete = () => {
-        onDelete(profile.id);
-        setShowDeleteConfirm(false);
-    };
-
     if (isEditing) {
         return (
             <div className="bg-white p-4 rounded-lg shadow-lg border-l-4 border-yellow-400 relative space-y-3">
                 <input name="name" value={editedProfile.name} onChange={handleInputChange} placeholder="이름" className="w-full p-2 border rounded text-sm font-bold" />
                 <input name="expertise" value={editedProfile.expertise || ''} onChange={handleInputChange} placeholder="전문영역" className="w-full p-2 border rounded text-sm" />
                 <textarea name="career" value={editedProfile.career} onChange={handleInputChange} placeholder="경력" className="w-full p-2 border rounded text-sm h-20" />
-                <input name="age" type="number" value={editedProfile.age || ''} onChange={handleInputChange} placeholder="나이" className="w-full p-2 border rounded text-sm" />
+                <div className="grid grid-cols-2 gap-2">
+                    <input name="age" type="number" value={editedProfile.age || ''} onChange={handleInputChange} placeholder="나이" className="w-full p-2 border rounded text-sm" />
+                    <input name="priority" type="text" value={editedProfile.priority || ''} onChange={handleInputChange} placeholder="우선순위" className="w-full p-2 border rounded text-sm" />
+                </div>
                 <textarea name="otherInfo" value={editedProfile.otherInfo || ''} onChange={handleInputChange} placeholder="기타 정보" className="w-full p-2 border rounded text-sm h-20" />
                 <input name="eventDate" type="datetime-local" value={editedProfile.eventDate || ''} onChange={handleInputChange} className="w-full p-2 border rounded text-sm" />
                 <div className="flex justify-end space-x-2">
@@ -123,22 +122,22 @@ const ProfileCard = ({ profile, onUpdate, onDelete }) => {
     }
     
     return (
-        <>
-            {showDeleteConfirm && <ConfirmationModal message={`'${profile.name}' 프로필을 정말로 삭제하시겠습니까?`} onConfirm={confirmDelete} onCancel={() => setShowDeleteConfirm(false)} />}
-            <div className="bg-white p-4 rounded-lg shadow relative group">
+        <div className="bg-white p-4 rounded-lg shadow relative group">
+            <div className="flex items-center justify-between">
                 <div className="flex items-baseline space-x-2">
                     <h3 className="font-bold text-yellow-600">{profile.name}</h3>
                     <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
                 </div>
-                {profile.expertise && <p className="text-sm font-semibold text-gray-600 mt-1">{profile.expertise}</p>}
-                <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
-                {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
-                <div className="absolute top-2 right-2 space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:underline text-xs">수정</button>
-                    <button onClick={handleDeleteRequest} className="text-red-500 hover:underline text-xs">삭제</button>
-                </div>
+                {profile.priority && <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${priorityColors[profile.priority] || 'bg-gray-100 text-gray-800'}`}>{profile.priority}</span>}
             </div>
-        </>
+            {profile.expertise && <p className="text-sm font-semibold text-gray-600 mt-1">{profile.expertise}</p>}
+            <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
+            {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
+            <div className="absolute top-2 right-2 space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:underline text-xs">수정</button>
+                <button onClick={() => onDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button>
+            </div>
+        </div>
     );
 };
 
@@ -173,7 +172,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
     }, [profiles]);
 
     const ageData = useMemo(() => {
-        const groups = { '10대': 0, '20대': 0, '30대': 0, '4대': 0, '50대 이상': 0 };
+        const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
         profiles.forEach(({ age }) => {
             if (!age) return;
             if (age < 20) groups['10대']++;
@@ -203,7 +202,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
               <section>
                 <h2 className="text-xl font-bold mb-4 flex items-center"><Calendar className="mr-2 text-red-500" />오늘의 일정</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {todayProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={() => onDelete(profile.id, profile.name)} />)}
+                  {todayProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />)}
                 </div>
               </section>
             )}
@@ -212,7 +211,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
               <section>
                 <h2 className="text-xl font-bold mb-4 flex items-center"><Zap className="mr-2 text-blue-500" />다가오는 일정</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {upcomingProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={() => onDelete(profile.id, profile.name)} />)}
+                  {upcomingProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />)}
                 </div>
               </section>
             )}
@@ -249,7 +248,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
               <section className="bg-white p-6 rounded-xl shadow-md">
                 <h2 className="text-xl font-bold text-gray-800 mb-4">"{selectedCompany}" 경력자</h2>
                 <div className="space-y-4">
-                  {filteredByCompanyProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={() => onDelete(profile.id, profile.name)} />)}
+                  {filteredByCompanyProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />)}
                 </div>
               </section>
             )}
@@ -259,8 +258,8 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
 
 // 프로필 관리 탭 컴포넌트
 const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, formState, setFormState }) => {
-    const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise } = formState;
-    const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise } = setFormState;
+    const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority } = formState;
+    const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority } = setFormState;
     const [searchTerm, setSearchTerm] = useState('');
     
     const searchedProfiles = useMemo(() => {
@@ -299,7 +298,7 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, formState, 
                         <h2 className="text-xl font-bold mb-4">검색 결과</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
-                                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={() => onDelete(profile.id, profile.name)} />
+                                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />
                             )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
                         </div>
                     </div>
@@ -309,9 +308,10 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, formState, 
             <section className="bg-white p-6 rounded-xl shadow-md">
                 <h2 className="text-xl font-bold mb-4 flex items-center"><UserPlus className="mr-2 text-yellow-500"/>새 프로필 추가</h2>
                 <form onSubmit={handleFormSubmit} className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <input type="text" placeholder="이름" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-2 border rounded" />
                         <input type="number" placeholder="나이" value={newAge} onChange={e => setNewAge(e.target.value)} className="w-full p-2 border rounded" />
+                        <input type="text" placeholder="우선순위" value={newPriority} onChange={e => setNewPriority(e.target.value)} className="w-full p-2 border rounded" />
                     </div>
                     <input type="text" placeholder="전문영역" value={newExpertise} onChange={e => setNewExpertise(e.target.value)} className="w-full p-2 border rounded" />
                     <textarea placeholder="경력" value={newCareer} onChange={e => setNewCareer(e.target.value)} className="w-full p-2 border rounded h-24" />
@@ -327,7 +327,7 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, formState, 
                 <h2 className="text-xl font-bold text-gray-800 mb-4">전체 프로필 목록</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {profiles.sort((a,b) => a.name.localeCompare(b.name)).map(profile => (
-                        <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={() => onDelete(profile.id, profile.name)} />
+                       <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />
                     ))}
                 </div>
             </section>
@@ -349,6 +349,7 @@ export default function App() {
   const [newOtherInfo, setNewOtherInfo] = useState('');
   const [newEventDate, setNewEventDate] = useState('');
   const [newExpertise, setNewExpertise] = useState('');
+  const [newPriority, setNewPriority] = useState('');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -393,17 +394,17 @@ export default function App() {
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!newName.trim() || !newCareer.trim() || !profilesCollectionRef) return;
-    const profileData = { name: newName, career: newCareer, age: newAge ? Number(newAge) : null, otherInfo: newOtherInfo, eventDate: newEventDate || null, expertise: newExpertise || null };
+    const profileData = { name: newName, career: newCareer, age: newAge ? Number(newAge) : null, otherInfo: newOtherInfo, eventDate: newEventDate || null, expertise: newExpertise || null, priority: newPriority || null };
     try {
         await addDoc(profilesCollectionRef, profileData);
-        setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewEventDate(''); setNewExpertise('');
+        setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewEventDate(''); setNewExpertise(''); setNewPriority('');
     } catch (err) {
       console.error("프로필 저장 오류: ", err);
     }
   };
   
   const handleUpdate = async (profileId, updatedData) => {
-    const { id, isToday, isUpcoming, ...dataToUpdate } = updatedData;
+    const { id, ...dataToUpdate } = updatedData;
     await updateDoc(doc(profilesCollectionRef, profileId), dataToUpdate);
   };
 
@@ -418,8 +419,8 @@ export default function App() {
       setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
   };
 
-  const formState = { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise };
-  const setFormState = { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise };
+  const formState = { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority };
+  const setFormState = { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority };
 
   if (!accessCode) {
     return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
