@@ -316,8 +316,16 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
                   <h2 className="text-xl font-bold text-gray-800 mb-4">세대별 분포</h2>
                   <ResponsiveContainer width="100%" height={300}>
                     <PieChart>
-                      <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} fill="#8884d8" dataKey="value" label onClick={(data) => handlePieClick('age', data.payload)}>
-                        {ageData.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} cursor="pointer" />)}
+                      <defs>
+                        {COLORS.map((color, index) => (
+                          <radialGradient key={`gradient-age-${index}`} id={`gradient-age-${index}`} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+                            <stop offset="0%" stopColor={color} stopOpacity={0.7} />
+                            <stop offset="100%" stopColor={color} stopOpacity={1} />
+                          </radialGradient>
+                        ))}
+                      </defs>
+                      <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(data) => handlePieClick('age', data.payload)}>
+                        {ageData.map((_, index) => <Cell key={`cell-${index}`} fill={`url(#gradient-age-${index})`} cursor="pointer" stroke="#fff" />)}
                       </Pie>
                       <Tooltip formatter={(value) => `${value}명`} />
                       <Legend />
@@ -329,8 +337,13 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
                   <h2 className="text-xl font-bold text-gray-800 mb-4">우선순위별 분포</h2>
                   <ResponsiveContainer width="100%" height={300}>
                     <PieChart>
-                        <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} fill="#82ca9d" dataKey="value" label onClick={(data) => handlePieClick('priority', data.payload)}>
-                            {priorityData.map((_, index) => <Cell key={`cell-${index}`} fill={['#FF4444', '#FFBB28', '#00C49F'][index % 3]} cursor="pointer" />)}
+                         <defs>
+                            <radialGradient id="gradient-priority-0"><stop offset="0%" stopColor="#FF4444" stopOpacity={0.7} /><stop offset="100%" stopColor="#FF4444" stopOpacity={1} /></radialGradient>
+                            <radialGradient id="gradient-priority-1"><stop offset="0%" stopColor="#FFBB28" stopOpacity={0.7} /><stop offset="100%" stopColor="#FFBB28" stopOpacity={1} /></radialGradient>
+                            <radialGradient id="gradient-priority-2"><stop offset="0%" stopColor="#00C49F" stopOpacity={0.7} /><stop offset="100%" stopColor="#00C49F" stopOpacity={1} /></radialGradient>
+                         </defs>
+                        <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(data) => handlePieClick('priority', data.payload)}>
+                            {priorityData.map((entry, index) => <Cell key={`cell-${index}`} fill={`url(#gradient-priority-${index})`} cursor="pointer" stroke="#fff"/>)}
                         </Pie>
                         <Tooltip formatter={(value) => `${value}명`} />
                         <Legend />
@@ -343,12 +356,18 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
               <h2 className="text-xl font-bold text-gray-800 mb-4">IT 기업 경력 분포</h2>
               <ResponsiveContainer width="100%" height={350}>
                 <BarChart data={keywordData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+                   <defs>
+                    <linearGradient id="gradient-company" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#FFBB28" stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor="#FF8042" stopOpacity={1}/>
+                    </linearGradient>
+                  </defs>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
                   <YAxis allowDecimals={false}/>
                   <Tooltip formatter={(value) => `${value}명`} />
                   <Legend />
-                  <Bar dataKey="count" fill="#FFBB28" onClick={(data) => handleBarClick('company', data)} cursor="pointer" />
+                  <Bar dataKey="count" fill="url(#gradient-company)" onClick={(data) => handleBarClick('company', data)} cursor="pointer" />
                 </BarChart>
               </ResponsiveContainer>
             </section>
@@ -357,12 +376,18 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
               <h2 className="text-xl font-bold text-gray-800 mb-4">전문영역 분포</h2>
               <ResponsiveContainer width="100%" height={350}>
                 <BarChart data={expertiseData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+                  <defs>
+                    <linearGradient id="gradient-expertise" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#00C49F" stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor="#82ca9d" stopOpacity={1}/>
+                    </linearGradient>
+                  </defs>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
                   <YAxis allowDecimals={false}/>
                   <Tooltip formatter={(value) => `${value}명`} />
                   <Legend />
-                  <Bar dataKey="count" fill="#00C49F" onClick={(data) => handleBarClick('expertise', data)} cursor="pointer" />
+                  <Bar dataKey="count" fill="url(#gradient-expertise)" onClick={(data) => handleBarClick('expertise', data)} cursor="pointer" />
                 </BarChart>
               </ResponsiveContainer>
             </section>
