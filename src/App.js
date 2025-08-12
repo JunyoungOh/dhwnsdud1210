@@ -293,6 +293,13 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
                  )}
             </section>
 
+            <section className="mb-8">
+                <div className="bg-white p-4 rounded-xl shadow-md inline-block">
+                  <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
+                  <p className="text-3xl font-bold text-yellow-500 mt-1">{profiles.length}</p>
+                </div>
+            </section>
+
             {todayProfiles.length > 0 && (
               <section>
                 <h2 className="text-xl font-bold mb-4 flex items-center"><Calendar className="mr-2 text-red-500" />오늘의 일정</h2>
@@ -325,7 +332,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
                         ))}
                       </defs>
                       <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(data) => handlePieClick('age', data.payload)}>
-                        {ageData.map((_, index) => <Cell key={`cell-${index}`} fill={`url(#gradient-age-${index})`} cursor="pointer" stroke="#fff" />)}
+                        {ageData.map((_, index) => <Cell key={`cell-age-${index}`} fill={`url(#gradient-age-${index})`} cursor="pointer" stroke="#fff" />)}
                       </Pie>
                       <Tooltip formatter={(value) => `${value}명`} />
                       <Legend />
@@ -343,7 +350,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
                             <radialGradient id="gradient-priority-2"><stop offset="0%" stopColor="#00C49F" stopOpacity={0.7} /><stop offset="100%" stopColor="#00C49F" stopOpacity={1} /></radialGradient>
                          </defs>
                         <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(data) => handlePieClick('priority', data.payload)}>
-                            {priorityData.map((entry, index) => <Cell key={`cell-${index}`} fill={`url(#gradient-priority-${index})`} cursor="pointer" stroke="#fff"/>)}
+                            {priorityData.map((entry, index) => <Cell key={`cell-priority-${index}`} fill={`url(#gradient-priority-${index})`} cursor="pointer" stroke="#fff"/>)}
                         </Pie>
                         <Tooltip formatter={(value) => `${value}명`} />
                         <Legend />
