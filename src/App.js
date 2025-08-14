@@ -112,7 +112,10 @@ const ProfileCard = ({ profile, onUpdate, onDelete }) => {
                     <input name="priority" type="text" value={editedProfile.priority || ''} onChange={handleInputChange} placeholder="우선순위" className="w-full p-2 border rounded text-sm" />
                 </div>
                 <textarea name="otherInfo" value={editedProfile.otherInfo || ''} onChange={handleInputChange} placeholder="기타 정보" className="w-full p-2 border rounded text-sm h-20" />
-                <input name="eventDate" type="datetime-local" value={editedProfile.eventDate || ''} onChange={handleInputChange} className="w-full p-2 border rounded text-sm" />
+                <div className="grid grid-cols-2 gap-2">
+                    <input name="eventDate" type="datetime-local" value={editedProfile.eventDate || ''} onChange={handleInputChange} className="w-full p-2 border rounded text-sm" />
+                    <input name="interviewer" value={editedProfile.interviewer || ''} onChange={handleInputChange} placeholder="미팅자 이름" className="w-full p-2 border rounded text-sm" />
+                </div>
                 <div className="flex justify-end space-x-2">
                     <button onClick={() => setIsEditing(false)} className="p-2 text-gray-500 hover:text-gray-800"><X size={20} /></button>
                     <button onClick={handleSave} className="p-2 text-green-600 hover:text-green-800"><Save size={20} /></button>
@@ -133,6 +136,12 @@ const ProfileCard = ({ profile, onUpdate, onDelete }) => {
             {profile.expertise && <p className="text-sm font-semibold text-gray-600 mt-1">{profile.expertise}</p>}
             <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
             {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
+             {profile.eventDate && (
+                <div className="mt-2 pt-2 border-t">
+                    <p className="text-xs font-semibold text-gray-500">미팅기록:</p>
+                    <p className="text-xs text-gray-600">{new Date(profile.eventDate).toLocaleString('ko-KR')} (미팅자: {profile.interviewer || '미지정'})</p>
+                </div>
+            )}
             <div className="absolute top-2 right-2 space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:underline text-xs">수정</button>
                 <button onClick={() => onDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button>
@@ -141,11 +150,33 @@ const ProfileCard = ({ profile, onUpdate, onDelete }) => {
     );
 };
 
+// 필터링 결과 섹션 컴포넌트
+const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear }) => (
+    <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in">
+        <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold text-gray-800">{title}</h2>
+            <button onClick={onClear} className="text-sm text-gray-500 hover:text-gray-800">필터 해제</button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {profiles.length > 0 ? (
+                profiles.map((profile, index) => (
+                    <div key={profile.id} className="animate-cascade" style={{ animationDelay: `${index * 50}ms` }}>
+                        <ProfileCard profile={profile} onUpdate={onUpdate} onDelete={onDelete} />
+                    </div>
+                ))
+            ) : (
+                <p className="text-gray-500 text-center col-span-full">해당 조건의 프로필이 없습니다.</p>
+            )}
+        </div>
+    </section>
+);
+
 
 // 대시보드 탭 컴포넌트
 const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
     const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
     const [searchTerm, setSearchTerm] = useState('');
+    const [showMeetingProfiles, setShowMeetingProfiles] = useState(false);
 
     const handlePieClick = (type, data) => {
         if (data.value === 0) return;
@@ -159,7 +190,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
         setActiveFilter({ type, value });
     };
 
-    const { todayProfiles, upcomingProfiles } = useMemo(() => {
+    const { todayProfiles, upcomingProfiles, meetingProfiles } = useMemo(() => {
         const now = new Date();
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const threeDaysLater = new Date(todayStart);
@@ -167,9 +198,11 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
 
         const today = [];
         const upcoming = [];
+        const meetings = [];
 
         profiles.forEach(p => {
             if (p.eventDate) {
+                meetings.push(p);
                 const eventDate = new Date(p.eventDate);
                 if (eventDate >= todayStart && eventDate < new Date(new Date(todayStart).setDate(todayStart.getDate() + 1))) {
                     today.push(p);
@@ -181,6 +214,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
         return {
             todayProfiles: today.sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate)),
             upcomingProfiles: upcoming.sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate)),
+            meetingProfiles: meetings.sort((a,b) => new Date(b.eventDate) - new Date(a.eventDate)), //최신순
         };
     }, [profiles]);
 
@@ -293,12 +327,20 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
                  )}
             </section>
 
-            <section className="mb-8">
-                <div className="bg-white p-4 rounded-xl shadow-md inline-block">
+            <section className="mb-8 flex space-x-4">
+                <div className="bg-white p-4 rounded-xl shadow-md">
                   <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
                   <p className="text-3xl font-bold text-yellow-500 mt-1">{profiles.length}</p>
                 </div>
+                <div className="bg-white p-4 rounded-xl shadow-md cursor-pointer hover:bg-gray-50" onClick={() => setShowMeetingProfiles(!showMeetingProfiles)}>
+                  <h3 className="text-base font-medium text-gray-500">미팅 진행 프로필</h3>
+                  <p className="text-3xl font-bold text-yellow-500 mt-1">{meetingProfiles.length}</p>
+                </div>
             </section>
+
+            {showMeetingProfiles && (
+                 <FilterResultSection title="미팅 진행 프로필 (최신순)" profiles={meetingProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setShowMeetingProfiles(false)} />
+            )}
 
             {todayProfiles.length > 0 && (
               <section>
@@ -358,6 +400,10 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
                   </ResponsiveContainer>
                 </section>
             </div>
+            
+            {(activeFilter.type === 'age' || activeFilter.type === 'priority') && (
+                <FilterResultSection title={`"${activeFilter.value}" 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} />
+            )}
 
             <section className="bg-white p-6 rounded-xl shadow-md">
               <h2 className="text-xl font-bold text-gray-800 mb-4">IT 기업 경력 분포</h2>
@@ -378,6 +424,9 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
                 </BarChart>
               </ResponsiveContainer>
             </section>
+             {activeFilter.type === 'company' && (
+                <FilterResultSection title={`"${activeFilter.value}" 경력자 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} />
+            )}
             
             <section className="bg-white p-6 rounded-xl shadow-md">
               <h2 className="text-xl font-bold text-gray-800 mb-4">전문영역 분포</h2>
@@ -398,21 +447,8 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
                 </BarChart>
               </ResponsiveContainer>
             </section>
-
-            {activeFilter.type && (
-              <section className="bg-white p-6 rounded-xl shadow-md">
-                <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-xl font-bold text-gray-800">"{activeFilter.value}" 필터 결과</h2>
-                    <button onClick={() => setActiveFilter({ type: null, value: null })} className="text-sm text-gray-500 hover:text-gray-800">필터 해제</button>
-                </div>
-                <div className="space-y-4">
-                  {filteredProfiles.length > 0 ? (
-                    filteredProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />)
-                  ) : (
-                    <p className="text-gray-500 text-center">해당 조건의 프로필이 없습니다.</p>
-                  )}
-                </div>
-              </section>
+            {activeFilter.type === 'expertise' && (
+                <FilterResultSection title={`"${activeFilter.value}" 전문영역 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} />
             )}
         </>
     );
@@ -420,8 +456,8 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
 
 // 프로필 관리 탭 컴포넌트
 const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState }) => {
-    const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority } = formState;
-    const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority } = setFormState;
+    const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newInterviewer } = formState;
+    const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewInterviewer } = setFormState;
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     const PROFILES_PER_PAGE = 9;
@@ -493,7 +529,10 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
                     <input type="text" placeholder="전문영역" value={newExpertise} onChange={e => setNewExpertise(e.target.value)} className="w-full p-2 border rounded" />
                     <textarea placeholder="경력" value={newCareer} onChange={e => setNewCareer(e.target.value)} className="w-full p-2 border rounded h-24" />
                     <textarea placeholder="기타 정보" value={newOtherInfo} onChange={e => setNewOtherInfo(e.target.value)} className="w-full p-2 border rounded h-24" />
-                    <input type="datetime-local" value={newEventDate} onChange={e => setNewEventDate(e.target.value)} className="w-full p-2 border rounded" />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input type="datetime-local" value={newEventDate} onChange={e => setNewEventDate(e.target.value)} className="w-full p-2 border rounded" />
+                        <input type="text" placeholder="미팅자 이름" value={newInterviewer} onChange={e => setNewInterviewer(e.target.value)} className="w-full p-2 border rounded" />
+                    </div>
                     <div className="flex justify-end">
                         <button type="submit" className="bg-yellow-400 text-white px-4 py-2 rounded hover:bg-yellow-500">추가하기</button>
                     </div>
@@ -643,6 +682,7 @@ export default function App() {
   const [newEventDate, setNewEventDate] = useState('');
   const [newExpertise, setNewExpertise] = useState('');
   const [newPriority, setNewPriority] = useState('');
+  const [newInterviewer, setNewInterviewer] = useState('');
 
   useEffect(() => {
     const script = document.createElement('script');
@@ -694,10 +734,10 @@ export default function App() {
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!newName.trim() || !newCareer.trim() || !profilesCollectionRef) return;
-    const profileData = { name: newName, career: newCareer, age: newAge ? Number(newAge) : null, otherInfo: newOtherInfo, eventDate: newEventDate || null, expertise: newExpertise || null, priority: newPriority || null };
+    const profileData = { name: newName, career: newCareer, age: newAge ? Number(newAge) : null, otherInfo: newOtherInfo, eventDate: newEventDate || null, expertise: newExpertise || null, priority: newPriority || null, interviewer: newInterviewer || null };
     try {
         await addDoc(profilesCollectionRef, profileData);
-        setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewEventDate(''); setNewExpertise(''); setNewPriority('');
+        setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewEventDate(''); setNewExpertise(''); setNewPriority(''); setNewInterviewer('');
     } catch (err) {
       console.error("프로필 저장 오류: ", err);
     }
@@ -744,8 +784,8 @@ export default function App() {
       setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
   };
 
-  const formState = { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority };
-  const setFormState = { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority };
+  const formState = { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newInterviewer };
+  const setFormState = { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewInterviewer };
 
   if (!accessCode) {
     return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
