@@ -162,6 +162,27 @@ const ProfileCard = ({ profile, onUpdate, onDelete }) => {
     );
 };
 
+// 필터링 결과 섹션 컴포넌트
+const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear }) => (
+    <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in">
+        <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold text-gray-800">{title}</h2>
+            <button onClick={onClear} className="text-sm text-gray-500 hover:text-gray-800">필터 해제</button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {profiles.length > 0 ? (
+                profiles.map((profile, index) => (
+                    <div key={profile.id} className="animate-cascade" style={{ animationDelay: `${index * 50}ms` }}>
+                        <ProfileCard profile={profile} onUpdate={onUpdate} onDelete={onDelete} />
+                    </div>
+                ))
+            ) : (
+                <p className="text-gray-500 text-center col-span-full">해당 조건의 프로필이 없습니다.</p>
+            )}
+        </div>
+    </section>
+);
+
 
 // 대시보드 탭 컴포넌트
 const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
@@ -609,20 +630,16 @@ const ExcelUploader = ({ onBulkAdd }) => {
                     return;
                 }
 
-                const newProfiles = json.slice(1).map(row => {
-                    const meetingRecord = row[11] || ''; // L열
-                    const eventDate = parseDateFromRecord(meetingRecord);
-                    return {
-                        name: row[2] || '',      // C열
-                        career: row[3] || '',    // D열
-                        age: row[5] ? Number(row[5]) : null, // F열
-                        expertise: row[7] || '', // H열
-                        priority: row[9] ? String(row[9]) : '',   // J열
-                        meetingRecord: meetingRecord, // L열
-                        otherInfo: row[13] || '',// N열
-                        eventDate: eventDate,
-                    };
-                }).filter(p => p.name && p.career); // 이름과 경력은 필수
+                const newProfiles = json.slice(1).map(row => ({
+                    name: row[2] || '',      // C열
+                    career: row[3] || '',    // D열
+                    age: row[5] ? Number(row[5]) : null, // F열
+                    expertise: row[7] || '', // H열
+                    priority: row[9] ? String(row[9]) : '',   // J열
+                    meetingRecord: row[11] || '', // L열
+                    otherInfo: row[13] || '',// N열
+                    eventDate: parseDateFromRecord(row[11] || ''),
+                })).filter(p => p.name && p.career); // 이름과 경력은 필수
 
                 const resultMessage = await onBulkAdd(newProfiles);
                 setMessage(resultMessage);
