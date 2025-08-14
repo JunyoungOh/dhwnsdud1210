@@ -30,6 +30,20 @@ const TAB_PAGE = {
   MANAGE: 'manage'
 };
 
+// 헬퍼 함수: 미팅 기록에서 날짜 파싱
+const parseDateFromRecord = (recordText) => {
+    if (!recordText) return null;
+    const match = recordText.match(/\((\d{2})\.(\d{2})\.(\d{2})\)/);
+    if (match) {
+        const year = 2000 + parseInt(match[1], 10);
+        const month = parseInt(match[2], 10) - 1; // JS months are 0-indexed
+        const day = parseInt(match[3], 10);
+        return new Date(year, month, day).toISOString();
+    }
+    return null;
+};
+
+
 // 로그인 화면 컴포넌트
 const LoginScreen = ({ onLogin, authStatus }) => {
     const [codeInput, setCodeInput] = useState('');
@@ -97,7 +111,8 @@ const ProfileCard = ({ profile, onUpdate, onDelete }) => {
     };
 
     const handleSave = () => {
-        onUpdate(profile.id, editedProfile);
+        const eventDate = parseDateFromRecord(editedProfile.meetingRecord);
+        onUpdate(profile.id, { ...editedProfile, eventDate });
         setIsEditing(false);
     };
 
@@ -112,10 +127,7 @@ const ProfileCard = ({ profile, onUpdate, onDelete }) => {
                     <input name="priority" type="text" value={editedProfile.priority || ''} onChange={handleInputChange} placeholder="우선순위" className="w-full p-2 border rounded text-sm" />
                 </div>
                 <textarea name="otherInfo" value={editedProfile.otherInfo || ''} onChange={handleInputChange} placeholder="기타 정보" className="w-full p-2 border rounded text-sm h-20" />
-                <div className="grid grid-cols-2 gap-2">
-                    <input name="eventDate" type="datetime-local" value={editedProfile.eventDate || ''} onChange={handleInputChange} className="w-full p-2 border rounded text-sm" />
-                    <input name="interviewer" value={editedProfile.interviewer || ''} onChange={handleInputChange} placeholder="미팅자 이름" className="w-full p-2 border rounded text-sm" />
-                </div>
+                <textarea name="meetingRecord" value={editedProfile.meetingRecord || ''} onChange={handleInputChange} placeholder="미팅기록 (예: (25.08.14) 1차 인터뷰)" className="w-full p-2 border rounded text-sm h-20" />
                 <div className="flex justify-end space-x-2">
                     <button onClick={() => setIsEditing(false)} className="p-2 text-gray-500 hover:text-gray-800"><X size={20} /></button>
                     <button onClick={handleSave} className="p-2 text-green-600 hover:text-green-800"><Save size={20} /></button>
@@ -136,10 +148,10 @@ const ProfileCard = ({ profile, onUpdate, onDelete }) => {
             {profile.expertise && <p className="text-sm font-semibold text-gray-600 mt-1">{profile.expertise}</p>}
             <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
             {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
-             {profile.eventDate && (
+            {profile.meetingRecord && (
                 <div className="mt-2 pt-2 border-t">
                     <p className="text-xs font-semibold text-gray-500">미팅기록:</p>
-                    <p className="text-xs text-gray-600">{new Date(profile.eventDate).toLocaleString('ko-KR')} (미팅자: {profile.interviewer || '미지정'})</p>
+                    <p className="text-xs text-gray-600 whitespace-pre-wrap">{profile.meetingRecord}</p>
                 </div>
             )}
             <div className="absolute top-2 right-2 space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -149,27 +161,6 @@ const ProfileCard = ({ profile, onUpdate, onDelete }) => {
         </div>
     );
 };
-
-// 필터링 결과 섹션 컴포넌트
-const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear }) => (
-    <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in">
-        <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold text-gray-800">{title}</h2>
-            <button onClick={onClear} className="text-sm text-gray-500 hover:text-gray-800">필터 해제</button>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {profiles.length > 0 ? (
-                profiles.map((profile, index) => (
-                    <div key={profile.id} className="animate-cascade" style={{ animationDelay: `${index * 50}ms` }}>
-                        <ProfileCard profile={profile} onUpdate={onUpdate} onDelete={onDelete} />
-                    </div>
-                ))
-            ) : (
-                <p className="text-gray-500 text-center col-span-full">해당 조건의 프로필이 없습니다.</p>
-            )}
-        </div>
-    </section>
-);
 
 
 // 대시보드 탭 컴포넌트
@@ -456,8 +447,8 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
 
 // 프로필 관리 탭 컴포넌트
 const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState }) => {
-    const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newInterviewer } = formState;
-    const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewInterviewer } = setFormState;
+    const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord } = formState;
+    const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord } = setFormState;
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     const PROFILES_PER_PAGE = 9;
@@ -529,10 +520,7 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
                     <input type="text" placeholder="전문영역" value={newExpertise} onChange={e => setNewExpertise(e.target.value)} className="w-full p-2 border rounded" />
                     <textarea placeholder="경력" value={newCareer} onChange={e => setNewCareer(e.target.value)} className="w-full p-2 border rounded h-24" />
                     <textarea placeholder="기타 정보" value={newOtherInfo} onChange={e => setNewOtherInfo(e.target.value)} className="w-full p-2 border rounded h-24" />
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <input type="datetime-local" value={newEventDate} onChange={e => setNewEventDate(e.target.value)} className="w-full p-2 border rounded" />
-                        <input type="text" placeholder="미팅자 이름" value={newInterviewer} onChange={e => setNewInterviewer(e.target.value)} className="w-full p-2 border rounded" />
-                    </div>
+                    <textarea placeholder="미팅기록 (예: (25.08.14) 1차 인터뷰)" value={newMeetingRecord} onChange={e => setNewMeetingRecord(e.target.value)} className="w-full p-2 border rounded h-24" />
                     <div className="flex justify-end">
                         <button type="submit" className="bg-yellow-400 text-white px-4 py-2 rounded hover:bg-yellow-500">추가하기</button>
                     </div>
@@ -621,15 +609,20 @@ const ExcelUploader = ({ onBulkAdd }) => {
                     return;
                 }
 
-                const newProfiles = json.slice(1).map(row => ({
-                    name: row[2] || '',      // C열
-                    career: row[3] || '',    // D열
-                    age: row[5] ? Number(row[5]) : null, // F열
-                    expertise: row[7] || '', // H열
-                    priority: row[9] ? String(row[9]) : '',   // J열
-                    otherInfo: row[13] || '',// N열
-                    eventDate: null,
-                })).filter(p => p.name && p.career); // 이름과 경력은 필수
+                const newProfiles = json.slice(1).map(row => {
+                    const meetingRecord = row[11] || ''; // L열
+                    const eventDate = parseDateFromRecord(meetingRecord);
+                    return {
+                        name: row[2] || '',      // C열
+                        career: row[3] || '',    // D열
+                        age: row[5] ? Number(row[5]) : null, // F열
+                        expertise: row[7] || '', // H열
+                        priority: row[9] ? String(row[9]) : '',   // J열
+                        meetingRecord: meetingRecord, // L열
+                        otherInfo: row[13] || '',// N열
+                        eventDate: eventDate,
+                    };
+                }).filter(p => p.name && p.career); // 이름과 경력은 필수
 
                 const resultMessage = await onBulkAdd(newProfiles);
                 setMessage(resultMessage);
@@ -654,7 +647,7 @@ const ExcelUploader = ({ onBulkAdd }) => {
                  <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md border">
                     <p className="font-semibold">엑셀 양식 안내:</p>
                     <p>2행부터 각 행을 한 프로필로 읽습니다.</p>
-                    <p>각 열의 C=이름, D=경력, F=나이, H=전문영역, J=우선순위, N=기타정보 로 입력됩니다.</p>
+                    <p>각 열의 C=이름, D=경력, F=나이, H=전문영역, J=우선순위, L=미팅기록, N=기타정보 로 입력됩니다.</p>
                     <p className="font-bold mt-1">※ 기존 프로필과 이름이 겹칠 경우, 덮어쓰기됩니다.</p>
                 </div>
                 <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100"/>
@@ -682,7 +675,7 @@ export default function App() {
   const [newEventDate, setNewEventDate] = useState('');
   const [newExpertise, setNewExpertise] = useState('');
   const [newPriority, setNewPriority] = useState('');
-  const [newInterviewer, setNewInterviewer] = useState('');
+  const [newMeetingRecord, setNewMeetingRecord] = useState('');
 
   useEffect(() => {
     const script = document.createElement('script');
@@ -734,10 +727,13 @@ export default function App() {
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!newName.trim() || !newCareer.trim() || !profilesCollectionRef) return;
-    const profileData = { name: newName, career: newCareer, age: newAge ? Number(newAge) : null, otherInfo: newOtherInfo, eventDate: newEventDate || null, expertise: newExpertise || null, priority: newPriority || null, interviewer: newInterviewer || null };
+    
+    const eventDate = parseDateFromRecord(newMeetingRecord);
+
+    const profileData = { name: newName, career: newCareer, age: newAge ? Number(newAge) : null, otherInfo: newOtherInfo, eventDate, expertise: newExpertise || null, priority: newPriority || null, meetingRecord: newMeetingRecord || null };
     try {
         await addDoc(profilesCollectionRef, profileData);
-        setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewEventDate(''); setNewExpertise(''); setNewPriority(''); setNewInterviewer('');
+        setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewEventDate(''); setNewExpertise(''); setNewPriority(''); setNewMeetingRecord('');
     } catch (err) {
       console.error("프로필 저장 오류: ", err);
     }
@@ -784,8 +780,8 @@ export default function App() {
       setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
   };
 
-  const formState = { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newInterviewer };
-  const setFormState = { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewInterviewer };
+  const formState = { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord };
+  const setFormState = { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord };
 
   if (!accessCode) {
     return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
