@@ -273,25 +273,39 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
     const searchedProfiles = useMemo(() => {
         const term = searchTerm.trim();
         if (!term) return [];
-        
-        const ageGroupMatch = term.match(/^(\d{1,2})대$/);
-        if (ageGroupMatch) {
-            const decadeStart = parseInt(ageGroupMatch[1], 10);
-            if (decadeStart >= 10) {
-                const minAge = decadeStart;
-                const maxAge = decadeStart + 9;
-                return profiles.filter(p => p.age && p.age >= minAge && p.age <= maxAge);
-            }
-        }
-        
-        const lowercasedTerm = term.toLowerCase();
-        return profiles.filter(p =>
-            (p.name && p.name.toLowerCase().includes(lowercasedTerm)) ||
-            (p.career && p.career.toLowerCase().includes(lowercasedTerm)) ||
-            (p.otherInfo && p.otherInfo.toLowerCase().includes(lowercasedTerm)) ||
-            (p.age && p.age.toString().includes(lowercasedTerm)) ||
-            (p.expertise && p.expertise.toLowerCase().includes(lowercasedTerm))
-        );
+
+        const orConditions = term.split(/\s+or\s+/i);
+
+        return profiles.filter(p => {
+            return orConditions.some(condition => {
+                const andKeywords = condition.split(/\s+and\s+/i).filter(k => k);
+                
+                return andKeywords.every(keyword => {
+                    const fieldMap = { '이름': 'name', '경력': 'career', '나이': 'age', '전문영역': 'expertise', '기타': 'otherInfo', '우선순위': 'priority' };
+                    const fieldMatch = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
+                    
+                    if (fieldMatch) {
+                        const fieldName = fieldMap[fieldMatch[1]];
+                        const fieldValue = fieldMatch[2].toLowerCase();
+                        const profileValue = p[fieldName] ? String(p[fieldName]).toLowerCase() : '';
+                        return profileValue.includes(fieldValue);
+                    }
+
+                    const ageGroupMatch = keyword.match(/^(\d{1,2})대$/);
+                    if (ageGroupMatch) {
+                        const decadeStart = parseInt(ageGroupMatch[1], 10);
+                        if (decadeStart >= 10) {
+                            const minAge = decadeStart;
+                            const maxAge = decadeStart + 9;
+                            return p.age && p.age >= minAge && p.age <= maxAge;
+                        }
+                    }
+                    
+                    const profileText = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
+                    return profileText.includes(keyword.toLowerCase());
+                });
+            });
+        });
     }, [searchTerm, profiles]);
 
     const filteredProfiles = useMemo(() => {
@@ -325,7 +339,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
             <section>
                 <div className="relative mb-6">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input type="text" placeholder="대시보드 내 프로필 검색..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
+                    <input type="text" placeholder="검색... (예: 경력:네이버 AND 20대)" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
                 </div>
                 {searchTerm.trim() && (
                     <div className="mb-8">
@@ -477,25 +491,39 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
     const searchedProfiles = useMemo(() => {
         const term = searchTerm.trim();
         if (!term) return [];
-        
-        const ageGroupMatch = term.match(/^(\d{1,2})대$/);
-        if (ageGroupMatch) {
-            const decadeStart = parseInt(ageGroupMatch[1], 10);
-            if (decadeStart >= 10) {
-                const minAge = decadeStart;
-                const maxAge = decadeStart + 9;
-                return profiles.filter(p => p.age && p.age >= minAge && p.age <= maxAge);
-            }
-        }
-        
-        const lowercasedTerm = term.toLowerCase();
-        return profiles.filter(p =>
-            (p.name && p.name.toLowerCase().includes(lowercasedTerm)) ||
-            (p.career && p.career.toLowerCase().includes(lowercasedTerm)) ||
-            (p.otherInfo && p.otherInfo.toLowerCase().includes(lowercasedTerm)) ||
-            (p.age && p.age.toString().includes(lowercasedTerm)) ||
-            (p.expertise && p.expertise.toLowerCase().includes(lowercasedTerm))
-        );
+
+        const orConditions = term.split(/\s+or\s+/i);
+
+        return profiles.filter(p => {
+            return orConditions.some(condition => {
+                const andKeywords = condition.split(/\s+and\s+/i).filter(k => k);
+                
+                return andKeywords.every(keyword => {
+                    const fieldMap = { '이름': 'name', '경력': 'career', '나이': 'age', '전문영역': 'expertise', '기타': 'otherInfo', '우선순위': 'priority' };
+                    const fieldMatch = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
+                    
+                    if (fieldMatch) {
+                        const fieldName = fieldMap[fieldMatch[1]];
+                        const fieldValue = fieldMatch[2].toLowerCase();
+                        const profileValue = p[fieldName] ? String(p[fieldName]).toLowerCase() : '';
+                        return profileValue.includes(fieldValue);
+                    }
+
+                    const ageGroupMatch = keyword.match(/^(\d{1,2})대$/);
+                    if (ageGroupMatch) {
+                        const decadeStart = parseInt(ageGroupMatch[1], 10);
+                        if (decadeStart >= 10) {
+                            const minAge = decadeStart;
+                            const maxAge = decadeStart + 9;
+                            return p.age && p.age >= minAge && p.age <= maxAge;
+                        }
+                    }
+                    
+                    const profileText = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
+                    return profileText.includes(keyword.toLowerCase());
+                });
+            });
+        });
     }, [searchTerm, profiles]);
 
     const { currentProfiles, totalPages } = useMemo(() => {
@@ -516,7 +544,7 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
             <section>
                 <div className="relative mb-6">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input type="text" placeholder="이름, 경력, 전문영역 등으로 검색... (예: 20대)" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
+                    <input type="text" placeholder="검색... (예: 경력:네이버 AND 20대)" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
                 </div>
                 {searchTerm.trim() && (
                     <div>
