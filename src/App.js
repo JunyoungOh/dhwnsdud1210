@@ -1,9 +1,10 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
+import { getMessaging, getToken, onMessage } from "firebase/messaging";
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc, writeBatch } from 'firebase/firestore';
 import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
-import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save, UploadCloud } from 'lucide-react';
+import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save, UploadCloud, BellRing } from 'lucide-react';
 
 // Firebase 구성 정보
 const firebaseConfig = {
@@ -20,6 +21,7 @@ const appId = 'profile-db-app-junyoungoh';
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
+const messaging = getMessaging(app);
 setLogLevel('debug');
 
 const COLORS = ['#FFBB28', '#FF8042', '#00C49F', '#8884D8', '#FF4444', '#82ca9d'];
@@ -33,14 +35,18 @@ const TAB_PAGE = {
 // 헬퍼 함수: 미팅 기록에서 날짜 파싱
 const parseDateFromRecord = (recordText) => {
     if (!recordText) return null;
-    const match = recordText.match(/\((\d{2})\.(\d{2})\.(\d{2})\)/);
-    if (match) {
+    const matches = recordText.matchAll(/\((\d{2})\.(\d{2})\.(\d{2})\)/g);
+    let latestDate = null;
+    for (const match of matches) {
         const year = 2000 + parseInt(match[1], 10);
-        const month = parseInt(match[2], 10) - 1; // JS months are 0-indexed
+        const month = parseInt(match[2], 10) - 1;
         const day = parseInt(match[3], 10);
-        return new Date(year, month, day).toISOString();
+        const currentDate = new Date(year, month, day);
+        if (!latestDate || currentDate > latestDate) {
+            latestDate = currentDate;
+        }
     }
-    return null;
+    return latestDate ? latestDate.toISOString() : null;
 };
 
 
@@ -95,7 +101,7 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
 );
 
 // 프로필 카드 컴포넌트 (수정 기능 내장)
-const ProfileCard = ({ profile, onUpdate, onDelete }) => {
+const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [editedProfile, setEditedProfile] = useState(profile);
     
@@ -154,6 +160,12 @@ const ProfileCard = ({ profile, onUpdate, onDelete }) => {
                     <p className="text-xs text-gray-600 whitespace-pre-wrap">{profile.meetingRecord}</p>
                 </div>
             )}
+            {isAlarmCard && (
+                <div className="mt-3 pt-3 border-t flex justify-end space-x-2">
+                    <button onClick={() => onConfirmAlarm(profile.id)} className="text-xs bg-gray-200 text-gray-700 font-semibold px-3 py-1 rounded-full hover:bg-gray-300">확인</button>
+                    <button onClick={() => onSnooze(profile.id)} className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-3 py-1 rounded-full hover:bg-indigo-200">3개월 후 다시 알림</button>
+                </div>
+            )}
             <div className="absolute top-2 right-2 space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:underline text-xs">수정</button>
                 <button onClick={() => onDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button>
@@ -202,15 +214,18 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
         setActiveFilter({ type, value });
     };
 
-    const { todayProfiles, upcomingProfiles, meetingProfiles } = useMemo(() => {
+    const { todayProfiles, upcomingProfiles, meetingProfiles, longTermNoContactProfiles } = useMemo(() => {
         const now = new Date();
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const threeDaysLater = new Date(todayStart);
         threeDaysLater.setDate(threeDaysLater.getDate() + 4);
+        const threeMonthsAgo = new Date(now);
+        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
         const today = [];
         const upcoming = [];
         const meetings = [];
+        const longTerm = [];
 
         profiles.forEach(p => {
             if (p.eventDate) {
@@ -221,14 +236,32 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
                 } else if (eventDate > now && eventDate < threeDaysLater) {
                     upcoming.push(p);
                 }
+
+                const lastContact = p.lastReviewedDate ? new Date(p.lastReviewedDate) : eventDate;
+                const snoozeUntil = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
+
+                if (lastContact < threeMonthsAgo && (!snoozeUntil || snoozeUntil < now)) {
+                    longTerm.push(p);
+                }
             }
         });
         return {
             todayProfiles: today.sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate)),
             upcomingProfiles: upcoming.sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate)),
-            meetingProfiles: meetings.sort((a,b) => new Date(b.eventDate) - new Date(a.eventDate)), //최신순
+            meetingProfiles: meetings.sort((a,b) => new Date(b.eventDate) - new Date(a.eventDate)),
+            longTermNoContactProfiles: longTerm.sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate)),
         };
     }, [profiles]);
+    
+    const handleSnooze = (profileId) => {
+        const snoozeDate = new Date();
+        snoozeDate.setMonth(snoozeDate.getMonth() + 3);
+        onUpdate(profileId, { snoozeUntil: snoozeDate.toISOString() });
+    };
+
+    const handleConfirmAlarm = (profileId) => {
+        onUpdate(profileId, { lastReviewedDate: new Date().toISOString() });
+    };
 
     const ageData = useMemo(() => {
         const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
@@ -352,20 +385,14 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
                     </div>
                  )}
             </section>
-
-            <section className="mb-8 flex space-x-4">
-                <div className="bg-white p-4 rounded-xl shadow-md">
-                  <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
-                  <p className="text-3xl font-bold text-yellow-500 mt-1">{profiles.length}</p>
+            
+            {longTermNoContactProfiles.length > 0 && (
+              <section>
+                <h2 className="text-xl font-bold mb-4 flex items-center"><BellRing className="mr-2 text-orange-500" />장기 미접촉 알림 (3개월 이상)</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {longTermNoContactProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} isAlarmCard={true} onSnooze={handleSnooze} onConfirmAlarm={handleConfirmAlarm} />)}
                 </div>
-                <div className="bg-white p-4 rounded-xl shadow-md cursor-pointer hover:bg-gray-50" onClick={() => setShowMeetingProfiles(!showMeetingProfiles)}>
-                  <h3 className="text-base font-medium text-gray-500">미팅 진행 프로필</h3>
-                  <p className="text-3xl font-bold text-yellow-500 mt-1">{meetingProfiles.length}</p>
-                </div>
-            </section>
-
-            {showMeetingProfiles && (
-                 <FilterResultSection title="미팅 진행 프로필 (최신순)" profiles={meetingProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setShowMeetingProfiles(false)} />
+              </section>
             )}
 
             {todayProfiles.length > 0 && (
@@ -384,6 +411,21 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
                   {upcomingProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />)}
                 </div>
               </section>
+            )}
+            
+            <section className="mb-8 flex space-x-4">
+                <div className="bg-white p-4 rounded-xl shadow-md">
+                  <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
+                  <p className="text-3xl font-bold text-yellow-500 mt-1">{profiles.length}</p>
+                </div>
+                <div className="bg-white p-4 rounded-xl shadow-md cursor-pointer hover:bg-gray-50" onClick={() => setShowMeetingProfiles(!showMeetingProfiles)}>
+                  <h3 className="text-base font-medium text-gray-500">미팅 진행 프로필</h3>
+                  <p className="text-3xl font-bold text-yellow-500 mt-1">{meetingProfiles.length}</p>
+                </div>
+            </section>
+
+            {showMeetingProfiles && (
+                 <FilterResultSection title="미팅 진행 프로필 (최신순)" profiles={meetingProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setShowMeetingProfiles(false)} />
             )}
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
