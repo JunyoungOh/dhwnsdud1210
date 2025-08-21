@@ -1,11 +1,8 @@
 // public/firebase-messaging-sw.js
 
-// Firebase SDK 스크립트를 가져옵니다.
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js");
 
-// 여기에 회원님의 Firebase 구성 정보를 붙여넣으세요.
-// 이 정보는 App.js에 있는 firebaseConfig와 동일해야 합니다.
 const firebaseConfig = {
   apiKey: "AIzaSyBue2ZMWEQ45L61s7ieFZM9DcQViQ-0_OY",
   authDomain: "dhwnsdud1210-bf233.firebaseapp.com",
@@ -16,21 +13,43 @@ const firebaseConfig = {
   measurementId: "G-XS3VFNW6Y3"
 };
 
-// Firebase 앱을 초기화합니다.
 firebase.initializeApp(firebaseConfig);
-
-// 메시징 서비스를 가져옵니다.
 const messaging = firebase.messaging();
 
-// 백그라운드에서 메시지를 처리하는 핸들러입니다.
 messaging.onBackgroundMessage(function(payload) {
   console.log('[firebase-messaging-sw.js] Received background message ', payload);
   
   const notificationTitle = payload.notification.title;
   const notificationOptions = {
     body: payload.notification.body,
-    icon: '/logo192.png' // 알림에 표시될 아이콘 (public 폴더에 있는 이미지)
+    icon: '/logo192.png',
+    data: payload.data // 서버에서 보낸 '꼬리표' 데이터를 알림에 포함
   };
 
   self.registration.showNotification(notificationTitle, notificationOptions);
+});
+
+// 사용자가 알림을 클릭했을 때의 동작을 정의합니다.
+self.addEventListener('notificationclick', function(event) {
+  event.notification.close(); // 알림창 닫기
+
+  const profileId = event.notification.data.profileId;
+  // 알림 클릭 시, 프로필 ID를 주소에 달고 앱을 엽니다.
+  const urlToOpen = new URL('/', self.location.origin).href + `?profileId=${profileId}`;
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(windowClients) {
+      // 이미 앱이 열려있는 경우, 해당 탭으로 이동하고 새로고침합니다.
+      for (var i = 0; i < windowClients.length; i++) {
+        var client = windowClients[i];
+        if (client.url === urlToOpen && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      // 앱이 닫혀있는 경우, 새 탭으로 엽니다.
+      if (clients.openWindow) {
+        return clients.openWindow(urlToOpen);
+      }
+    })
+  );
 });
