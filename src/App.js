@@ -39,7 +39,7 @@ const parseDateFromRecord = (recordText) => {
     let latestDate = null;
     for (const match of matches) {
         const year = 2000 + parseInt(match[1], 10);
-        const month = parseInt(match[2], 10) - 1;
+        const month = parseInt(match[2], 10) - 1; // JS months are 0-indexed
         const day = parseInt(match[3], 10);
         const currentDate = new Date(year, month, day);
         if (!latestDate || currentDate > latestDate) {
@@ -143,7 +143,7 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
     }
     
     return (
-        <div className="bg-white p-4 rounded-lg shadow relative group">
+        <div id={`profile-card-${profile.id}`} className="bg-white p-4 rounded-lg shadow relative group">
             <div className="flex items-center justify-between">
                 <div className="flex items-baseline space-x-2">
                     <h3 className="font-bold text-yellow-600">{profile.name}</h3>
@@ -197,10 +197,26 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear }) =
 
 
 // 대시보드 탭 컴포넌트
-const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
+const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHighlightedProfile }) => {
     const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
     const [searchTerm, setSearchTerm] = useState('');
     const [showMeetingProfiles, setShowMeetingProfiles] = useState(false);
+
+    useEffect(() => {
+        if (highlightedProfile) {
+            const element = document.getElementById(`profile-card-${highlightedProfile}`);
+            if (element) {
+                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                element.classList.add('highlight');
+                setTimeout(() => {
+                    element.classList.remove('highlight');
+                    setHighlightedProfile(null); // Reset after animation
+                }, 2500);
+            } else {
+                 setHighlightedProfile(null);
+            }
+        }
+    }, [highlightedProfile, setHighlightedProfile, profiles]);
 
     const handlePieClick = (type, data) => {
         if (data.value === 0) return;
@@ -754,6 +770,7 @@ export default function App() {
   const [authStatus, setAuthStatus] = useState('authenticating');
   const [activeTab, setActiveTab] = useState(TAB_PAGE.DASHBOARD);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
+  const [highlightedProfile, setHighlightedProfile] = useState(null);
 
   const [newName, setNewName] = useState('');
   const [newCareer, setNewCareer] = useState('');
@@ -797,7 +814,6 @@ export default function App() {
                 const currentToken = await getToken(messaging, { vapidKey: 'BISKOk17u6pUukTRG0zuthw3lM27ZcY861y8kzNxY3asx3jKnzQPTTkFXxcWluBvRWjWDthTHtwWszW-hVL_vZM' }); 
                 if (currentToken) {
                     console.log('FCM Token:', currentToken);
-                    alert('FCM Token: ' + currentToken);
                     const tokenRef = doc(db, "fcmTokens", accessCode);
                     await setDoc(tokenRef, {
                         tokens: arrayUnion(currentToken)
@@ -817,6 +833,14 @@ export default function App() {
         console.log('Message received. ', payload);
         alert(`[알림] ${payload.notification.title}: ${payload.notification.body}`);
     });
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const profileId = urlParams.get('profileId');
+    if (profileId) {
+        setActiveTab(TAB_PAGE.DASHBOARD);
+        setHighlightedProfile(profileId);
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
   }, [authStatus, accessCode]);
 
   const profilesCollectionRef = useMemo(() => {
@@ -907,6 +931,25 @@ export default function App() {
 
   return (
     <div className="bg-gray-50 min-h-screen font-sans">
+      <style>{`
+        @keyframes highlight-animation {
+            0% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.7); }
+            70% { box-shadow: 0 0 20px 10px rgba(251, 191, 36, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+        }
+        .highlight {
+            animation: highlight-animation 2.5s ease-out;
+        }
+        @keyframes slide-down-fade-in {
+          from { opacity: 0; transform: translateY(-15px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in { animation: slide-down-fade-in 0.5s ease-out forwards; }
+        .animate-cascade {
+          animation: slide-down-fade-in 0.5s ease-out forwards;
+          opacity: 0;
+        }
+      `}</style>
       {showDeleteConfirm.show && (
         <ConfirmationModal 
             message={`'${showDeleteConfirm.profileName}' 프로필을 정말로 삭제하시겠습니까?`}
@@ -931,7 +974,7 @@ export default function App() {
       </div>
 
       <main className="p-6 space-y-12">
-        {activeTab === TAB_PAGE.DASHBOARD && <DashboardTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} />}
+        {activeTab === TAB_PAGE.DASHBOARD && <DashboardTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} highlightedProfile={highlightedProfile} setHighlightedProfile={setHighlightedProfile} />}
         {activeTab === TAB_PAGE.MANAGE && <ManageTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} handleFormSubmit={handleFormSubmit} handleBulkAdd={handleBulkAdd} formState={formState} setFormState={setFormState} />}
       </main>
     </div>
