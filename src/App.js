@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc, writeBatch, arrayUnion } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc, writeBatch, arrayUnion, setDoc } from 'firebase/firestore';
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
 import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save, UploadCloud, BellRing } from 'lucide-react';
@@ -796,8 +796,9 @@ export default function App() {
             if (permission === 'granted') {
                 const currentToken = await getToken(messaging, { vapidKey: 'BISKOk17u6pUukTRG0zuthw3lM27ZcY861y8kzNxY3asx3jKnzQPTTkFXxcWluBvRWjWDthTHtwWszW-hVL_vZM' }); 
                 if (currentToken) {
+                    console.log('FCM Token:', currentToken);
                     const tokenRef = doc(db, "fcmTokens", accessCode);
-                    await updateDoc(tokenRef, {
+                    await setDoc(tokenRef, {
                         tokens: arrayUnion(currentToken)
                     }, { merge: true });
                 }
