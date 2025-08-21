@@ -1,8 +1,8 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getMessaging, getToken, onMessage } from "firebase/messaging";
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc, writeBatch, arrayUnion } from 'firebase/firestore';
+import { getMessaging, getToken, onMessage } from "firebase/messaging";
 import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
 import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save, UploadCloud, BellRing } from 'lucide-react';
 
@@ -787,6 +787,34 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+  
+  // 푸시 알림 권한 요청 및 토큰 발급 로직
+  useEffect(() => {
+    const requestNotificationPermission = async () => {
+        try {
+            const permission = await Notification.requestPermission();
+            if (permission === 'granted') {
+                console.log('Notification permission granted.');
+                // VAPID 키는 Firebase 콘솔 > 프로젝트 설정 > 클라우드 메시징 > 웹 푸시 인증서에서 생성
+                const currentToken = await getToken(messaging, { vapidKey: 'BISKOk17u6pUukTRG0zuthw3lM27ZcY861y8kzNxY3asx3jKnzQPTTkFXxcWluBvRWjWDthTHtwWszW-hVL_vZM' }); 
+                if (currentToken) {
+                    console.log('FCM Token:', currentToken);
+                    // TODO: 이 토큰을 Firestore에 사용자 정보와 함께 저장해야 합니다. (3단계에서 진행)
+                } else {
+                    console.log('No registration token available. Request permission to generate one.');
+                }
+            } else {
+                console.log('Unable to get permission to notify.');
+            }
+        } catch (err) {
+            console.error('An error occurred while retrieving token. ', err);
+        }
+    };
+
+    if (authStatus === 'authenticated') {
+        requestNotificationPermission();
+    }
+  }, [authStatus]);
 
   const profilesCollectionRef = useMemo(() => {
     if (!accessCode) return null;
