@@ -5,25 +5,52 @@ const { getMessaging } = require("firebase-admin/messaging");
 
 initializeApp();
 
-exports.checkMeetingNotifications = onSchedule("every 1 minutes", async (event) => {
+// 이 함수는 매일 오전 10시(한국 시간 기준)에 자동으로 실행됩니다.
+exports.checkMeetingNotifications = onSchedule({
+  schedule: "0 10 * * *",
+  timeZone: "Asia/Seoul",
+}, async (event) => {
   const db = getFirestore();
   const messaging = getMessaging();
   const now = new Date();
   
-  const thirtyMinutesFromNow = new Date(now.getTime() + 30 * 60 * 1000);
-  const thirtyOneMinutesFromNow = new Date(now.getTime() + 31 * 60 * 1000);
+  // 한국 시간(KST) 기준으로 오늘의 시작과 끝 설정
+  const kstOffset = 9 * 60 * 60 * 1000;
+  const todayKST = new Date(now.getTime() + kstOffset);
+  const todayStart = new Date(todayKST.getFullYear(), todayKST.getMonth(), todayKST.getDate());
+  
+  // D-3일 계산
+  const threeDaysFromNow = new Date(todayStart);
+  threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
 
   const groupsSnapshot = await db.collection("artifacts/profile-db-app-junyoungoh/public/data").listDocuments();
 
   for (const groupDoc of groupsSnapshot) {
     const accessCode = groupDoc.id;
     
-    const profilesSnapshot = await db.collection(groupDoc.path)
-      .where('eventDate', '>=', thirtyMinutesFromNow.toISOString())
-      .where('eventDate', '<', thirtyOneMinutesFromNow.toISOString())
+    const notificationsToSend = [];
+
+    // 1. 오늘의 일정 (D-Day)
+    const todaySnapshot = await db.collection(groupDoc.path)
+      .where('eventDate', '>=', todayStart.toISOString())
+      .where('eventDate', '<', new Date(todayStart.getTime() + 24 * 60 * 60 * 1000).toISOString())
+      .get();
+      
+    todaySnapshot.forEach(doc => {
+        notificationsToSend.push({ profile: doc.data(), type: "오늘의 일정" });
+    });
+
+    // 2. 다가오는 일정 (D-3)
+    const upcomingSnapshot = await db.collection(groupDoc.path)
+      .where('eventDate', '>=', threeDaysFromNow.toISOString())
+      .where('eventDate', '<', new Date(threeDaysFromNow.getTime() + 24 * 60 * 60 * 1000).toISOString())
       .get();
 
-    if (profilesSnapshot.empty) continue;
+    upcomingSnapshot.forEach(doc => {
+        notificationsToSend.push({ profile: doc.data(), type: "다가오는 일정 (D-3)" });
+    });
+
+    if (notificationsToSend.length === 0) continue;
 
     const tokensSnapshot = await db.collection("fcmTokens").doc(accessCode).get();
     if (!tokensSnapshot.exists) continue;
@@ -32,23 +59,18 @@ exports.checkMeetingNotifications = onSchedule("every 1 minutes", async (event) 
     const tokens = tokensData.tokens || [];
     if (tokens.length === 0) continue;
 
-    for (const profileDoc of profilesSnapshot.docs) {
-      const profile = profileDoc.data();
+    for (const item of notificationsToSend) {
       const message = {
         notification: {
-          title: "미팅 30분 전 알림",
-          body: `${profile.name}님과의 미팅이 곧 시작됩니다.`
-        },
-        // 여기에 '꼬리표'를 추가합니다.
-        data: {
-          profileId: profileDoc.id,
+          title: item.type,
+          body: `${item.profile.name}님과의 일정이 있습니다.`
         },
         tokens: tokens,
       };
 
       try {
         await messaging.sendEachForMulticast(message);
-        console.log(`[${accessCode}] 알림 성공:`, profile.name);
+        console.log(`[${accessCode}] 알림 성공:`, item.profile.name, `(${item.type})`);
       } catch (error) {
         console.log(`[${accessCode}] 알림 실패:`, error);
       }
