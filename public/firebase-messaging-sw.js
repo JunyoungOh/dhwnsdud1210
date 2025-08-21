@@ -5,6 +5,7 @@ importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js")
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js");
 
 // 여기에 회원님의 Firebase 구성 정보를 붙여넣으세요.
+// 이 정보는 App.js에 있는 firebaseConfig와 동일해야 합니다.
 const firebaseConfig = {
   apiKey: "AIzaSyBue2ZMWEQ45L61s7ieFZM9DcQViQ-0_OY",
   authDomain: "dhwnsdud1210-bf233.firebaseapp.com",
