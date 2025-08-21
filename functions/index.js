@@ -5,62 +5,74 @@ const { getMessaging } = require("firebase-admin/messaging");
 
 initializeApp();
 
-// 이 함수는 1분마다 자동으로 실행됩니다.
-exports.checkMeetingNotifications = onSchedule("every 1 minutes", async (event) => {
+// 이 함수는 매일 오전 10시(한국 시간 기준)에 자동으로 실행됩니다.
+exports.checkMeetingNotifications = onSchedule({
+  schedule: "0 10 * * *",
+  timeZone: "Asia/Seoul",
+}, async (event) => {
   const db = getFirestore();
   const messaging = getMessaging();
   const now = new Date();
   
-  // 30분 후와 31분 후의 시간 계산 (정확히 30분 뒤에 시작하는 미팅을 찾기 위함)
-  const thirtyMinutesFromNow = new Date(now.getTime() + 30 * 60 * 1000);
-  const thirtyOneMinutesFromNow = new Date(now.getTime() + 31 * 60 * 1000);
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  
+  // 1. "오늘의 일정" 알림 대상 찾기
+  const todayEnd = new Date(todayStart);
+  todayEnd.setDate(todayEnd.getDate() + 1);
+
+  // 2. "다가오는 일정" 알림 대상 찾기 (정확히 3일 뒤)
+  const threeDaysFromNowStart = new Date(todayStart);
+  threeDaysFromNowStart.setDate(threeDaysFromNowStart.getDate() + 3);
+  const threeDaysFromNowEnd = new Date(threeDaysFromNowStart);
+  threeDaysFromNowEnd.setDate(threeDaysFromNowEnd.getDate() + 1);
 
   // 모든 액세스 코드 그룹(컬렉션)을 가져옵니다.
   const groupsSnapshot = await db.collection("artifacts/profile-db-app-junyoungoh/public/data").listDocuments();
 
   for (const groupDoc of groupsSnapshot) {
     const accessCode = groupDoc.id;
+    const tokensSnapshot = await db.collection("fcmTokens").doc(accessCode).get();
+    if (!tokensSnapshot.exists) continue;
     
-    // 각 그룹의 프로필 중에서 30분 뒤에 시작하는 미팅을 찾습니다.
-    const profilesSnapshot = await db.collection(groupDoc.path)
-      .where('eventDate', '>=', thirtyMinutesFromNow.toISOString())
-      .where('eventDate', '<', thirtyOneMinutesFromNow.toISOString())
+    const tokens = tokensSnapshot.data().tokens || [];
+    if (tokens.length === 0) continue;
+
+    // "오늘의 일정" 알림 보내기
+    const todayProfilesSnapshot = await db.collection(groupDoc.path)
+      .where('eventDate', '>=', todayStart.toISOString())
+      .where('eventDate', '<', todayEnd.toISOString())
       .get();
 
-    if (profilesSnapshot.empty) {
-      continue; // 해당 그룹에 알림 보낼 미팅이 없으면 다음 그룹으로 넘어갑니다.
-    }
-
-    // 해당 그룹의 모든 알림 수신자(토큰)를 찾습니다.
-    const tokensSnapshot = await db.collection("fcmTokens").doc(accessCode).get();
-    if (!tokensSnapshot.exists) {
-      continue; // 알림 받을 사람이 없으면 넘어갑니다.
-    }
-    
-    const tokensData = tokensSnapshot.data();
-    const tokens = tokensData.tokens || [];
-
-    if (tokens.length === 0) {
-      continue;
-    }
-
-    // 각 프로필에 대해 알림을 보냅니다.
-    for (const profileDoc of profilesSnapshot.docs) {
+    for (const profileDoc of todayProfilesSnapshot.docs) {
       const profile = profileDoc.data();
       const message = {
         notification: {
-          title: "미팅 30분 전 알림",
-          body: `${profile.name}님과의 미팅이 곧 시작됩니다.`
+          title: "오늘의 일정 알림",
+          body: `${profile.name}님과의 미팅이 오늘 예정되어 있습니다.`
         },
         tokens: tokens,
       };
+      await messaging.sendEachForMulticast(message);
+      console.log(`[${accessCode}] 오늘의 일정 알림 성공:`, profile.name);
+    }
 
-      try {
-        const response = await messaging.sendEachForMulticast(message);
-        console.log(`[${accessCode}] 알림 성공:`, response.successCount, "건");
-      } catch (error) {
-        console.log(`[${accessCode}] 알림 실패:`, error);
-      }
+    // "다가오는 일정" 알림 보내기
+    const upcomingProfilesSnapshot = await db.collection(groupDoc.path)
+      .where('eventDate', '>=', threeDaysFromNowStart.toISOString())
+      .where('eventDate', '<', threeDaysFromNowEnd.toISOString())
+      .get();
+
+    for (const profileDoc of upcomingProfilesSnapshot.docs) {
+        const profile = profileDoc.data();
+        const message = {
+            notification: {
+                title: "다가오는 일정 알림 (D-3)",
+                body: `${profile.name}님과의 미팅이 3일 후에 예정되어 있습니다.`
+            },
+            tokens: tokens,
+        };
+        await messaging.sendEachForMulticast(message);
+        console.log(`[${accessCode}] 다가오는 일정 알림 성공:`, profile.name);
     }
   }
 });
