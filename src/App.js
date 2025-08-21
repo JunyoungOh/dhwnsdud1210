@@ -788,23 +788,19 @@ export default function App() {
     return () => unsubscribe();
   }, []);
   
-  // 푸시 알림 권한 요청 및 토큰 발급 로직
   useEffect(() => {
     const requestNotificationPermission = async () => {
+        if (!accessCode) return;
         try {
             const permission = await Notification.requestPermission();
             if (permission === 'granted') {
-                console.log('Notification permission granted.');
-                // VAPID 키는 Firebase 콘솔 > 프로젝트 설정 > 클라우드 메시징 > 웹 푸시 인증서에서 생성
                 const currentToken = await getToken(messaging, { vapidKey: 'BISKOk17u6pUukTRG0zuthw3lM27ZcY861y8kzNxY3asx3jKnzQPTTkFXxcWluBvRWjWDthTHtwWszW-hVL_vZM' }); 
                 if (currentToken) {
-                    console.log('FCM Token:', currentToken);
-                    // TODO: 이 토큰을 Firestore에 사용자 정보와 함께 저장해야 합니다. (3단계에서 진행)
-                } else {
-                    console.log('No registration token available. Request permission to generate one.');
+                    const tokenRef = doc(db, "fcmTokens", accessCode);
+                    await updateDoc(tokenRef, {
+                        tokens: arrayUnion(currentToken)
+                    }, { merge: true });
                 }
-            } else {
-                console.log('Unable to get permission to notify.');
             }
         } catch (err) {
             console.error('An error occurred while retrieving token. ', err);
@@ -814,7 +810,12 @@ export default function App() {
     if (authStatus === 'authenticated') {
         requestNotificationPermission();
     }
-  }, [authStatus]);
+
+    onMessage(messaging, (payload) => {
+        console.log('Message received. ', payload);
+        alert(`[알림] ${payload.notification.title}: ${payload.notification.body}`);
+    });
+  }, [authStatus, accessCode]);
 
   const profilesCollectionRef = useMemo(() => {
     if (!accessCode) return null;
