@@ -797,6 +797,7 @@ export default function App() {
                 const currentToken = await getToken(messaging, { vapidKey: 'BISKOk17u6pUukTRG0zuthw3lM27ZcY861y8kzNxY3asx3jKnzQPTTkFXxcWluBvRWjWDthTHtwWszW-hVL_vZM' }); 
                 if (currentToken) {
                     console.log('FCM Token:', currentToken);
+                    alert('FCM Token: ' + currentToken);
                     const tokenRef = doc(db, "fcmTokens", accessCode);
                     await setDoc(tokenRef, {
                         tokens: arrayUnion(currentToken)
