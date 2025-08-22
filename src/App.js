@@ -1,4 +1,8 @@
-// App.jsx (또는 App.js)
+// src/app.js
+
+// 이 코드는 두 개의 탭 페이지로 나뉘어 구성됩니다.
+// 1페이지: 오늘 일정, 다가오는 일정, 대시보드
+// 2페이지: 검색, 새 프로필 추가, 전체 목록, 엑셀 업로드
 
 import React, { useMemo, useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -15,9 +19,10 @@ import {
   updateDoc,
   writeBatch,
   arrayUnion,
-  setDoc
+  setDoc,
+  getDoc
 } from 'firebase/firestore';
-import { getMessaging, getToken, onMessage } from 'firebase/messaging';
+import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messaging';
 import {
   PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer
 } from 'recharts';
@@ -25,6 +30,9 @@ import {
   Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2,
   ShieldAlert, X, Save, UploadCloud, BellRing
 } from 'lucide-react';
+
+// -------------------- 배포 도메인 (딥링크 대상) --------------------
+const BASE_URL = 'https://harmonious-dango-511e5b.netlify.app';
 
 // -------------------- Firebase --------------------
 const firebaseConfig = {
@@ -41,7 +49,6 @@ const appId = 'profile-db-app-junyoungoh';
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
-const messaging = getMessaging(app);
 setLogLevel('debug');
 
 // -------------------- Consts --------------------
@@ -791,58 +798,106 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 🔔 Web Push: 권한/토큰 발급 + 토큰 저장 + 포그라운드 메시지 + 알림 딥링크 처리
+  // 🔔 Web Push: 서비스워커 등록 + 권한/토큰 발급 + 중복 저장 방지 + 포그라운드 메시지 + 딥링크 처리
   useEffect(() => {
-    const requestNotificationPermission = async () => {
+    let unsubscribeOnMessage = () => {};
+
+    const initMessaging = async () => {
       if (!accessCode) return;
       try {
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-          // 서비스워커 등록 핸들(가능하면 전달) – iOS PWA/안드로이드/PC에서 모두 안전
-          let swReg = undefined;
-          if ('serviceWorker' in navigator) {
-            try { swReg = await navigator.serviceWorker.ready; } catch {}
-          }
-          const currentToken = await getToken(messaging, {
-            vapidKey: 'BISKOk17u6pUukTRG0zuthw3lM27ZcY861y8kzNxY3asx3jKnzQPTTkFXxcWluBvRWjWDthTHtwWszW-hVL_vZM',
-            serviceWorkerRegistration: swReg
-          });
-          if (currentToken) {
-            const tokenRef = doc(db, "fcmTokens", accessCode);
-            await setDoc(tokenRef, { tokens: arrayUnion(currentToken) }, { merge: true });
+        const supported = await isSupported();
+        if (!supported) {
+          console.warn('이 브라우저는 FCM 웹 푸시를 지원하지 않습니다.');
+          return;
+        }
+
+        // 1) 서비스워커를 명시적으로 등록 (Netlify/PC 안정성 ↑)
+        let swRegistration;
+        if ('serviceWorker' in navigator) {
+          try {
+            swRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
+            // ready 대기
+            swRegistration = await navigator.serviceWorker.ready;
+          } catch (e) {
+            console.warn('서비스워커 등록 실패:', e);
           }
         }
+
+        // 2) 권한 요청
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          console.warn('알림 권한이 거부 또는 보류되었습니다.');
+          return;
+        }
+
+        // 3) 토큰 발급 (서비스워커 핸들 전달)
+        const messaging = getMessaging(app);
+        const currentToken = await getToken(messaging, {
+          vapidKey: 'BISKOk17u6pUukTRG0zuthw3lM27ZcY861y8kzNxY3asx3jKnzQPTTkFXxcWluBvRWjWDthTHtwWszW-hVL_vZM',
+          serviceWorkerRegistration: swRegistration
+        });
+
+        if (currentToken) {
+          // 4) Firestore에 중복 없이 저장
+          const tokenRef = doc(db, 'fcmTokens', accessCode);
+          const snap = await getDoc(tokenRef);
+          const existing = snap.exists() && Array.isArray(snap.data().tokens) ? snap.data().tokens : [];
+          if (!existing.includes(currentToken)) {
+            await setDoc(tokenRef, { tokens: arrayUnion(currentToken) }, { merge: true });
+            console.log('FCM 토큰 저장됨');
+          } else {
+            console.log('이미 저장된 토큰입니다 (중복 저장 스킵)');
+          }
+        } else {
+          console.warn('FCM 토큰을 가져오지 못했습니다.');
+        }
+
+        // 5) 포그라운드 수신 처리 (클릭 없이도 하이라이트 이동)
+        unsubscribeOnMessage = onMessage(messaging, (payload) => {
+          console.log('Foreground message:', payload);
+          const { title, body } = payload.notification || {};
+          if (title || body) {
+            // 간단 알림
+            try { alert(`[알림] ${title ?? ''}${title && body ? ': ' : ''}${body ?? ''}`); } catch {}
+          }
+          const pid = payload?.data?.profileId;
+          if (pid) {
+            setActiveTab(TAB_PAGE.DASHBOARD);
+            setHighlightedProfile(pid);
+            // 주소 표시도 맞춰주고 싶으면:
+            try {
+              const url = new URL(BASE_URL);
+              url.searchParams.set('profileId', pid);
+              window.history.replaceState({}, document.title, url.pathname + url.search);
+              // 잠시 후 주소 정리
+              setTimeout(() => {
+                window.history.replaceState({}, document.title, url.pathname);
+              }, 2000);
+            } catch {}
+          }
+        });
+
+        // 6) 알림 클릭(백그라운드)으로 열린 경우의 딥링크 파싱
+        const params = new URLSearchParams(window.location.search);
+        const pid = params.get('profileId');
+        if (pid) {
+          setActiveTab(TAB_PAGE.DASHBOARD);
+          setHighlightedProfile(pid);
+          // 주소 정리
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
       } catch (err) {
-        console.error('FCM 토큰 발급 오류: ', err);
+        console.error('FCM 초기화 오류:', err);
       }
     };
 
-    if (authStatus === 'authenticated') requestNotificationPermission();
-
-    // 포그라운드 수신
-    const unsub = onMessage(messaging, (payload) => {
-      console.log('Message received: ', payload);
-      const { title, body } = payload.notification || {};
-      if (title || body) alert(`[알림] ${title ?? ''}${title && body ? ': ' : ''}${body ?? ''}`);
-      // data.profileId가 있으면 바로 하이라이트
-      const pid = payload?.data?.profileId;
-      if (pid) {
-        setActiveTab(TAB_PAGE.DASHBOARD);
-        setHighlightedProfile(pid);
-      }
-    });
-
-    // 알림 클릭(백그라운드)은 service worker가 /?profileId= 로 열고, 여기서 파싱
-    const urlParams = new URLSearchParams(window.location.search);
-    const profileId = urlParams.get('profileId');
-    if (profileId) {
-      setActiveTab(TAB_PAGE.DASHBOARD);
-      setHighlightedProfile(profileId);
-      // 주소 정리
-      window.history.replaceState({}, document.title, window.location.pathname);
+    if (authStatus === 'authenticated') {
+      initMessaging();
     }
 
-    return () => unsub();
+    return () => {
+      try { unsubscribeOnMessage(); } catch {}
+    };
   }, [authStatus, accessCode]);
 
   // Firestore ref
