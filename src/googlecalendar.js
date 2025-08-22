@@ -2,7 +2,7 @@
 // 구글 캘린더 OAuth + 이벤트 생성/업데이트 유틸
 
 // ⬇️ Google Cloud 콘솔에서 발급한 OAuth 클라이언트 ID로 교체하세요
-const GOOGLE_OAUTH_CLIENT_ID = "YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com";
+const GOOGLE_OAUTH_CLIENT_ID = "9275853060-01csg1l9qr9bq7ddrkn61up6vpop3tid.apps.googleusercontent.com";
 
 const SCOPES = "https://www.googleapis.com/auth/calendar";
 let gapiInited = false;
