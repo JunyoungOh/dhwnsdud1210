@@ -1,8 +1,5 @@
-// src/app.js
-
-// 이 코드는 두 개의 탭 페이지로 나뉘어 구성됩니다.
-// 1페이지: 오늘 일정, 다가오는 일정, 대시보드
-// 2페이지: 검색, 새 프로필 추가, 전체 목록, 엑셀 업로드
+// src/App.jsx
+// 전체 리액트 앱: 대시보드 + 관리 + FCM + 딥링크 + 엑셀 업로드 보강
 
 import React, { useMemo, useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -19,10 +16,9 @@ import {
   updateDoc,
   writeBatch,
   arrayUnion,
-  setDoc,
-  getDoc
+  setDoc
 } from 'firebase/firestore';
-import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messaging';
+import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import {
   PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer
 } from 'recharts';
@@ -30,9 +26,6 @@ import {
   Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2,
   ShieldAlert, X, Save, UploadCloud, BellRing
 } from 'lucide-react';
-
-// -------------------- 배포 도메인 (딥링크 대상) --------------------
-const BASE_URL = 'https://harmonious-dango-511e5b.netlify.app';
 
 // -------------------- Firebase --------------------
 const firebaseConfig = {
@@ -49,6 +42,7 @@ const appId = 'profile-db-app-junyoungoh';
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
+const messaging = getMessaging(app);
 setLogLevel('debug');
 
 // -------------------- Consts --------------------
@@ -57,19 +51,29 @@ const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아�
 const TAB_PAGE = { DASHBOARD: 'dashboard', MANAGE: 'manage' };
 
 // -------------------- Utils --------------------
-// (25.08.14) 같은 패턴에서 가장 최근 날짜 추출 → ISO
+// (YY.MM.DD) 토큰을 모두 찾고, 가장 최근 날짜를 반환
+// return { token: "YY.MM.DD" | null, iso: ISOString | null }
 const parseDateFromRecord = (recordText) => {
-  if (!recordText) return null;
-  const matches = recordText.matchAll(/\((\d{2})\.(\d{2})\.(\d{2})\)/g);
-  let latestDate = null;
-  for (const match of matches) {
-    const year = 2000 + parseInt(match[1], 10);
-    const month = parseInt(match[2], 10) - 1;
-    const day = parseInt(match[3], 10);
+  if (!recordText) return { token: null, iso: null };
+  const re = /\((\d{2})\.(\d{2})\.(\d{2})\)/g;
+  let match;
+  let latest = null;       // Date
+  let latestToken = null;  // "YY.MM.DD"
+  while ((match = re.exec(recordText)) !== null) {
+    const yy = parseInt(match[1], 10);
+    const mm = parseInt(match[2], 10);
+    const dd = parseInt(match[3], 10);
+    if (Number.isNaN(yy) || Number.isNaN(mm) || Number.isNaN(dd)) continue;
+    const year = 2000 + yy;
+    const month = mm - 1;
+    const day = dd;
     const d = new Date(year, month, day);
-    if (!latestDate || d > latestDate) latestDate = d;
+    if (!latest || d > latest) {
+      latest = d;
+      latestToken = `${String(yy).padStart(2, '0')}.${String(mm).padStart(2, '0')}.${String(dd).padStart(2, '0')}`;
+    }
   }
-  return latestDate ? latestDate.toISOString() : null;
+  return latest ? { token: latestToken, iso: latest.toISOString() } : { token: null, iso: null };
 };
 
 // -------------------- UI: Login --------------------
@@ -140,8 +144,13 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
     setEditedProfile(p => ({ ...p, [name]: name === 'age' ? (value ? Number(value) : '') : value }));
   };
   const handleSave = () => {
-    const eventDate = parseDateFromRecord(editedProfile.meetingRecord);
-    onUpdate(profile.id, { ...editedProfile, eventDate });
+    const parsed = parseDateFromRecord(editedProfile.meetingRecord);
+    const patch = {
+      ...editedProfile,
+      eventDate: parsed.iso,
+      meetingDateToken: parsed.token || null
+    };
+    onUpdate(profile.id, patch);
     setIsEditing(false);
   };
 
@@ -654,7 +663,7 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
       </section>
 
       {/* 엑셀 업로더 (SheetJS CDN을 window.XLSX로 사용) */}
-      <ExcelUploader onBulkAdd={handleBulkAdd} />
+      <ExcelUploader onBulkAdd={onBulkAddWrapper(handleBulkAdd)} />
 
       {/* 전체 목록 + 페이지네이션 */}
       <section>
@@ -668,6 +677,20 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
       </section>
     </>
   );
+};
+
+// 엑셀 업로더에 meetingDateToken/eventDate 자동 세팅 래퍼
+const onBulkAddWrapper = (handleBulkAdd) => async (rows) => {
+  // rows는 ExcelUploader가 만들어준 배열 (name/career/age/expertise/priority/meetingRecord/otherInfo/eventDate)
+  const withTokens = rows.map(p => {
+    const parsed = parseDateFromRecord(p.meetingRecord || '');
+    return {
+      ...p,
+      eventDate: parsed.iso,
+      meetingDateToken: parsed.token || null
+    };
+  });
+  return handleBulkAdd(withTokens);
 };
 
 // -------------------- Pagination --------------------
@@ -724,9 +747,8 @@ const ExcelUploader = ({ onBulkAdd }) => {
           age: row[5] ? Number(row[5]) : null, // F
           expertise: row[7] || '',        // H
           priority: row[9] ? String(row[9]) : '', // J
-          meetingRecord: row[11] || '',   // L
+          meetingRecord: row[11] || '',   // L (예: (25.08.14) 1차 인터뷰)
           otherInfo: row[13] || '',       // N
-          eventDate: parseDateFromRecord(row[11] || ''),
         })).filter(p => p.name && p.career);
 
         const resultMsg = await onBulkAdd(newProfiles);
@@ -773,7 +795,7 @@ export default function App() {
   const [newCareer, setNewCareer] = useState('');
   const [newAge, setNewAge] = useState('');
   const [newOtherInfo, setNewOtherInfo] = useState('');
-  const [newEventDate, setNewEventDate] = useState('');
+  const [newEventDate, setNewEventDate] = useState(''); // (UI에 노출은 안하지만 기존 구조 유지)
   const [newExpertise, setNewExpertise] = useState('');
   const [newPriority, setNewPriority] = useState('');
   const [newMeetingRecord, setNewMeetingRecord] = useState('');
@@ -798,106 +820,74 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 🔔 Web Push: 서비스워커 등록 + 권한/토큰 발급 + 중복 저장 방지 + 포그라운드 메시지 + 딥링크 처리
+  // 🔔 Web Push: 권한/토큰 발급 + 토큰 저장 + 포그라운드 메시지 + 알림 클릭 딥링크 처리
   useEffect(() => {
-    let unsubscribeOnMessage = () => {};
-
-    const initMessaging = async () => {
-      if (!accessCode) return;
+    const saveFcmToken = async (token) => {
+      if (!accessCode || !token) return;
       try {
-        const supported = await isSupported();
-        if (!supported) {
-          console.warn('이 브라우저는 FCM 웹 푸시를 지원하지 않습니다.');
-          return;
-        }
-
-        // 1) 서비스워커를 명시적으로 등록 (Netlify/PC 안정성 ↑)
-        let swRegistration;
-        if ('serviceWorker' in navigator) {
-          try {
-            swRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
-            // ready 대기
-            swRegistration = await navigator.serviceWorker.ready;
-          } catch (e) {
-            console.warn('서비스워커 등록 실패:', e);
-          }
-        }
-
-        // 2) 권한 요청
-        const permission = await Notification.requestPermission();
-        if (permission !== 'granted') {
-          console.warn('알림 권한이 거부 또는 보류되었습니다.');
-          return;
-        }
-
-        // 3) 토큰 발급 (서비스워커 핸들 전달)
-        const messaging = getMessaging(app);
-        const currentToken = await getToken(messaging, {
-          vapidKey: 'BISKOk17u6pUukTRG0zuthw3lM27ZcY861y8kzNxY3asx3jKnzQPTTkFXxcWluBvRWjWDthTHtwWszW-hVL_vZM',
-          serviceWorkerRegistration: swRegistration
-        });
-
-        if (currentToken) {
-          // 4) Firestore에 중복 없이 저장
-          const tokenRef = doc(db, 'fcmTokens', accessCode);
-          const snap = await getDoc(tokenRef);
-          const existing = snap.exists() && Array.isArray(snap.data().tokens) ? snap.data().tokens : [];
-          if (!existing.includes(currentToken)) {
-            await setDoc(tokenRef, { tokens: arrayUnion(currentToken) }, { merge: true });
-            console.log('FCM 토큰 저장됨');
-          } else {
-            console.log('이미 저장된 토큰입니다 (중복 저장 스킵)');
-          }
-        } else {
-          console.warn('FCM 토큰을 가져오지 못했습니다.');
-        }
-
-        // 5) 포그라운드 수신 처리 (클릭 없이도 하이라이트 이동)
-        unsubscribeOnMessage = onMessage(messaging, (payload) => {
-          console.log('Foreground message:', payload);
-          const { title, body } = payload.notification || {};
-          if (title || body) {
-            // 간단 알림
-            try { alert(`[알림] ${title ?? ''}${title && body ? ': ' : ''}${body ?? ''}`); } catch {}
-          }
-          const pid = payload?.data?.profileId;
-          if (pid) {
-            setActiveTab(TAB_PAGE.DASHBOARD);
-            setHighlightedProfile(pid);
-            // 주소 표시도 맞춰주고 싶으면:
-            try {
-              const url = new URL(BASE_URL);
-              url.searchParams.set('profileId', pid);
-              window.history.replaceState({}, document.title, url.pathname + url.search);
-              // 잠시 후 주소 정리
-              setTimeout(() => {
-                window.history.replaceState({}, document.title, url.pathname);
-              }, 2000);
-            } catch {}
-          }
-        });
-
-        // 6) 알림 클릭(백그라운드)으로 열린 경우의 딥링크 파싱
-        const params = new URLSearchParams(window.location.search);
-        const pid = params.get('profileId');
-        if (pid) {
-          setActiveTab(TAB_PAGE.DASHBOARD);
-          setHighlightedProfile(pid);
-          // 주소 정리
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }
-      } catch (err) {
-        console.error('FCM 초기화 오류:', err);
+        // 1) 신규 경로(권장)
+        const tokenRef1 = doc(db, 'artifacts', appId, 'public', 'tokens', accessCode);
+        await setDoc(tokenRef1, { tokens: arrayUnion(token) }, { merge: true });
+        // 2) 레거시 경로(기존 함수 호환)
+        const tokenRef2 = doc(db, 'fcmTokens', accessCode);
+        await setDoc(tokenRef2, { tokens: arrayUnion(token) }, { merge: true });
+      } catch (e) {
+        console.error('FCM 토큰 저장 오류:', e);
       }
     };
 
-    if (authStatus === 'authenticated') {
-      initMessaging();
+    const requestNotificationPermission = async () => {
+      if (!accessCode) return;
+      try {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          // service worker 핸들 확보
+          let swReg = undefined;
+          try {
+            if ('serviceWorker' in navigator) {
+              // 이미 등록되어 있으면 ready, 없다면 등록 시도
+              swReg = await navigator.serviceWorker.ready.catch(async () => {
+                return await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+              });
+            }
+          } catch {}
+          const currentToken = await getToken(messaging, {
+            vapidKey: 'BISKOk17u6pUukTRG0zuthw3lM27ZcY861y8kzNxY3asx3jKnzQPTTkFXxcWluBvRWjWDthTHtwWszW-hVL_vZM',
+            serviceWorkerRegistration: swReg
+          });
+          if (currentToken) await saveFcmToken(currentToken);
+        }
+      } catch (err) {
+        console.error('FCM 토큰 발급 오류: ', err);
+      }
+    };
+
+    if (authStatus === 'authenticated') requestNotificationPermission();
+
+    // 포그라운드 수신
+    const unsub = onMessage(messaging, (payload) => {
+      console.log('Message received: ', payload);
+      const { title, body } = payload.notification || {};
+      if (title || body) alert(`[알림] ${title ?? ''}${title && body ? ': ' : ''}${body ?? ''}`);
+      // data.profileId가 있으면 바로 하이라이트
+      const pid = payload?.data?.profileId;
+      if (pid) {
+        setActiveTab(TAB_PAGE.DASHBOARD);
+        setHighlightedProfile(pid);
+      }
+    });
+
+    // 백그라운드 클릭으로 열릴 때 딥링크 처리
+    const urlParams = new URLSearchParams(window.location.search);
+    const profileId = urlParams.get('profileId');
+    if (profileId) {
+      setActiveTab(TAB_PAGE.DASHBOARD);
+      setHighlightedProfile(profileId);
+      // 주소 정리
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
 
-    return () => {
-      try { unsubscribeOnMessage(); } catch {}
-    };
+    return () => unsub();
   }, [authStatus, accessCode]);
 
   // Firestore ref
@@ -924,13 +914,15 @@ export default function App() {
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!newName.trim() || !newCareer.trim() || !profilesCollectionRef) return;
-    const eventDate = parseDateFromRecord(newMeetingRecord);
+
+    const parsed = parseDateFromRecord(newMeetingRecord);
     const profileData = {
       name: newName,
       career: newCareer,
       age: newAge ? Number(newAge) : null,
       otherInfo: newOtherInfo,
-      eventDate,
+      eventDate: parsed.iso,
+      meetingDateToken: parsed.token || null,
       expertise: newExpertise || null,
       priority: newPriority || null,
       meetingRecord: newMeetingRecord || null
@@ -962,6 +954,12 @@ export default function App() {
   // 업데이트/삭제
   const handleUpdate = async (profileId, updatedData) => {
     const { id, ...dataToUpdate } = updatedData;
+    // meetingRecord 변경 시 안전하게 다시 토큰/날짜 계산
+    if (typeof dataToUpdate.meetingRecord === 'string') {
+      const parsed = parseDateFromRecord(dataToUpdate.meetingRecord);
+      dataToUpdate.eventDate = parsed.iso;
+      dataToUpdate.meetingDateToken = parsed.token || null;
+    }
     await updateDoc(doc(profilesCollectionRef, profileId), dataToUpdate);
   };
   const handleDeleteRequest = (profileId, profileName) => setShowDeleteConfirm({ show: true, profileId, profileName });
