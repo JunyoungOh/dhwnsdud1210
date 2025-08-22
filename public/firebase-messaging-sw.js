@@ -1,7 +1,8 @@
-/* public/firebase-messaging-sw.js */
-// compat 로더 (백그라운드 수신)
-importScripts('https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js');
+// public/firebase-messaging-sw.js
+
+/* Firebase v9 compat for SW */
+importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
+importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js");
 
 const firebaseConfig = {
   apiKey: "AIzaSyBue2ZMWEQ45L61s7ieFZM9DcQViQ-0_OY",
@@ -16,48 +17,41 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
 
-// 백그라운드 수신
+/** 백그라운드 수신 */
 messaging.onBackgroundMessage(function(payload) {
-  console.log('[firebase-messaging-sw.js] background message: ', payload);
+  console.log('[firebase-messaging-sw.js] Received background message ', payload);
 
-  const title = payload.notification?.title || '알림';
+  const title = payload?.notification?.title || "알림";
+  const body = payload?.notification?.body || "";
+  const data = payload?.data || {};
+
   const options = {
-    body: payload.notification?.body || '',
-    icon: '/logo192.png',
-    data: {
-      // 우리가 data에 넣어둔 profileId/링크를 그대로 싣는다.
-      ...payload.data
-    }
+    body,
+    icon: "/logo192.png",
+    data, // profileId, url 등
   };
 
   self.registration.showNotification(title, options);
 });
 
-// 클릭 시 동작 (링크 > profileId 순으로 처리)
+/** 알림 클릭 → 앱으로 딥링크 */
 self.addEventListener('notificationclick', function(event) {
   event.notification.close();
 
-  // 1) FCM이 제공하는 클릭 주소/링크가 있으면 우선 사용
-  const fcmClick =
-    event.notification?.data?.FCM_MSG?.notification?.click_action ||
-    event.notification?.data?.link ||
-    event.notification?.data?.url;
-
-  // 2) 서버에서 내려준 profileId로 딥링크 구성 (보조)
-  const profileId = event.notification?.data?.profileId;
-  const fallbackUrl = profileId ? `/?profileId=${profileId}` : '/';
-
-  const urlToOpen = fcmClick || fallbackUrl;
+  const data = event.notification?.data || {};
+  const profileId = data.profileId;
+  const deeplink = data.url || (profileId ? `/?profileId=${encodeURIComponent(profileId)}` : "/");
 
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
+      // 같은 URL 열린 탭 있으면 focus
       for (const client of windowClients) {
-        if (client.url.includes(self.location.origin) && 'focus' in client) {
-          client.navigate(urlToOpen);
+        if (client.url && client.url.indexOf(deeplink) !== -1 && "focus" in client) {
           return client.focus();
         }
       }
-      return clients.openWindow(urlToOpen);
+      // 아니면 새 창
+      if (clients.openWindow) return clients.openWindow(deeplink);
     })
   );
 });
