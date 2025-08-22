@@ -1,130 +1,168 @@
-// Cloud Functions v2 (Node.js 20)
-const { onSchedule } = require('firebase-functions/v2/scheduler');
-const { onRequest } = require('firebase-functions/v2/https');
-const { initializeApp } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
-const { getMessaging } = require('firebase-admin/messaging');
+// functions/index.js
+
+/**
+ * (YY.MM.DD) 형식의 meetingDateToken 을 기준으로
+ *  - 오늘(0일) & D-3(3일 뒤) 대상에게 푸시 발송
+ *  - 수동 트리거(sendNotificationsNow)와 스케줄 트리거(checkMeetingNotifications) 제공
+ * 알림 클릭 시 Netlify 배포 도메인으로 딥링크
+ */
+
+const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onRequest } = require("firebase-functions/v2/https");
+const { initializeApp } = require("firebase-admin/app");
+const { getFirestore } = require("firebase-admin/firestore");
+const { getMessaging } = require("firebase-admin/messaging");
 
 initializeApp();
 
-const APP_ID = 'profile-db-app-junyoungoh';
+const REGION = "asia-northeast3"; // 서울 리전
+const APP_ID = "profile-db-app-junyoungoh";
 
-// ✅ 사용 중인 배포 URL
-const APP_URL = 'https://harmonious-dango-511e5b.netlify.app';
+// 🔗 알림 클릭 시 열 도메인 (사용자 제공)
+const SITE_BASE_URL = "https://harmonious-dango-511e5b.netlify.app";
 
-// KST 계산용
-const KST_OFFSET = 9 * 60 * 60 * 1000;
+// Firestore 경로 루트
+const TARGET_COLLECTION_ROOT = `artifacts/${APP_ID}/public/data`;
 
-function kstRange(daysFromToday = 0) {
-  const now = new Date(Date.now() + KST_OFFSET);
-  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const start = new Date(base);
-  start.setDate(start.getDate() + daysFromToday);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  return { startISO: start.toISOString(), endISO: end.toISOString() };
-}
+// 토큰 중복 제거
+const dedupe = (arr) => Array.from(new Set((arr || []).filter(Boolean)));
 
-async function getTargets(db, accessCode) {
-  const col = db.collection(`artifacts/${APP_ID}/public/data/${accessCode}`);
-  const today = kstRange(0);
-  const d3 = kstRange(3);
+// KST 기준 (YY.MM.DD) 토큰 만들기
+const kstToken = (offsetDays = 0) => {
+  const now = new Date(Date.now() + 9 * 60 * 60 * 1000); // KST now
+  now.setDate(now.getDate() + offsetDays);
+  const yy = String(now.getFullYear()).slice(-2);
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${yy}.${mm}.${dd}`;
+};
 
+// 개별 accessCode 그룹 처리
+async function processGroup(accessCode, db, messaging) {
+  const todayTok = kstToken(0);
+  const d3Tok = kstToken(3);
+
+  // 예: artifacts/<appId>/public/data/<accessCode>
+  const groupCol = db.collection(`${TARGET_COLLECTION_ROOT}/${accessCode}`);
+
+  // meetingDateToken 으로 정확 조회
   const [todaySnap, d3Snap] = await Promise.all([
-    col.where('eventDate', '>=', today.startISO).where('eventDate', '<', today.endISO).get(),
-    col.where('eventDate', '>=', d3.startISO).where('eventDate', '<', d3.endISO).get(),
+    groupCol.where("meetingDateToken", "==", todayTok).get(),
+    groupCol.where("meetingDateToken", "==", d3Tok).get(),
   ]);
 
   const items = [];
-  todaySnap.forEach((doc) => items.push({ id: doc.id, type: '오늘의 일정', ...doc.data() }));
-  d3Snap.forEach((doc) => items.push({ id: doc.id, type: '다가오는 일정 (D-3)', ...doc.data() }));
+  todaySnap.forEach((doc) => items.push({ id: doc.id, data: doc.data(), type: "오늘의 일정" }));
+  d3Snap.forEach((doc) => items.push({ id: doc.id, data: doc.data(), type: "다가오는 일정 (D-3)" }));
 
-  return items;
-}
+  if (items.length === 0) return { count: 0 };
 
-async function getTokens(db, accessCode) {
-  const snap = await db.collection('fcmTokens').doc(accessCode).get();
-  if (!snap.exists) return [];
-  const arr = snap.data().tokens || [];
-  // ✅ 중복 제거
-  return [...new Set(arr)].filter(Boolean);
-}
+  // 토큰 로드: fcmTokens/<accessCode> { tokens: [...] }
+  const tokenDoc = await db.collection("fcmTokens").doc(accessCode).get();
+  if (!tokenDoc.exists) return { count: 0 };
 
-async function sendOne({ accessCode, item, tokens }) {
-  const link = `${APP_URL}/?profileId=${item.id}`;
-  const message = {
-    tokens,
-    notification: {
-      title: item.type,
-      body: `${item.name || '프로필'}님과의 일정이 있습니다.`
-    },
-    data: {
-      profileId: item.id,
-      accessCode
-    },
-    webpush: {
-      fcmOptions: { link }, // ✅ 웹 브라우저에서 클릭 시 열 주소
+  const tokens = dedupe(tokenDoc.data()?.tokens);
+  if (tokens.length === 0) return { count: 0 };
+
+  let sent = 0;
+  for (const item of items) {
+    const deeplink = `${SITE_BASE_URL}/?profileId=${encodeURIComponent(item.id)}`;
+
+    const message = {
       notification: {
-        icon: '/logo192.png'
-      }
-    },
-    android: {
-      notification: {
-        clickAction: link
-      }
+        title: item.type,
+        body: `${item.data.name ?? "알 수 없음"} 프로필 일정이 있습니다.`,
+      },
+      data: {
+        profileId: item.id,
+        url: deeplink, // SW에서 우선 사용
+      },
+      tokens,
+    };
+
+    try {
+      await messaging.sendEachForMulticast(message);
+      sent++;
+      console.log(`[${accessCode}] sent: ${item.data.name} (${item.type})`);
+    } catch (e) {
+      console.error(`[${accessCode}] send error:`, e);
     }
-  };
+  }
 
-  const res = await getMessaging().sendEachForMulticast(message);
-  console.log(`[${accessCode}] '${item.name}' -> success ${res.successCount}/${tokens.length}`);
-  return res;
+  return { count: sent };
 }
 
-// ⏰ 매일 오전 10시 KST (리전 통일: asia-northeast3)
+/**
+ * 1) 스케줄 트리거 (매일 오전 10시 KST)
+ */
 exports.checkMeetingNotifications = onSchedule(
-  { schedule: '0 10 * * *', timeZone: 'Asia/Seoul', region: 'asia-northeast3' },
+  { schedule: "0 10 * * *", timeZone: "Asia/Seoul", region: REGION },
   async () => {
     const db = getFirestore();
-    const groups = await db.collection(`artifacts/${APP_ID}/public/data`).listDocuments();
+    const messaging = getMessaging();
 
-    for (const groupDoc of groups) {
-      const accessCode = groupDoc.id;
-      const [items, tokens] = await Promise.all([
-        getTargets(db, accessCode),
-        getTokens(db, accessCode),
-      ]);
-      if (!tokens.length || !items.length) continue;
-
-      // ✅ 대표 1건만 발송 (중복 알림 방지)
-      await sendOne({ accessCode, item: items[0], tokens });
-
-      // 여러 건 보내고 싶으면 아래 주석 해제 (예: 최대 2건)
-      // for (const item of items.slice(0, 2)) await sendOne({ accessCode, item, tokens });
+    const groups = await db.collection(TARGET_COLLECTION_ROOT).listDocuments();
+    let total = 0;
+    for (const g of groups) {
+      const accessCode = g.id;
+      const { count } = await processGroup(accessCode, db, messaging);
+      total += count;
     }
+    console.log(`Scheduled push done. groups: ${groups.length}, pushed items: ${total}`);
   }
 );
 
-// 🌐 수동 테스트용 HTTP 트리거 (리전 통일: asia-northeast3)
-// 예) https://<호스트>/send?accessCode=잠재인재풀
-exports.sendNotificationsNow = onRequest({ region: 'asia-northeast3' }, async (req, res) => {
+/**
+ * 2) 수동 트리거 (브라우저/포스트맨): ?accessCode=...
+ * 예) https://<trigger-url>/sendNotificationsNow?accessCode=잠재인재풀
+ */
+exports.sendNotificationsNow = onRequest({ region: REGION }, async (req, res) => {
   try {
-    const raw = req.query.accessCode || '';
-    const accessCode = decodeURIComponent(String(raw)).trim();
-    if (!accessCode) return res.status(400).send('accessCode 쿼리가 필요합니다.');
+    const accessCode = req.query.accessCode;
+    if (!accessCode) return res.status(400).send("Query param 'accessCode' is required");
 
     const db = getFirestore();
-    const [items, tokens] = await Promise.all([
-      getTargets(db, accessCode),
-      getTokens(db, accessCode),
-    ]);
+    const messaging = getMessaging();
 
-    if (!tokens.length) return res.send('토큰이 없습니다. (권한 허용/토큰 저장 필요)');
-    if (!items.length) return res.send('대상 없음 (오늘/D-3 조건 불일치)');
-
-    await sendOne({ accessCode, item: items[0], tokens });
-    return res.send(`OK - 대상 1개 처리`);
+    const { count } = await processGroup(accessCode, db, messaging);
+    res.status(200).send(count > 0 ? `OK - 대상 ${count}개 처리` : "대상 없음");
   } catch (e) {
     console.error(e);
-    return res.status(500).send('서버 오류');
+    res.status(500).send("서버 오류");
+  }
+});
+
+/**
+ * 3) (선택) 백필: 예전 문서에 meetingDateToken 채우기 (관리자용)
+ *    브라우저에서 1회: /backfillMeetingDateToken?accessCode=잠재인재풀
+ */
+exports.backfillMeetingDateToken = onRequest({ region: REGION }, async (req, res) => {
+  try {
+    const accessCode = req.query.accessCode;
+    if (!accessCode) return res.status(400).send("Query param 'accessCode' is required");
+
+    const db = getFirestore();
+    const col = db.collection(`${TARGET_COLLECTION_ROOT}/${accessCode}`);
+    const snap = await col.get();
+
+    const re = /\((\d{2})\.(\d{2})\.(\d{2})\)/g;
+    let updated = 0;
+
+    for (const docSnap of snap.docs) {
+      const p = docSnap.data();
+      if (!p.meetingDateToken && p.meetingRecord) {
+        const m = [...p.meetingRecord.matchAll(re)];
+        if (m.length > 0) {
+          const last = m[m.length - 1];
+          const token = `${last[1]}.${last[2]}.${last[3]}`; // "YY.MM.DD"
+          await docSnap.ref.update({ meetingDateToken: token });
+          updated++;
+        }
+      }
+    }
+    res.send(`backfill done: updated ${updated}`);
+  } catch (e) {
+    console.error(e);
+    res.status(500).send("서버 오류");
   }
 });
