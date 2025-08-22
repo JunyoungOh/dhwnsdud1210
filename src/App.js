@@ -1,22 +1,9 @@
-// src/App.jsx
-// - 디자인: 기존 레이아웃/색상/애니메이션 그대로
-// - 푸시 관련 코드 완전 제거
-// - "캘린더 등록" 버튼 추가 (미팅 당일 10:00 KST, 알림 10:00 팝업)
-
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import {
-  getFirestore,
-  collection,
-  addDoc,
-  onSnapshot,
-  doc,
-  deleteDoc,
-  query,
-  setLogLevel,
-  updateDoc,
-  writeBatch,
+  getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query,
+  setLogLevel, updateDoc, writeBatch
 } from 'firebase/firestore';
 import {
   PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer
@@ -26,11 +13,115 @@ import {
   ShieldAlert, X, Save, UploadCloud, BellRing
 } from 'lucide-react';
 
-import {
-  initGoogle,
-  createCalendarEvent,
-  extractLatestKSTEventISOFromRecord,
-} from './googleCalendar';
+// This would typically be in a separate file like googleCalendar.js
+// For self-containment, it's included here.
+// NOTE: This requires the Google API scripts to be loaded in index.html
+// <script src="https://accounts.google.com/gsi/client" async defer></script>
+// <script src="https://apis.google.com/js/api.js" async defer></script>
+let tokenClient = null;
+let gapiInited = false;
+let gisInited = false;
+
+const GOOGLE_API_KEY = "YOUR_GOOGLE_API_KEY"; // Replace with your Google API Key
+const GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID"; // Replace with your Google OAuth Client ID
+
+const initGoogle = async () => {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://apis.google.com/js/api.js";
+    script.onload = () => {
+      window.gapi.load('client', async () => {
+        try {
+          await window.gapi.client.init({
+            apiKey: GOOGLE_API_KEY,
+            discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"],
+          });
+          gapiInited = true;
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+    };
+    document.body.appendChild(script);
+
+    const script2 = document.createElement("script");
+    script2.src = "https://accounts.google.com/gsi/client";
+    script2.onload = () => {
+        tokenClient = window.google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: 'https://www.googleapis.com/auth/calendar.events',
+            callback: '', // Callback will be handled by the promise
+        });
+        gisInited = true;
+        resolve();
+    };
+    document.body.appendChild(script2);
+  });
+};
+
+const createCalendarEvent = async ({ summary, description, startISO, endISO }) => {
+    return new Promise((resolve, reject) => {
+        if (!gapiInited || !gisInited) {
+            reject(new Error("Google API not initialized."));
+            return;
+        }
+
+        tokenClient.callback = async (resp) => {
+            if (resp.error !== undefined) {
+                return reject(resp);
+            }
+            try {
+                const event = {
+                    'summary': summary,
+                    'description': description,
+                    'start': { 'dateTime': startISO, 'timeZone': 'Asia/Seoul' },
+                    'end': { 'dateTime': endISO, 'timeZone': 'Asia/Seoul' },
+                    'reminders': {
+                        'useDefault': false,
+                        'overrides': [
+                            { 'method': 'popup', 'minutes': 10 },
+                        ],
+                    },
+                };
+
+                const request = window.gapi.client.calendar.events.insert({
+                    'calendarId': 'primary',
+                    'resource': event,
+                });
+
+                request.execute((event) => {
+                    resolve(event);
+                });
+            } catch (err) {
+                reject(err);
+            }
+        };
+        
+        if (window.gapi.client.getToken() === null) {
+            tokenClient.requestAccessToken({ prompt: 'consent' });
+        } else {
+            tokenClient.requestAccessToken({ prompt: '' });
+        }
+    });
+};
+
+const extractLatestKSTEventISOFromRecord = (recordText) => {
+  if (!recordText) return null;
+  const latestDate = parseDateFromRecordForSort(recordText);
+  if (!latestDate) return null;
+
+  const kstDate = new Date(latestDate.toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
+  
+  const start = new Date(kstDate);
+  start.setHours(10, 0, 0, 0);
+
+  const end = new Date(start);
+  end.setHours(start.getHours() + 1);
+
+  return { startISO: start.toISOString(), endISO: end.toISOString() };
+};
+
 
 // -------------------- Firebase --------------------
 const firebaseConfig = {
@@ -54,7 +145,6 @@ const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아�
 const TAB_PAGE = { DASHBOARD: 'dashboard', MANAGE: 'manage' };
 
 // -------------------- Utils --------------------
-// (YY.MM.DD) 패턴 중 "가장 최근 날짜"를 Date 객체로 구해 비교할 때 사용
 const parseDateFromRecordForSort = (recordText) => {
   if (!recordText) return null;
   const rx = /\((\d{2})\.(\d{2})\.(\d{2})\)/g;
@@ -63,7 +153,7 @@ const parseDateFromRecordForSort = (recordText) => {
     const y = 2000 + parseInt(m[1], 10);
     const mm = parseInt(m[2], 10) - 1;
     const dd = parseInt(m[3], 10);
-    const d = new Date(y, mm, dd); // 로컬 자정
+    const d = new Date(y, mm, dd);
     if (!latest || d > latest) latest = d;
   }
   return latest;
@@ -137,7 +227,6 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
     setEditedProfile(p => ({ ...p, [name]: name === 'age' ? (value ? Number(value) : '') : value }));
   };
   const handleSave = () => {
-    // 정렬/대시보드용 eventDate는 로컬 Date로 저장(표시/필터에 사용)
     const latest = parseDateFromRecordForSort(editedProfile.meetingRecord);
     onUpdate(profile.id, { ...editedProfile, eventDate: latest ? latest.toISOString() : null });
     setIsEditing(false);
@@ -318,9 +407,9 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
     return Object.entries(groups).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
   }, [profiles]);
 
-  const keywordData = useMemo(() =>
-    TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length }))
-  , [profiles]);
+  const keywordData = useMemo(() => TARGET_KEYWORDS.map(k => ({
+    name: k, count: profiles.filter(p => p.career?.includes(k)).length
+  })), [profiles]);
 
   const expertiseData = useMemo(() => {
     const cnt = {};
@@ -480,31 +569,8 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
                   </radialGradient>
                 ))}
               </defs>
-              <Pie data={useMemo(() => {
-                const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
-                profiles.forEach(({ age }) => {
-                  if (!age) return;
-                  if (age < 20) groups['10대']++;
-                  else if (age < 30) groups['20대']++;
-                  else if (age < 40) groups['30대']++;
-                  else if (age < 50) groups['40대']++;
-                  else groups['50대 이상']++;
-                });
-                return Object.entries(groups).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
-              }, [profiles])}
-                cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(d) => handlePieClick('age', d.payload)}>
-                {useMemo(() => {
-                  const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
-                  profiles.forEach(({ age }) => {
-                    if (!age) return;
-                    if (age < 20) groups['10대']++;
-                    else if (age < 30) groups['20대']++;
-                    else if (age < 40) groups['30대']++;
-                    else if (age < 50) groups['40대']++;
-                    else groups['50대 이상']++;
-                  });
-                  return Object.entries(groups).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
-                }, [profiles]).map((_, i) => <Cell key={`cell-age-${i}`} fill={`url(#gradient-age-${i})`} cursor="pointer" stroke="#fff" />)}
+              <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(d) => handlePieClick('age', d.payload)}>
+                {ageData.map((_, i) => <Cell key={`cell-age-${i}`} fill={`url(#gradient-age-${i})`} cursor="pointer" stroke="#fff" />)}
               </Pie>
               <Tooltip formatter={(v) => `${v}명`} />
               <Legend />
@@ -521,25 +587,8 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
                 <radialGradient id="gradient-priority-1"><stop offset="0%" stopColor="#FFBB28" stopOpacity={0.7} /><stop offset="100%" stopColor="#FFBB28" stopOpacity={1} /></radialGradient>
                 <radialGradient id="gradient-priority-2"><stop offset="0%" stopColor="#00C49F" stopOpacity={0.7} /><stop offset="100%" stopColor="#00C49F" stopOpacity={1} /></radialGradient>
               </defs>
-              <Pie data={useMemo(() => {
-                const pr = { '3 (상)': 0, '2 (중)': 0, '1 (하)': 0 };
-                profiles.forEach(p => {
-                  if (p.priority === '3') pr['3 (상)']++;
-                  else if (p.priority === '2') pr['2 (중)']++;
-                  else if (p.priority === '1') pr['1 (하)']++;
-                });
-                return Object.entries(pr).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
-              }, [profiles])}
-                cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(d) => handlePieClick('priority', d.payload)}>
-                {useMemo(() => {
-                  const pr = { '3 (상)': 0, '2 (중)': 0, '1 (하)': 0 };
-                  profiles.forEach(p => {
-                    if (p.priority === '3') pr['3 (상)']++;
-                    else if (p.priority === '2') pr['2 (중)']++;
-                    else if (p.priority === '1') pr['1 (하)']++;
-                  });
-                  return Object.entries(pr).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
-                }, [profiles]).map((_, i) => <Cell key={`cell-priority-${i}`} fill={`url(#gradient-priority-${i})`} cursor="pointer" stroke="#fff" />)}
+              <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(d) => handlePieClick('priority', d.payload)}>
+                {priorityData.map((_, i) => <Cell key={`cell-priority-${i}`} fill={`url(#gradient-priority-${i})`} cursor="pointer" stroke="#fff" />)}
               </Pie>
               <Tooltip formatter={(v) => `${v}명`} />
               <Legend />
@@ -562,9 +611,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
       <section className="bg-white p-6 rounded-xl shadow-md">
         <h2 className="text-xl font-bold text-gray-800 mb-4">IT 기업 경력 분포</h2>
         <ResponsiveContainer width="100%" height={350}>
-          <BarChart data={useMemo(() =>
-            TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length }))
-          , [profiles])} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+          <BarChart data={keywordData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
             <defs>
               <linearGradient id="gradient-company" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#FFBB28" stopOpacity={0.8} />
@@ -595,11 +642,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
       <section className="bg-white p-6 rounded-xl shadow-md">
         <h2 className="text-xl font-bold text-gray-800 mb-4">전문영역 분포</h2>
         <ResponsiveContainer width="100%" height={350}>
-          <BarChart data={useMemo(() => {
-            const cnt = {};
-            profiles.forEach(p => { if (p.expertise) cnt[p.expertise] = (cnt[p.expertise] || 0) + 1; });
-            return Object.entries(cnt).map(([name, count]) => ({ name, count }));
-          }, [profiles])} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+          <BarChart data={expertiseData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
             <defs>
               <linearGradient id="gradient-expertise" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#00C49F" stopOpacity={0.8} />
@@ -792,13 +835,13 @@ const ExcelUploader = ({ onBulkAdd }) => {
         }
 
         const newProfiles = json.slice(1).map(row => ({
-          name: row[2] || '',             // C
-          career: row[3] || '',           // D
+          name: row[2] || '',           // C
+          career: row[3] || '',         // D
           age: row[5] ? Number(row[5]) : null, // F
-          expertise: row[7] || '',        // H
+          expertise: row[7] || '',      // H
           priority: row[9] ? String(row[9]) : '', // J
           meetingRecord: row[11] || '',   // L
-          otherInfo: row[13] || '',       // N
+          otherInfo: row[13] || '',      // N
           eventDate: (() => {
             const d = parseDateFromRecordForSort(row[11] || '');
             return d ? d.toISOString() : null;
@@ -854,14 +897,13 @@ export default function App() {
   const [newPriority, setNewPriority] = useState('');
   const [newMeetingRecord, setNewMeetingRecord] = useState('');
 
-  // Google OAuth 초기화 (index.html에 스크립트 2줄 필요)
+  // Google OAuth 초기화
   useEffect(() => {
     const init = async () => {
       try {
-        const cid = window.GOOGLE_OAUTH_CLIENT_ID; // 전역에 넣어두기
-        if (cid) await initGoogle(cid);
+        await initGoogle();
       } catch (e) {
-        console.error(e);
+        console.error("Google API 초기화 실패", e);
       }
     };
     init();
@@ -940,8 +982,11 @@ export default function App() {
 
   // 업데이트/삭제
   const handleUpdate = async (profileId, updatedData) => {
-    const { id, ...dataToUpdate } = updatedData;
-    await updateDoc(doc(profilesCollectionRef, profileId), dataToUpdate);
+    const patch = { ...updatedData };
+    if (typeof updatedData.meetingRecord === 'string') {
+      patch.eventDate = parseDateFromRecordForSort(updatedData.meetingRecord)?.toISOString() || null;
+    }
+    await updateDoc(doc(profilesCollectionRef, profileId), patch);
   };
   const handleDeleteRequest = (profileId, profileName) => setShowDeleteConfirm({ show: true, profileId, profileName });
   const confirmDelete = async () => {
@@ -968,15 +1013,14 @@ export default function App() {
         profile.otherInfo ? `기타: ${profile.otherInfo}` : '',
       ].filter(Boolean).join('\n');
 
-      const result = await createCalendarEvent({
+      await createCalendarEvent({
         summary,
         description,
-        startISO: t.startISO, // 10:00 KST
-        endISO: t.endISO,     // 11:00 KST
+        startISO: t.startISO,
+        endISO: t.endISO,
       });
 
       alert('구글 캘린더에 등록했습니다.');
-      console.log('calendar event result:', result);
     } catch (e) {
       console.error(e);
       alert(e.userMessage || e.message || '캘린더 등록에 실패했습니다.');
@@ -1040,7 +1084,7 @@ export default function App() {
           <DashboardTab
             profiles={profiles}
             onUpdate={handleUpdate}
-            onDelete={(id,name)=>setShowDeleteConfirm({ show:true, profileId:id, profileName:name })}
+            onDelete={handleDeleteRequest}
             highlightedProfile={highlightedProfile}
             setHighlightedProfile={setHighlightedProfile}
             onAddToCalendar={handleAddToCalendar}
@@ -1050,7 +1094,7 @@ export default function App() {
           <ManageTab
             profiles={profiles}
             onUpdate={handleUpdate}
-            onDelete={(id,name)=>setShowDeleteConfirm({ show:true, profileId:id, profileName:name })}
+            onDelete={handleDeleteRequest}
             handleFormSubmit={handleFormSubmit}
             handleBulkAdd={handleBulkAdd}
             formState={formState}
