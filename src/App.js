@@ -1,4 +1,4 @@
-// src/App.js
+// src/App.js 리트라이
 import React, { useMemo, useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
