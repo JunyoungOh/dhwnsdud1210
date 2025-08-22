@@ -1,27 +1,22 @@
-// src/App.jsx
-// 전체 리액트 앱: 대시보드 + 관리 + FCM + 딥링크 + 엑셀 업로드 보강
+// src/app.js
+// 전체 앱 (React)
+// - FCM 토큰 저장/수신, SW postMessage 처리, 딥링크 하이라이트
+// - meetingRecord의 (YY.MM.DD) → meetingDateToken 자동 저장
+// - 기존 대시보드/관리 UI 유지
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import {
-  getFirestore,
-  collection,
-  addDoc,
-  onSnapshot,
-  doc,
-  deleteDoc,
-  query,
-  setLogLevel,
-  updateDoc,
-  writeBatch,
-  arrayUnion,
-  setDoc
+  getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query,
+  setLogLevel, updateDoc, writeBatch, arrayUnion, setDoc
 } from 'firebase/firestore';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
+
 import {
   PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer
 } from 'recharts';
+
 import {
   Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2,
   ShieldAlert, X, Save, UploadCloud, BellRing
@@ -38,7 +33,9 @@ const firebaseConfig = {
   measurementId: "G-XS3VFNW6Y3"
 };
 
+const APP_BASE_URL = "https://harmonious-dango-511e5b.netlify.app";
 const appId = 'profile-db-app-junyoungoh';
+
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
@@ -51,29 +48,35 @@ const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아�
 const TAB_PAGE = { DASHBOARD: 'dashboard', MANAGE: 'manage' };
 
 // -------------------- Utils --------------------
-// (YY.MM.DD) 토큰을 모두 찾고, 가장 최근 날짜를 반환
-// return { token: "YY.MM.DD" | null, iso: ISOString | null }
+// (YY.MM.DD) 패턴에서 가장 최근 날짜 추출 → ISO (기존 대시보드 정렬용)
 const parseDateFromRecord = (recordText) => {
-  if (!recordText) return { token: null, iso: null };
-  const re = /\((\d{2})\.(\d{2})\.(\d{2})\)/g;
-  let match;
-  let latest = null;       // Date
-  let latestToken = null;  // "YY.MM.DD"
-  while ((match = re.exec(recordText)) !== null) {
-    const yy = parseInt(match[1], 10);
-    const mm = parseInt(match[2], 10);
-    const dd = parseInt(match[3], 10);
-    if (Number.isNaN(yy) || Number.isNaN(mm) || Number.isNaN(dd)) continue;
-    const year = 2000 + yy;
-    const month = mm - 1;
-    const day = dd;
+  if (!recordText) return null;
+  const matches = recordText.matchAll(/\((\d{2})\.(\d{2})\.(\d{2})\)/g);
+  let latestDate = null;
+  for (const match of matches) {
+    const year = 2000 + parseInt(match[1], 10);
+    const month = parseInt(match[2], 10) - 1;
+    const day = parseInt(match[3], 10);
     const d = new Date(year, month, day);
-    if (!latest || d > latest) {
-      latest = d;
-      latestToken = `${String(yy).padStart(2, '0')}.${String(mm).padStart(2, '0')}.${String(dd).padStart(2, '0')}`;
-    }
+    if (!latestDate || d > latestDate) latestDate = d;
   }
-  return latest ? { token: latestToken, iso: latest.toISOString() } : { token: null, iso: null };
+  return latestDate ? latestDate.toISOString() : null;
+};
+
+// meetingRecord에서 (YY.MM.DD) 토큰을 뽑아 meetingDateToken으로 저장
+const toMeetingDateToken = (text) => {
+  if (typeof text !== 'string') return null;
+  const iter = text.matchAll(/\((\d{2})\.(\d{2})\.(\d{2})\)/g);
+  let best = null;
+  for (const m of iter) {
+    const y = 2000 + parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10);
+    const d = parseInt(m[3], 10);
+    const token = `(${String(y % 100).padStart(2,'0')}.${String(mo).padStart(2,'0')}.${String(d).padStart(2,'0')})`;
+    const date = new Date(y, mo - 1, d);
+    if (!best || date > best.date) best = { token, date };
+  }
+  return best ? best.token : null;
 };
 
 // -------------------- UI: Login --------------------
@@ -144,13 +147,9 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
     setEditedProfile(p => ({ ...p, [name]: name === 'age' ? (value ? Number(value) : '') : value }));
   };
   const handleSave = () => {
-    const parsed = parseDateFromRecord(editedProfile.meetingRecord);
-    const patch = {
-      ...editedProfile,
-      eventDate: parsed.iso,
-      meetingDateToken: parsed.token || null
-    };
-    onUpdate(profile.id, patch);
+    const eventDate = parseDateFromRecord(editedProfile.meetingRecord);
+    const meetingDateToken = toMeetingDateToken(editedProfile.meetingRecord || '');
+    onUpdate(profile.id, { ...editedProfile, eventDate, meetingDateToken });
     setIsEditing(false);
   };
 
@@ -529,7 +528,6 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
         </ResponsiveContainer>
       </section>
 
-      {/* company filter */}
       {activeFilter.type === 'company' && (
         <FilterResultSection
           title={`"${activeFilter.value}" 경력자 필터 결과`}
@@ -560,7 +558,6 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
         </ResponsiveContainer>
       </section>
 
-      {/* expertise filter */}
       {activeFilter.type === 'expertise' && (
         <FilterResultSection
           title={`"${activeFilter.value}" 전문영역 필터 결과`}
@@ -663,7 +660,7 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
       </section>
 
       {/* 엑셀 업로더 (SheetJS CDN을 window.XLSX로 사용) */}
-      <ExcelUploader onBulkAdd={onBulkAddWrapper(handleBulkAdd)} />
+      <ExcelUploader onBulkAdd={handleBulkAdd} />
 
       {/* 전체 목록 + 페이지네이션 */}
       <section>
@@ -677,20 +674,6 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
       </section>
     </>
   );
-};
-
-// 엑셀 업로더에 meetingDateToken/eventDate 자동 세팅 래퍼
-const onBulkAddWrapper = (handleBulkAdd) => async (rows) => {
-  // rows는 ExcelUploader가 만들어준 배열 (name/career/age/expertise/priority/meetingRecord/otherInfo/eventDate)
-  const withTokens = rows.map(p => {
-    const parsed = parseDateFromRecord(p.meetingRecord || '');
-    return {
-      ...p,
-      eventDate: parsed.iso,
-      meetingDateToken: parsed.token || null
-    };
-  });
-  return handleBulkAdd(withTokens);
 };
 
 // -------------------- Pagination --------------------
@@ -747,8 +730,10 @@ const ExcelUploader = ({ onBulkAdd }) => {
           age: row[5] ? Number(row[5]) : null, // F
           expertise: row[7] || '',        // H
           priority: row[9] ? String(row[9]) : '', // J
-          meetingRecord: row[11] || '',   // L (예: (25.08.14) 1차 인터뷰)
+          meetingRecord: row[11] || '',   // L
           otherInfo: row[13] || '',       // N
+          eventDate: parseDateFromRecord(row[11] || ''),
+          meetingDateToken: toMeetingDateToken(row[11] || '') || null,
         })).filter(p => p.name && p.career);
 
         const resultMsg = await onBulkAdd(newProfiles);
@@ -788,14 +773,17 @@ export default function App() {
   const [authStatus, setAuthStatus] = useState('authenticating');
   const [activeTab, setActiveTab] = useState(TAB_PAGE.DASHBOARD);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
+
+  // 하이라이트용(알림 클릭/딥링크/포그라운드) profileId 대기 저장
   const [highlightedProfile, setHighlightedProfile] = useState(null);
+  const pendingProfileIdRef = useRef(null);
 
   // form states
   const [newName, setNewName] = useState('');
   const [newCareer, setNewCareer] = useState('');
   const [newAge, setNewAge] = useState('');
   const [newOtherInfo, setNewOtherInfo] = useState('');
-  const [newEventDate, setNewEventDate] = useState(''); // (UI에 노출은 안하지만 기존 구조 유지)
+  const [newEventDate, setNewEventDate] = useState('');
   const [newExpertise, setNewExpertise] = useState('');
   const [newPriority, setNewPriority] = useState('');
   const [newMeetingRecord, setNewMeetingRecord] = useState('');
@@ -820,71 +808,57 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 🔔 Web Push: 권한/토큰 발급 + 토큰 저장 + 포그라운드 메시지 + 알림 클릭 딥링크 처리
+  // 🔔 Web Push: 권한/토큰 발급 + 토큰 저장 + 포그라운드 메시지 + SW postMessage + 딥링크
   useEffect(() => {
-    const saveFcmToken = async (token) => {
-      if (!accessCode || !token) return;
-      try {
-        // 1) 신규 경로(권장)
-        const tokenRef1 = doc(db, 'artifacts', appId, 'public', 'tokens', accessCode);
-        await setDoc(tokenRef1, { tokens: arrayUnion(token) }, { merge: true });
-        // 2) 레거시 경로(기존 함수 호환)
-        const tokenRef2 = doc(db, 'fcmTokens', accessCode);
-        await setDoc(tokenRef2, { tokens: arrayUnion(token) }, { merge: true });
-      } catch (e) {
-        console.error('FCM 토큰 저장 오류:', e);
-      }
-    };
+    if (authStatus !== 'authenticated' || !accessCode) return;
 
-    const requestNotificationPermission = async () => {
-      if (!accessCode) return;
+    (async () => {
       try {
+        let swReg = undefined;
+        if ('serviceWorker' in navigator) {
+          try { swReg = await navigator.serviceWorker.ready; } catch {}
+        }
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
-          // service worker 핸들 확보
-          let swReg = undefined;
-          try {
-            if ('serviceWorker' in navigator) {
-              // 이미 등록되어 있으면 ready, 없다면 등록 시도
-              swReg = await navigator.serviceWorker.ready.catch(async () => {
-                return await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-              });
-            }
-          } catch {}
           const currentToken = await getToken(messaging, {
             vapidKey: 'BISKOk17u6pUukTRG0zuthw3lM27ZcY861y8kzNxY3asx3jKnzQPTTkFXxcWluBvRWjWDthTHtwWszW-hVL_vZM',
             serviceWorkerRegistration: swReg
           });
-          if (currentToken) await saveFcmToken(currentToken);
+          if (currentToken) {
+            await setDoc(doc(db, "fcmTokens", accessCode), { tokens: arrayUnion(currentToken) }, { merge: true });
+          }
         }
       } catch (err) {
         console.error('FCM 토큰 발급 오류: ', err);
       }
-    };
-
-    if (authStatus === 'authenticated') requestNotificationPermission();
+    })();
 
     // 포그라운드 수신
     const unsub = onMessage(messaging, (payload) => {
-      console.log('Message received: ', payload);
-      const { title, body } = payload.notification || {};
-      if (title || body) alert(`[알림] ${title ?? ''}${title && body ? ': ' : ''}${body ?? ''}`);
-      // data.profileId가 있으면 바로 하이라이트
       const pid = payload?.data?.profileId;
       if (pid) {
+        pendingProfileIdRef.current = pid;
         setActiveTab(TAB_PAGE.DASHBOARD);
-        setHighlightedProfile(pid);
+      }
+      console.log('Foreground message:', payload);
+    });
+
+    // 서비스워커가 보낸 postMessage 수신
+    navigator.serviceWorker?.addEventListener?.('message', (ev) => {
+      if (ev?.data?.type === 'OPEN_PROFILE' && ev?.data?.profileId) {
+        pendingProfileIdRef.current = ev.data.profileId;
+        setActiveTab(TAB_PAGE.DASHBOARD);
       }
     });
 
-    // 백그라운드 클릭으로 열릴 때 딥링크 처리
+    // 딥링크 처리
     const urlParams = new URLSearchParams(window.location.search);
-    const profileId = urlParams.get('profileId');
-    if (profileId) {
+    const pid = urlParams.get('profileId');
+    if (pid) {
+      pendingProfileIdRef.current = pid;
       setActiveTab(TAB_PAGE.DASHBOARD);
-      setHighlightedProfile(profileId);
       // 주소 정리
-      window.history.replaceState({}, document.title, window.location.pathname);
+      window.history.replaceState({}, document.title, APP_BASE_URL);
     }
 
     return () => unsub();
@@ -907,6 +881,17 @@ export default function App() {
     return () => unsubscribe();
   }, [profilesCollectionRef]);
 
+  // 프로필 로딩 후 대기중 pid 실행
+  useEffect(() => {
+    const pid = pendingProfileIdRef.current;
+    if (!pid) return;
+    const exists = profiles.some(p => p.id === pid);
+    if (exists) {
+      setHighlightedProfile(pid);
+      pendingProfileIdRef.current = null;
+    }
+  }, [profiles]);
+
   // 로그인 코드 저장
   const handleLogin = (code) => { setAccessCode(code); localStorage.setItem('profileDbAccessCode', code); };
 
@@ -914,18 +899,18 @@ export default function App() {
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!newName.trim() || !newCareer.trim() || !profilesCollectionRef) return;
-
-    const parsed = parseDateFromRecord(newMeetingRecord);
+    const eventDate = parseDateFromRecord(newMeetingRecord);
+    const meetingDateToken = toMeetingDateToken(newMeetingRecord || '');
     const profileData = {
       name: newName,
       career: newCareer,
       age: newAge ? Number(newAge) : null,
       otherInfo: newOtherInfo,
-      eventDate: parsed.iso,
-      meetingDateToken: parsed.token || null,
+      eventDate,
       expertise: newExpertise || null,
       priority: newPriority || null,
-      meetingRecord: newMeetingRecord || null
+      meetingRecord: newMeetingRecord || null,
+      meetingDateToken: meetingDateToken || null,
     };
     try {
       await addDoc(profilesCollectionRef, profileData);
@@ -953,19 +938,18 @@ export default function App() {
 
   // 업데이트/삭제
   const handleUpdate = async (profileId, updatedData) => {
-    const { id, ...dataToUpdate } = updatedData;
-    // meetingRecord 변경 시 안전하게 다시 토큰/날짜 계산
-    if (typeof dataToUpdate.meetingRecord === 'string') {
-      const parsed = parseDateFromRecord(dataToUpdate.meetingRecord);
-      dataToUpdate.eventDate = parsed.iso;
-      dataToUpdate.meetingDateToken = parsed.token || null;
+    const patch = { ...updatedData };
+    if (typeof updatedData.meetingRecord === 'string') {
+      patch.meetingDateToken = toMeetingDateToken(updatedData.meetingRecord) || null;
+      patch.eventDate = parseDateFromRecord(updatedData.meetingRecord) || null;
     }
-    await updateDoc(doc(profilesCollectionRef, profileId), dataToUpdate);
+    await updateDoc(doc(profilesCollectionRef, profileId), patch);
   };
-  const handleDeleteRequest = (profileId, profileName) => setShowDeleteConfirm({ show: true, profileId, profileName });
+  const [deleteState, setDeleteState] = useState({ show: false, id: null, name: '' });
+  const handleDeleteRequest = (profileId, profileName) => setDeleteState({ show: true, id: profileId, name: profileName });
   const confirmDelete = async () => {
-    if (showDeleteConfirm.profileId) await deleteDoc(doc(profilesCollectionRef, showDeleteConfirm.profileId));
-    setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
+    if (deleteState.id) await deleteDoc(doc(profilesCollectionRef, deleteState.id));
+    setDeleteState({ show: false, id: null, name: '' });
   };
 
   const formState = { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord };
@@ -987,11 +971,11 @@ export default function App() {
         .animate-cascade { animation: slide-down-fade-in 0.5s ease-out forwards; opacity: 0; }
       `}</style>
 
-      {showDeleteConfirm.show && (
+      {deleteState.show && (
         <ConfirmationModal
-          message={`'${showDeleteConfirm.profileName}' 프로필을 정말로 삭제하시겠습니까?`}
+          message={`'${deleteState.name}' 프로필을 정말로 삭제하시겠습니까?`}
           onConfirm={confirmDelete}
-          onCancel={() => setShowDeleteConfirm({ show: false, profileId: null, profileName: '' })}
+          onCancel={() => setDeleteState({ show: false, id: null, name: '' })}
         />
       )}
 
