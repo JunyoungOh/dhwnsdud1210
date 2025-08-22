@@ -1,7 +1,7 @@
-// public/firebase-messaging-sw.js
-
-importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
-importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js");
+/* public/firebase-messaging-sw.js */
+// compat 로더 (백그라운드 수신)
+importScripts('https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js');
 
 const firebaseConfig = {
   apiKey: "AIzaSyBue2ZMWEQ45L61s7ieFZM9DcQViQ-0_OY",
@@ -16,40 +16,48 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
 
+// 백그라운드 수신
 messaging.onBackgroundMessage(function(payload) {
-  console.log('[firebase-messaging-sw.js] Received background message ', payload);
-  
-  const notificationTitle = payload.notification.title;
-  const notificationOptions = {
-    body: payload.notification.body,
+  console.log('[firebase-messaging-sw.js] background message: ', payload);
+
+  const title = payload.notification?.title || '알림';
+  const options = {
+    body: payload.notification?.body || '',
     icon: '/logo192.png',
-    data: payload.data // 서버에서 보낸 '꼬리표' 데이터를 알림에 포함
+    data: {
+      // 우리가 data에 넣어둔 profileId/링크를 그대로 싣는다.
+      ...payload.data
+    }
   };
 
-  self.registration.showNotification(notificationTitle, notificationOptions);
+  self.registration.showNotification(title, options);
 });
 
-// 사용자가 알림을 클릭했을 때의 동작을 정의합니다.
+// 클릭 시 동작 (링크 > profileId 순으로 처리)
 self.addEventListener('notificationclick', function(event) {
-  event.notification.close(); // 알림창 닫기
+  event.notification.close();
 
-  const profileId = event.notification.data.profileId;
-  // 알림 클릭 시, 프로필 ID를 주소에 달고 앱을 엽니다.
-  const urlToOpen = new URL('/', self.location.origin).href + `?profileId=${profileId}`;
+  // 1) FCM이 제공하는 클릭 주소/링크가 있으면 우선 사용
+  const fcmClick =
+    event.notification?.data?.FCM_MSG?.notification?.click_action ||
+    event.notification?.data?.link ||
+    event.notification?.data?.url;
+
+  // 2) 서버에서 내려준 profileId로 딥링크 구성 (보조)
+  const profileId = event.notification?.data?.profileId;
+  const fallbackUrl = profileId ? `/?profileId=${profileId}` : '/';
+
+  const urlToOpen = fcmClick || fallbackUrl;
 
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(windowClients) {
-      // 이미 앱이 열려있는 경우, 해당 탭으로 이동하고 새로고침합니다.
-      for (var i = 0; i < windowClients.length; i++) {
-        var client = windowClients[i];
-        if (client.url === urlToOpen && 'focus' in client) {
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          client.navigate(urlToOpen);
           return client.focus();
         }
       }
-      // 앱이 닫혀있는 경우, 새 탭으로 엽니다.
-      if (clients.openWindow) {
-        return clients.openWindow(urlToOpen);
-      }
+      return clients.openWindow(urlToOpen);
     })
   );
 });
