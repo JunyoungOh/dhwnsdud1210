@@ -1,26 +1,24 @@
-// src/app.js
-// 전체 앱 (React)
-// - FCM 토큰 저장/수신, SW postMessage 처리, 딥링크 하이라이트
-// - meetingRecord의 (YY.MM.DD) → meetingDateToken 자동 저장
-// - 기존 대시보드/관리 UI 유지
-
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+// src/App.js
+import React, { useMemo, useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query,
-  setLogLevel, updateDoc, writeBatch, arrayUnion, setDoc
+  setLogLevel, updateDoc, writeBatch
 } from 'firebase/firestore';
-import { getMessaging, getToken, onMessage } from 'firebase/messaging';
-
 import {
   PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer
 } from 'recharts';
-
 import {
-  Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2,
+  Users, LogOut, Search, Calendar as CalendarIcon, Zap, UserPlus, KeyRound, Loader2,
   ShieldAlert, X, Save, UploadCloud, BellRing
 } from 'lucide-react';
+
+// ✅ Google Calendar 유틸
+import {
+  ensureGoogleApisLoaded, initGapi, initGis, requestCalendarAccess,
+  createAllDayEvent, updateAllDayEvent
+} from './googleCalendar';
 
 // -------------------- Firebase --------------------
 const firebaseConfig = {
@@ -28,27 +26,25 @@ const firebaseConfig = {
   authDomain: "dhwnsdud1210-bf233.firebaseapp.com",
   projectId: "dhwnsdud1210-bf233",
   storageBucket: "dhwnsdud1210-bf233.appspot.com",
-  messagingSenderId: "9275853060",
   appId: "1:9275853060:web:e5ccfa323da3493312a851",
+  messagingSenderId: "9275853060",
   measurementId: "G-XS3VFNW6Y3"
 };
 
-const APP_BASE_URL = "https://harmonious-dango-511e5b.netlify.app";
 const appId = 'profile-db-app-junyoungoh';
-
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
-const messaging = getMessaging(app);
 setLogLevel('debug');
 
 // -------------------- Consts --------------------
 const COLORS = ['#FFBB28', '#FF8042', '#00C49F', '#8884D8', '#FF4444', '#82ca9d'];
 const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아한형제들', '당근', '토스'];
 const TAB_PAGE = { DASHBOARD: 'dashboard', MANAGE: 'manage' };
+const APP_BASE_URL = 'https://harmonious-dango-511e5b.netlify.app/';
 
 // -------------------- Utils --------------------
-// (YY.MM.DD) 패턴에서 가장 최근 날짜 추출 → ISO (기존 대시보드 정렬용)
+// "(25.08.22)" 같은 패턴에서 가장 최근 날짜를 ISO로 파싱 (UTC 기준 종일 이벤트 의도)
 const parseDateFromRecord = (recordText) => {
   if (!recordText) return null;
   const matches = recordText.matchAll(/\((\d{2})\.(\d{2})\.(\d{2})\)/g);
@@ -57,58 +53,33 @@ const parseDateFromRecord = (recordText) => {
     const year = 2000 + parseInt(match[1], 10);
     const month = parseInt(match[2], 10) - 1;
     const day = parseInt(match[3], 10);
-    const d = new Date(year, month, day);
+    const d = new Date(Date.UTC(year, month, day));
     if (!latestDate || d > latestDate) latestDate = d;
   }
   return latestDate ? latestDate.toISOString() : null;
 };
 
-// meetingRecord에서 (YY.MM.DD) 토큰을 뽑아 meetingDateToken으로 저장
-const toMeetingDateToken = (text) => {
-  if (typeof text !== 'string') return null;
-  const iter = text.matchAll(/\((\d{2})\.(\d{2})\.(\d{2})\)/g);
-  let best = null;
-  for (const m of iter) {
-    const y = 2000 + parseInt(m[1], 10);
-    const mo = parseInt(m[2], 10);
-    const d = parseInt(m[3], 10);
-    const token = `(${String(y % 100).padStart(2,'0')}.${String(mo).padStart(2,'0')}.${String(d).padStart(2,'0')})`;
-    const date = new Date(y, mo - 1, d);
-    if (!best || date > best.date) best = { token, date };
-  }
-  return best ? best.token : null;
-};
-
 // -------------------- UI: Login --------------------
 const LoginScreen = ({ onLogin, authStatus }) => {
   const [codeInput, setCodeInput] = useState('');
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (codeInput.trim()) onLogin(codeInput.trim());
-  };
+  const handleSubmit = (e) => { e.preventDefault(); if (codeInput.trim()) onLogin(codeInput.trim()); };
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
       <div className="w-full max-w-md bg-white p-8 rounded-xl shadow-lg">
         <div className="text-center">
           <Users className="mx-auto text-yellow-400 w-12 h-12" />
           <h2 className="mt-4 text-2xl font-bold text-gray-800">프로필 대시보드 접속</h2>
-          <p className="mt-2 text-sm text-gray-500">데이터를 불러올 접속 코드를 입력하세요.</p>
+          <p className="mt-2 text-sm text-gray-500">접속 코드를 입력하세요.</p>
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="relative">
             <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-            <input
-              type="text" placeholder="Access Code"
-              className="w-full pl-10 pr-3 py-3 border rounded-lg"
-              value={codeInput} onChange={(e) => setCodeInput(e.target.value)}
-            />
+            <input type="text" placeholder="Access Code" className="w-full pl-10 pr-3 py-3 border rounded-lg"
+              value={codeInput} onChange={(e) => setCodeInput(e.target.value)} />
           </div>
           <div>
-            <button
-              type="submit"
-              disabled={authStatus !== 'authenticated'}
-              className="w-full flex justify-center py-3 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200"
-            >
+            <button type="submit" disabled={authStatus !== 'authenticated'}
+              className="w-full flex justify-center py-3 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
               {authStatus === 'authenticating' && <Loader2 className="animate-spin mr-2" />}
               {authStatus === 'authenticated' ? '데이터 불러오기' : '인증 중...'}
             </button>
@@ -137,20 +108,27 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
 );
 
 // -------------------- UI: ProfileCard --------------------
-const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm }) => {
+const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm, onSyncCalendar }) => {
   const [isEditing, setIsEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
   const prColors = { '3': 'bg-red-100 text-red-800', '2': 'bg-yellow-100 text-yellow-800', '1': 'bg-green-100 text-green-800' };
+
+  useEffect(() => { setEditedProfile(profile); }, [profile]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setEditedProfile(p => ({ ...p, [name]: name === 'age' ? (value ? Number(value) : '') : value }));
   };
-  const handleSave = () => {
-    const eventDate = parseDateFromRecord(editedProfile.meetingRecord);
-    const meetingDateToken = toMeetingDateToken(editedProfile.meetingRecord || '');
-    onUpdate(profile.id, { ...editedProfile, eventDate, meetingDateToken });
-    setIsEditing(false);
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const eventDate = parseDateFromRecord(editedProfile.meetingRecord);
+      await onUpdate(profile.id, { ...editedProfile, eventDate });
+      setIsEditing(false);
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (isEditing) {
@@ -166,8 +144,10 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
         <textarea name="otherInfo" value={editedProfile.otherInfo || ''} onChange={handleInputChange} placeholder="기타 정보" className="w-full p-2 border rounded text-sm h-20" />
         <textarea name="meetingRecord" value={editedProfile.meetingRecord || ''} onChange={handleInputChange} placeholder="미팅기록 (예: (25.08.14) 1차 인터뷰)" className="w-full p-2 border rounded text-sm h-20" />
         <div className="flex justify-end space-x-2">
-          <button onClick={() => setIsEditing(false)} className="p-2 text-gray-500 hover:text-gray-800"><X size={20} /></button>
-          <button onClick={handleSave} className="p-2 text-green-600 hover:text-green-800"><Save size={20} /></button>
+          <button onClick={() => setIsEditing(false)} className="p-2 text-gray-500 hover:text-gray-800" disabled={saving}><X size={20} /></button>
+          <button onClick={handleSave} className="p-2 text-green-600 hover:text-green-800" disabled={saving}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save size={20} />}
+          </button>
         </div>
       </div>
     );
@@ -191,12 +171,22 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
           <p className="text-xs text-gray-600 whitespace-pre-wrap">{profile.meetingRecord}</p>
         </div>
       )}
-      {isAlarmCard && (
-        <div className="mt-3 pt-3 border-t flex justify-end space-x-2">
-          <button onClick={() => onConfirmAlarm(profile.id)} className="text-xs bg-gray-200 text-gray-700 font-semibold px-3 py-1 rounded-full hover:bg-gray-300">확인</button>
-          <button onClick={() => onSnooze(profile.id)} className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-3 py-1 rounded-full hover:bg-indigo-200">3개월 후 다시 알림</button>
-        </div>
-      )}
+
+      {/* 캘린더 등록/업데이트 버튼 */}
+      <div className="mt-3 pt-3 border-t flex justify-end space-x-2">
+        <button
+          onClick={() => onSyncCalendar(profile)}
+          className="text-xs bg-blue-100 text-blue-700 font-semibold px-3 py-1 rounded-full hover:bg-blue-200">
+          {profile.calendarEventId ? '캘린더 업데이트' : '캘린더 등록'}
+        </button>
+        {isAlarmCard && (
+          <>
+            <button onClick={() => onConfirmAlarm(profile.id)} className="text-xs bg-gray-200 text-gray-700 font-semibold px-3 py-1 rounded-full hover:bg-gray-300">확인</button>
+            <button onClick={() => onSnooze(profile.id)} className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-3 py-1 rounded-full hover:bg-indigo-200">3개월 후 다시 알림</button>
+          </>
+        )}
+      </div>
+
       <div className="absolute top-2 right-2 space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
         <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:underline text-xs">수정</button>
         <button onClick={() => onDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button>
@@ -206,7 +196,7 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
 };
 
 // -------------------- UI: FilterResult --------------------
-const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear }) => (
+const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, onSyncCalendar }) => (
   <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in">
     <div className="flex justify-between items-center mb-4">
       <h2 className="text-xl font-bold text-gray-800">{title}</h2>
@@ -216,7 +206,7 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear }) =
       {profiles.length > 0 ? (
         profiles.map((profile, i) => (
           <div key={profile.id} className="animate-cascade" style={{ animationDelay: `${i * 50}ms` }}>
-            <ProfileCard profile={profile} onUpdate={onUpdate} onDelete={onDelete} />
+            <ProfileCard profile={profile} onUpdate={onUpdate} onDelete={onDelete} onSyncCalendar={onSyncCalendar} />
           </div>
         ))
       ) : (
@@ -227,12 +217,12 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear }) =
 );
 
 // -------------------- Tab: Dashboard --------------------
-const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHighlightedProfile }) => {
+const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHighlightedProfile, onSyncCalendar, onBulkSync }) => {
   const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
   const [searchTerm, setSearchTerm] = useState('');
   const [showMeetingProfiles, setShowMeetingProfiles] = useState(false);
 
-  // 알림 클릭시 넘어온 profileId 하이라이트 & 스크롤
+  // 알림/딥링크로 넘어온 profileId 하이라이트 (캘린더만 남겨두더라도 UX 유지)
   useEffect(() => {
     if (highlightedProfile) {
       const el = document.getElementById(`profile-card-${highlightedProfile}`);
@@ -262,9 +252,9 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
 
   const { todayProfiles, upcomingProfiles, meetingProfiles, longTermNoContactProfiles } = useMemo(() => {
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     const threeDaysLater = new Date(todayStart);
-    threeDaysLater.setDate(threeDaysLater.getDate() + 4);
+    threeDaysLater.setUTCDate(threeDaysLater.getUTCDate() + 4);
     const threeMonthsAgo = new Date(now);
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
@@ -273,7 +263,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
       if (p.eventDate) {
         meetings.push(p);
         const eventDate = new Date(p.eventDate);
-        if (eventDate >= todayStart && eventDate < new Date(new Date(todayStart).setDate(todayStart.getDate() + 1))) {
+        if (eventDate >= todayStart && eventDate < new Date(new Date(todayStart).setUTCDate(todayStart.getUTCDate() + 1))) {
           today.push(p);
         } else if (eventDate > now && eventDate < threeDaysLater) {
           upcoming.push(p);
@@ -395,12 +385,27 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
             className="w-full p-4 pl-12 border rounded-xl shadow-sm"
           />
         </div>
+
+        {/* 캘린더 일괄 등록 버튼 */}
+        <div className="flex flex-wrap gap-2 mb-6">
+          <button
+            onClick={() => onBulkSync('today')}
+            className="px-3 py-2 text-sm rounded bg-green-600 text-white hover:bg-green-700 flex items-center">
+            <CalendarIcon size={16} className="mr-1" /> 오늘 일정 전체 캘린더 등록/업데이트
+          </button>
+          <button
+            onClick={() => onBulkSync('upcoming')}
+            className="px-3 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 flex items-center">
+            <Zap size={16} className="mr-1" /> 다가오는 일정(D-3) 전체 캘린더 등록/업데이트
+          </button>
+        </div>
+
         {searchTerm.trim() && (
           <div className="mb-8">
             <h2 className="text-xl font-bold mb-4">검색 결과</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {searchedProfiles.length > 0
-                ? searchedProfiles.map(p => <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} />)
+                ? searchedProfiles.map(p => <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} onSyncCalendar={onSyncCalendar} />)
                 : <p className="text-gray-500">검색 결과가 없습니다.</p>}
             </div>
           </div>
@@ -409,29 +414,32 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
 
       {longTermNoContactProfiles.length > 0 && (
         <section>
-          <h2 className="text-xl font-bold mb-4 flex items-center"><BellRing className="mr-2 text-orange-500" />장기 미접촉 알림 (3개월 이상)</h2>
+          <h2 className="text-xl font-bold mb-4 flex items-center"><BellRing className="mr-2 text-orange-500" />장기 미접촉 (3개월+)</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {longTermNoContactProfiles.map(p =>
               <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete}
-                isAlarmCard onSnooze={handleSnooze} onConfirmAlarm={handleConfirmAlarm} />)}
+                isAlarmCard onSnooze={(id)=>onUpdate(id,{snoozeUntil:new Date(Date.now()+1000).toISOString()})}
+                onConfirmAlarm={(id)=>onUpdate(id,{lastReviewedDate:new Date().toISOString()})}
+                onSyncCalendar={onSyncCalendar} />)}
           </div>
         </section>
       )}
 
+      {/* 오늘/다가오는 일정 섹션 */}
       {todayProfiles.length > 0 && (
         <section>
-          <h2 className="text-xl font-bold mb-4 flex items-center"><Calendar className="mr-2 text-red-500" />오늘의 일정</h2>
+          <h2 className="text-xl font-bold mb-4 flex items-center"><CalendarIcon className="mr-2 text-red-500" />오늘의 일정</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {todayProfiles.map(p => <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} />)}
+            {todayProfiles.map(p => <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} onSyncCalendar={onSyncCalendar} />)}
           </div>
         </section>
       )}
 
       {upcomingProfiles.length > 0 && (
         <section>
-          <h2 className="text-xl font-bold mb-4 flex items-center"><Zap className="mr-2 text-blue-500" />다가오는 일정</h2>
+          <h2 className="text-xl font-bold mb-4 flex items-center"><Zap className="mr-2 text-blue-500" />다가오는 일정 (D-3)</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {upcomingProfiles.map(p => <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} />)}
+            {upcomingProfiles.map(p => <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} onSyncCalendar={onSyncCalendar} />)}
           </div>
         </section>
       )}
@@ -453,6 +461,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
           profiles={meetingProfiles}
           onUpdate={onUpdate}
           onDelete={onDelete}
+          onSyncCalendar={onSyncCalendar}
           onClear={() => setShowMeetingProfiles(false)}
         />
       )}
@@ -504,6 +513,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
           profiles={filteredProfiles}
           onUpdate={onUpdate}
           onDelete={onDelete}
+          onSyncCalendar={onSyncCalendar}
           onClear={() => setActiveFilter({ type: null, value: null })}
         />
       )}
@@ -534,6 +544,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
           profiles={filteredProfiles}
           onUpdate={onUpdate}
           onDelete={onDelete}
+          onSyncCalendar={onSyncCalendar}
           onClear={() => setActiveFilter({ type: null, value: null })}
         />
       )}
@@ -541,7 +552,11 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
       <section className="bg-white p-6 rounded-xl shadow-md">
         <h2 className="text-xl font-bold text-gray-800 mb-4">전문영역 분포</h2>
         <ResponsiveContainer width="100%" height={350}>
-          <BarChart data={expertiseData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+          <BarChart data={useMemo(() => {
+            const cnt = {};
+            profiles.forEach(p => { if (p.expertise) cnt[p.expertise] = (cnt[p.expertise] || 0) + 1; });
+            return Object.entries(cnt).map(([name, count]) => ({ name, count }));
+          }, [profiles])} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
             <defs>
               <linearGradient id="gradient-expertise" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#00C49F" stopOpacity={0.8} />
@@ -564,6 +579,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
           profiles={filteredProfiles}
           onUpdate={onUpdate}
           onDelete={onDelete}
+          onSyncCalendar={onSyncCalendar}
           onClear={() => setActiveFilter({ type: null, value: null })}
         />
       )}
@@ -572,9 +588,9 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, highlightedProfile, setHig
 };
 
 // -------------------- Tab: Manage --------------------
-const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState }) => {
-  const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord } = formState;
-  const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord } = setFormState;
+const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState, onSyncCalendar }) => {
+  const { newName, newCareer, newAge, newOtherInfo, newExpertise, newPriority, newMeetingRecord } = formState;
+  const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewExpertise, setNewPriority, setNewMeetingRecord } = setFormState;
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const PROFILES_PER_PAGE = 9;
@@ -633,7 +649,7 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
             <h2 className="text-xl font-bold mb-4">검색 결과</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {searchedProfiles.length > 0
-                ? searchedProfiles.map(p => <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} />)
+                ? searchedProfiles.map(p => <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} onSyncCalendar={onSyncCalendar} />)
                 : <p className="text-gray-500">검색 결과가 없습니다.</p>}
             </div>
           </div>
@@ -659,14 +675,14 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
         </form>
       </section>
 
-      {/* 엑셀 업로더 (SheetJS CDN을 window.XLSX로 사용) */}
+      {/* 엑셀 업로더 (CDN SheetJS 사용) */}
       <ExcelUploader onBulkAdd={handleBulkAdd} />
 
       {/* 전체 목록 + 페이지네이션 */}
       <section>
         <h2 className="text-xl font-bold text-gray-800 mb-4">전체 프로필 목록</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {currentProfiles.map(p => <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} />)}
+          {currentProfiles.map(p => <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} onSyncCalendar={onSyncCalendar} />)}
         </div>
         {totalPages > 1 && (
           <Pagination totalPages={totalPages} currentPage={currentPage} setCurrentPage={setCurrentPage} />
@@ -733,7 +749,6 @@ const ExcelUploader = ({ onBulkAdd }) => {
           meetingRecord: row[11] || '',   // L
           otherInfo: row[13] || '',       // N
           eventDate: parseDateFromRecord(row[11] || ''),
-          meetingDateToken: toMeetingDateToken(row[11] || '') || null,
         })).filter(p => p.name && p.career);
 
         const resultMsg = await onBulkAdd(newProfiles);
@@ -773,17 +788,15 @@ export default function App() {
   const [authStatus, setAuthStatus] = useState('authenticating');
   const [activeTab, setActiveTab] = useState(TAB_PAGE.DASHBOARD);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
-
-  // 하이라이트용(알림 클릭/딥링크/포그라운드) profileId 대기 저장
   const [highlightedProfile, setHighlightedProfile] = useState(null);
-  const pendingProfileIdRef = useRef(null);
+  const [calendarReady, setCalendarReady] = useState(false);
+  const [showMeetingProfiles, setShowMeetingProfiles] = useState(false);
 
   // form states
   const [newName, setNewName] = useState('');
   const [newCareer, setNewCareer] = useState('');
   const [newAge, setNewAge] = useState('');
   const [newOtherInfo, setNewOtherInfo] = useState('');
-  const [newEventDate, setNewEventDate] = useState('');
   const [newExpertise, setNewExpertise] = useState('');
   const [newPriority, setNewPriority] = useState('');
   const [newMeetingRecord, setNewMeetingRecord] = useState('');
@@ -808,61 +821,32 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 🔔 Web Push: 권한/토큰 발급 + 토큰 저장 + 포그라운드 메시지 + SW postMessage + 딥링크
+  // Google Calendar 준비 (gapi/GIS 초기화 + 최초 권한 팝업은 동작 시 요청)
   useEffect(() => {
-    if (authStatus !== 'authenticated' || !accessCode) return;
-
+    let mounted = true;
     (async () => {
       try {
-        let swReg = undefined;
-        if ('serviceWorker' in navigator) {
-          try { swReg = await navigator.serviceWorker.ready; } catch {}
-        }
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-          const currentToken = await getToken(messaging, {
-            vapidKey: 'BISKOk17u6pUukTRG0zuthw3lM27ZcY861y8kzNxY3asx3jKnzQPTTkFXxcWluBvRWjWDthTHtwWszW-hVL_vZM',
-            serviceWorkerRegistration: swReg
-          });
-          if (currentToken) {
-            await setDoc(doc(db, "fcmTokens", accessCode), { tokens: arrayUnion(currentToken) }, { merge: true });
-          }
-        }
-      } catch (err) {
-        console.error('FCM 토큰 발급 오류: ', err);
+        await ensureGoogleApisLoaded();
+        await initGapi();
+        initGis();
+        if (mounted) setCalendarReady(true);
+      } catch (e) {
+        console.error('Google API 초기화 실패:', e);
       }
     })();
+    return () => { mounted = false; };
+  }, []);
 
-    // 포그라운드 수신
-    const unsub = onMessage(messaging, (payload) => {
-      const pid = payload?.data?.profileId;
-      if (pid) {
-        pendingProfileIdRef.current = pid;
-        setActiveTab(TAB_PAGE.DASHBOARD);
-      }
-      console.log('Foreground message:', payload);
-    });
-
-    // 서비스워커가 보낸 postMessage 수신
-    navigator.serviceWorker?.addEventListener?.('message', (ev) => {
-      if (ev?.data?.type === 'OPEN_PROFILE' && ev?.data?.profileId) {
-        pendingProfileIdRef.current = ev.data.profileId;
-        setActiveTab(TAB_PAGE.DASHBOARD);
-      }
-    });
-
-    // 딥링크 처리
+  // 딥링크 (혹시 있을 경우 하이라이트)
+  useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
-    const pid = urlParams.get('profileId');
-    if (pid) {
-      pendingProfileIdRef.current = pid;
+    const profileId = urlParams.get('profileId');
+    if (profileId) {
       setActiveTab(TAB_PAGE.DASHBOARD);
-      // 주소 정리
-      window.history.replaceState({}, document.title, APP_BASE_URL);
+      setHighlightedProfile(profileId);
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
-
-    return () => unsub();
-  }, [authStatus, accessCode]);
+  }, []);
 
   // Firestore ref
   const profilesCollectionRef = useMemo(() => {
@@ -881,17 +865,6 @@ export default function App() {
     return () => unsubscribe();
   }, [profilesCollectionRef]);
 
-  // 프로필 로딩 후 대기중 pid 실행
-  useEffect(() => {
-    const pid = pendingProfileIdRef.current;
-    if (!pid) return;
-    const exists = profiles.some(p => p.id === pid);
-    if (exists) {
-      setHighlightedProfile(pid);
-      pendingProfileIdRef.current = null;
-    }
-  }, [profiles]);
-
   // 로그인 코드 저장
   const handleLogin = (code) => { setAccessCode(code); localStorage.setItem('profileDbAccessCode', code); };
 
@@ -900,7 +873,6 @@ export default function App() {
     e.preventDefault();
     if (!newName.trim() || !newCareer.trim() || !profilesCollectionRef) return;
     const eventDate = parseDateFromRecord(newMeetingRecord);
-    const meetingDateToken = toMeetingDateToken(newMeetingRecord || '');
     const profileData = {
       name: newName,
       career: newCareer,
@@ -909,12 +881,11 @@ export default function App() {
       eventDate,
       expertise: newExpertise || null,
       priority: newPriority || null,
-      meetingRecord: newMeetingRecord || null,
-      meetingDateToken: meetingDateToken || null,
+      meetingRecord: newMeetingRecord || null
     };
     try {
       await addDoc(profilesCollectionRef, profileData);
-      setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewEventDate('');
+      setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo('');
       setNewExpertise(''); setNewPriority(''); setNewMeetingRecord('');
     } catch (err) { console.error("프로필 저장 오류: ", err); }
   };
@@ -938,44 +909,103 @@ export default function App() {
 
   // 업데이트/삭제
   const handleUpdate = async (profileId, updatedData) => {
-    const patch = { ...updatedData };
-    if (typeof updatedData.meetingRecord === 'string') {
-      patch.meetingDateToken = toMeetingDateToken(updatedData.meetingRecord) || null;
-      patch.eventDate = parseDateFromRecord(updatedData.meetingRecord) || null;
-    }
-    await updateDoc(doc(profilesCollectionRef, profileId), patch);
+    const { id, ...dataToUpdate } = updatedData;
+    await updateDoc(doc(profilesCollectionRef, profileId), dataToUpdate);
   };
-  const [deleteState, setDeleteState] = useState({ show: false, id: null, name: '' });
-  const handleDeleteRequest = (profileId, profileName) => setDeleteState({ show: true, id: profileId, name: profileName });
+  const handleDeleteRequest = (profileId, profileName) => setShowDeleteConfirm({ show: true, profileId, profileName });
   const confirmDelete = async () => {
-    if (deleteState.id) await deleteDoc(doc(profilesCollectionRef, deleteState.id));
-    setDeleteState({ show: false, id: null, name: '' });
+    if (showDeleteConfirm.profileId) await deleteDoc(doc(profilesCollectionRef, showDeleteConfirm.profileId));
+    setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
   };
 
-  const formState = { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord };
-  const setFormState = { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord };
+  // ✅ 단일 프로필 캘린더 동기화
+  const onSyncCalendar = async (profile) => {
+    if (!calendarReady) { alert('Google API 초기화 중입니다. 잠시 후 다시 시도해주세요.'); return; }
+    if (!profile.eventDate) { alert('이 프로필에는 이벤트 날짜가 없습니다. (미팅기록에 (YY.MM.DD) 형식 입력)'); return; }
+
+    try {
+      await requestCalendarAccess(); // 최초 1회 팝업
+      const summary = `미팅: ${profile.name}`;
+      const description = [
+        profile.expertise ? `전문영역: ${profile.expertise}` : '',
+        profile.career ? `경력: ${profile.career}` : '',
+        profile.otherInfo ? `기타: ${profile.otherInfo}` : '',
+      ].filter(Boolean).join('\n');
+      const linkUrl = `${APP_BASE_URL}?profileId=${profile.id}`;
+
+      let result;
+      if (profile.calendarEventId) {
+        result = await updateAllDayEvent(profile.calendarEventId, { summary, description, dateISO: profile.eventDate, linkUrl });
+      } else {
+        result = await createAllDayEvent({ summary, description, dateISO: profile.eventDate, linkUrl });
+        // 이벤트 ID 저장
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', accessCode, profile.id), {
+          calendarEventId: result.id
+        });
+      }
+      alert('구글 캘린더 동기화가 완료되었습니다.');
+      if (result?.htmlLink) window.open(result.htmlLink, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      console.error('캘린더 동기화 실패:', e);
+      alert('캘린더 동기화에 실패했습니다. (콘솔 확인)');
+    }
+  };
+
+  // ✅ 오늘/다가오는 일정 일괄 동기화
+  const onBulkSync = async (type) => {
+    if (!calendarReady) { alert('Google API 초기화 중입니다. 잠시 후 다시 시도해주세요.'); return; }
+    const now = new Date();
+    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const todayEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+    const threeDaysLater = new Date(todayStart); threeDaysLater.setUTCDate(threeDaysLater.getUTCDate() + 3);
+
+    const pick = profiles.filter(p => p.eventDate).filter(p => {
+      const d = new Date(p.eventDate);
+      if (type === 'today') return d >= todayStart && d < todayEnd;
+      if (type === 'upcoming') return d >= threeDaysLater && d < new Date(Date.UTC(threeDaysLater.getUTCFullYear(), threeDaysLater.getUTCMonth(), threeDaysLater.getUTCDate() + 1));
+      return false;
+    });
+
+    if (pick.length === 0) { alert('대상 프로필이 없습니다.'); return; }
+
+    try {
+      await requestCalendarAccess();
+      let ok = 0, fail = 0;
+      for (const p of pick) {
+        try {
+          await onSyncCalendar(p);
+          ok++;
+        } catch {
+          fail++;
+        }
+      }
+      alert(`캘린더 일괄 동기화 완료: ${ok}건 성공${fail ? `, ${fail}건 실패` : ''}`);
+    } catch (e) {
+      console.error(e);
+      alert('권한 요청 또는 동기화 중 오류가 발생했습니다.');
+    }
+  };
+
+  const formState = { newName, newCareer, newAge, newOtherInfo, newExpertise, newPriority, newMeetingRecord };
+  const setFormState = { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewExpertise, setNewPriority, setNewMeetingRecord };
 
   if (!accessCode) return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
 
   return (
     <div className="bg-gray-50 min-h-screen font-sans">
       <style>{`
-        @keyframes highlight-animation {
-          0% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.7); }
-          70% { box-shadow: 0 0 20px 10px rgba(251, 191, 36, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
-        }
+        @keyframes highlight-animation { 0% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.7); } 70% { box-shadow: 0 0 20px 10px rgba(251, 191, 36, 0); } 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); } }
         .highlight { animation: highlight-animation 2.5s ease-out; }
         @keyframes slide-down-fade-in { from { opacity: 0; transform: translateY(-15px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fade-in { animation: slide-down-fade-in 0.5s ease-out forwards; }
         .animate-cascade { animation: slide-down-fade-in 0.5s ease-out forwards; opacity: 0; }
       `}</style>
 
-      {deleteState.show && (
+      {showDeleteConfirm.show && (
         <ConfirmationModal
-          message={`'${deleteState.name}' 프로필을 정말로 삭제하시겠습니까?`}
+          message={`'${showDeleteConfirm.profileName}' 프로필을 정말로 삭제하시겠습니까?`}
           onConfirm={confirmDelete}
-          onCancel={() => setDeleteState({ show: false, id: null, name: '' })}
+          onCancel={() => setShowDeleteConfirm({ show: false, profileId: null, profileName: '' })}
         />
       )}
 
@@ -1012,6 +1042,8 @@ export default function App() {
             onDelete={handleDeleteRequest}
             highlightedProfile={highlightedProfile}
             setHighlightedProfile={setHighlightedProfile}
+            onSyncCalendar={onSyncCalendar}
+            onBulkSync={onBulkSync}
           />
         )}
         {activeTab === TAB_PAGE.MANAGE && (
@@ -1023,6 +1055,7 @@ export default function App() {
             handleBulkAdd={handleBulkAdd}
             formState={formState}
             setFormState={setFormState}
+            onSyncCalendar={onSyncCalendar}
           />
         )}
       </main>
