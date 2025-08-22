@@ -1,18 +1,16 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>프로필 데이터베이스</title>
-    <!-- 디자인 설명서 -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 차트 라이브러리 -->
-    <script src="https://unpkg.com/recharts/umd/Recharts.min.js"></script>
-    <!-- 엑셀 라이브러리 (새로 추가!) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>프로필 대시보드</title>
   </head>
-  <body class="bg-gray-100">
-    <noscript>You need to enable JavaScript to run this app.</noscript>
+  <body>
     <div id="root"></div>
+
+    <!-- Google API (gapi) & Google Identity Services -->
+    <script src="https://apis.google.com/js/api.js" async defer></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!-- 번들 스크립트(CRA/Vite)는 프로젝트 설정에 따라 자동 삽입됨 -->
   </body>
 </html>
