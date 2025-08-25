@@ -6,22 +6,22 @@ import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, Cart
 import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save, UploadCloud, BellRing, Share2, RefreshCw } from 'lucide-react';
 
 // ===================================================================================
-// 중요: Google API 설정 (GIS 방식)
+// 중요: Google API 설정 (GIS 방식) - .env.local 파일에서 값을 불러오도록 수정
 // ===================================================================================
-const GOOGLE_API_KEY = "AIzaSyBue2ZMWEQ45L61s7ieFZM9DcQViQ-0_OY";
-const GOOGLE_CLIENT_ID = "9275853060-01csg1l9qr9bq7ddrkn61up6vpop3tid.apps.googleusercontent.com";
+const GOOGLE_API_KEY = process.env.REACT_APP_GOOGLE_API_KEY;
+const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
 const DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"];
 const SCOPES = "https://www.googleapis.com/auth/calendar.events";
 
-// Firebase 구성 정보
+// Firebase 구성 정보 - .env.local 파일에서 값을 불러오도록 수정
 const firebaseConfig = {
-  apiKey: "AIzaSyBue2ZMWEQ45L61s7ieFZM9DcQViQ-0_OY",
-  authDomain: "dhwnsdud1210-bf233.firebaseapp.com",
-  projectId: "dhwnsdud1210-bf233",
-  storageBucket: "dhwnsdud1210-bf233.appspot.com",
-  messagingSenderId: "9275853060",
-  appId: "1:9275853060:web:e5ccfa323da3493312a851",
-  measurementId: "G-XS3VFNW6Y3"
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID,
+  measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID
 };
 
 const appId = 'profile-db-app-junyoungoh';
@@ -846,12 +846,12 @@ export default function App() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
 
   // Google API 상태
-  const [gapiClient, setGapiClient] = useState(null);          // window.gapi
-  const [tokenClient, setTokenClient] = useState(null);        // GIS token client
+  const [gapiClient, setGapiClient] = useState(null);         // window.gapi
+  const [tokenClient, setTokenClient] = useState(null);       // GIS token client
   const [isGoogleSignedIn, setIsGoogleSignedIn] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [googleApiReady, setGoogleApiReady] = useState(null);  // true/false
-  const [googleError, setGoogleError] = useState('');          // 실패 메시지(옵션)
+  const [googleApiReady, setGoogleApiReady] = useState(null); // true/false
+  const [googleError, setGoogleError] = useState('');         // 실패 메시지(옵션)
 
   const [newName, setNewName] = useState('');
   const [newCareer, setNewCareer] = useState('');
