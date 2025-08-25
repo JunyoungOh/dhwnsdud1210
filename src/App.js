@@ -14,7 +14,6 @@ import {
 } from 'lucide-react';
 
 // --- Google Calendar API Integration ---
-// 사용자로부터 전달받은 키를 적용했습니다.
 const GOOGLE_API_KEY = "AIzaSyBue2ZMWEQ45L61s7ieFZM9DcQViQ-0_OY";
 const GOOGLE_CLIENT_ID = "9275853060-01csg1l9qr9bq7ddrkn61up6vpop3tid.apps.googleusercontent.com";
 
@@ -124,9 +123,9 @@ const extractLatestKSTEventISOFromRecord = (recordText) => {
 };
 
 // --- Firebase Setup ---
-// 환경 변수에서 Firebase 구성을 가져옵니다.
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'profile-db-app-junyoungoh';
+// [수정된 부분] window 객체를 통해 전역 변수에 접근하여 'no-undef' ESLint 오류를 방지합니다.
+const firebaseConfig = typeof window.__firebase_config !== 'undefined' ? JSON.parse(window.__firebase_config) : {};
+const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'profile-db-app-junyoungoh';
 
 let app, db, auth;
 if (firebaseConfig.apiKey) {
@@ -887,9 +886,8 @@ export default function App() {
   useEffect(() => {
     initGoogle().catch(e => {
         console.error("Google API 초기화 실패", e);
-        // Check if the error is the specific permission denied error
         if (e && e.error && e.error.status === 'PERMISSION_DENIED') {
-            showNotification("Google API 오류: 현재 앱 주소가 Google Cloud Console에 등록되지 않았습니다. 설정을 확인해주세요.", "error", 10000); // 10초간 표시
+            showNotification("Google API 오류: 현재 앱 주소가 Google Cloud Console에 등록되지 않았습니다. 설정을 확인해주세요.", "error", 10000);
         } else {
             showNotification("Google API 초기화에 실패했습니다.", "error");
         }
@@ -897,26 +895,34 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!auth) return;
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    if (!auth) {
+        setAuthStatus('error');
+        showNotification("Firebase 초기화에 실패했습니다.", "error");
+        return;
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         setAuthStatus('authenticated');
       } else {
-        try {
-          if (typeof __initial_auth_token !== 'undefined') {
-            await signInWithCustomToken(auth, __initial_auth_token);
-          } else {
-            await signInAnonymously(auth);
-          }
-          setAuthStatus('authenticated');
-        } catch (e) {
-          console.error("Firebase 로그인 오류:", e);
-          setAuthStatus('error');
+        // [수정된 부분] window 객체를 통해 전역 변수에 접근하여 'no-undef' ESLint 오류를 방지합니다.
+        if (typeof window.__initial_auth_token !== 'undefined') {
+          signInWithCustomToken(auth, window.__initial_auth_token).catch((error) => {
+            console.error("커스텀 토큰 로그인 실패:", error);
+            setAuthStatus('error');
+          });
+        } else {
+          signInAnonymously(auth).catch((error) => {
+            console.error("익명 로그인 실패:", error);
+            setAuthStatus('error');
+          });
         }
       }
     });
+
     return () => unsubscribe();
   }, []);
+
 
   const profilesCollectionRef = useMemo(() => {
     if (!accessCode || !db) return null;
