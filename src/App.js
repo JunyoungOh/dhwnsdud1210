@@ -1,57 +1,91 @@
+// App.jsx — 응급 패치본 (GIS + .env 분리 + 가드 + ErrorBoundary)
+// ---------------------------------------------------------------
+// 필요 패키지: react, firebase, recharts, lucide-react
+// 환경변수: VITE_* (Vite) / REACT_APP_* (CRA 폴백)
+
 import React, { useMemo, useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
-import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
-import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save, UploadCloud, BellRing, Share2, RefreshCw } from 'lucide-react';
+import {
+  getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query,
+  setLogLevel, updateDoc, writeBatch, getDoc
+} from 'firebase/firestore';
+import {
+  PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis,
+  CartesianGrid, ResponsiveContainer
+} from 'recharts';
+import {
+  Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit,
+  Trash2, ShieldAlert, X, Save, UploadCloud, BellRing, Share2, RefreshCw
+} from 'lucide-react';
 
-// ===================================================================================
-// 환경변수 로더: Vite(import.meta.env) 우선, CRA(process.env.REACT_APP_*) 폴백
-// ===================================================================================
+// ============== ENV 로더 (Vite 우선, CRA 폴백) ==================
 const env = (() => {
   const v = (typeof import.meta !== 'undefined' && import.meta.env) ? import.meta.env : {};
   const p = (typeof process !== 'undefined' && process.env) ? process.env : {};
-  // Vite가 우선, 없으면 CRA로 폴백
   return { ...p, ...v };
 })();
 
-// ===================================================================================
-// 중요: Google API 설정 (GIS 방식) - 반드시 .env로 주입
-// Vite: VITE_* / CRA: REACT_APP_*
-// ===================================================================================
+// ============== Google API (.env에서 주입) =======================
 const GOOGLE_API_KEY   = env.VITE_GOOGLE_API_KEY   || env.REACT_APP_GOOGLE_API_KEY;
 const GOOGLE_CLIENT_ID = env.VITE_GOOGLE_CLIENT_ID || env.REACT_APP_GOOGLE_CLIENT_ID;
 const DISCOVERY_DOCS   = ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"];
 const SCOPES           = "https://www.googleapis.com/auth/calendar.events";
 
-// ===================================================================================
-// Firebase 구성 정보 - 반드시 .env로 주입
-// ===================================================================================
+// 구글 캘린더 기능 토글 (기본 ON) — Netlify에 VITE_ENABLE_GOOGLE_CAL=false 넣으면 비활성
+const ENABLE_GOOGLE = String(
+  env.VITE_ENABLE_GOOGLE_CAL ?? env.REACT_APP_ENABLE_GOOGLE_CAL ?? 'true'
+).toLowerCase() !== 'false';
+
+// ============== Firebase (.env에서 주입) =========================
 const firebaseConfig = {
-  apiKey:            env.VITE_FIREBASE_API_KEY            || env.REACT_APP_FIREBASE_API_KEY,
-  authDomain:        env.VITE_FIREBASE_AUTH_DOMAIN        || env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-  projectId:         env.VITE_FIREBASE_PROJECT_ID         || env.REACT_APP_FIREBASE_PROJECT_ID,
-  storageBucket:     env.VITE_FIREBASE_STORAGE_BUCKET     || env.REACT_APP_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID|| env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
-  appId:             env.VITE_FIREBASE_APP_ID             || env.REACT_APP_FIREBASE_APP_ID,
-  measurementId:     env.VITE_FIREBASE_MEASUREMENT_ID     || env.REACT_APP_FIREBASE_MEASUREMENT_ID,
+  apiKey:            env.VITE_FIREBASE_API_KEY             || env.REACT_APP_FIREBASE_API_KEY,
+  authDomain:        env.VITE_FIREBASE_AUTH_DOMAIN         || env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId:         env.VITE_FIREBASE_PROJECT_ID          || env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket:     env.VITE_FIREBASE_STORAGE_BUCKET      || env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId:             env.VITE_FIREBASE_APP_ID              || env.REACT_APP_FIREBASE_APP_ID,
+  measurementId:     env.VITE_FIREBASE_MEASUREMENT_ID      || env.REACT_APP_FIREBASE_MEASUREMENT_ID,
 };
 
-// 고정 앱 ID (데이터 경로 네임스페이스 용)
+// === (선택) ENV 점검 로그 — 필요 시 주석 해제해서 확인하세요 ===
+// if (typeof window !== 'undefined') {
+//   console.log('[ENV check]', {
+//     GOOGLE_API_KEY: (GOOGLE_API_KEY || '').slice(0, 6),
+//     GOOGLE_CLIENT_ID: (GOOGLE_CLIENT_ID || '').slice(0, 10),
+//     FIREBASE_PROJECT_ID: firebaseConfig?.projectId,
+//   });
+// }
+
+// ============== Firebase 초기화 (가드) ===========================
+let appFirebase = null;
+let db = null;
+let auth = null;
+
+try {
+  if (!firebaseConfig?.apiKey || !firebaseConfig?.projectId) {
+    console.warn('[Firebase] Missing env. App will run without Firestore.');
+  } else {
+    appFirebase = initializeApp(firebaseConfig);
+    db = getFirestore(appFirebase);
+    auth = getAuth(appFirebase);
+    setLogLevel('debug');
+  }
+} catch (e) {
+  console.error('[Firebase init failed]', e, {
+    apiKeyPreview: (firebaseConfig?.apiKey || '').slice(0, 6),
+    projectId: firebaseConfig?.projectId,
+  });
+  // 실패해도 앱은 계속 렌더 (데이터 기능만 비활성)
+}
+
+// ============== 상수 / 유틸 =====================================
 const appId = 'profile-db-app-junyoungoh';
-
-// Firebase init
-const app  = initializeApp(firebaseConfig);
-const db   = getFirestore(app);
-const auth = getAuth(app);
-setLogLevel('debug');
-
-// 차트/필터 상수
 const COLORS = ['#FFBB28', '#FF8042', '#00C49F', '#8884D8', '#FF4444', '#82ca9d'];
 const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아한형제들', '당근', '토스'];
 const TAB_PAGE = { DASHBOARD: 'dashboard', MANAGE: 'manage' };
 
-// 헬퍼: 미팅 기록에서 (YY.MM.DD) 및 (AM/PM hh시 mm분) 파싱 → ISO
+// 날짜 파싱 (YY.MM.DD) (AM/PM hh시 mm분) → ISO
 const parseDateFromRecord = (recordText) => {
   if (!recordText) return null;
   const regex = /\((\d{2})\.(\d{2})\.(\d{2})\)(?:\s*(AM|PM)\s*(\d{1,2})시\s*(\d{1,2})분)?/i;
@@ -74,13 +108,18 @@ const parseDateFromRecord = (recordText) => {
   return latestDate ? latestDate.toISOString() : null;
 };
 
-// ============================== 공유 상세 뷰 ==============================
+// ============== 공유 뷰 =========================================
 const ProfileDetailView = ({ profileId, accessCode }) => {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
 
   useEffect(() => {
+    if (!db) {
+      setError('데이터베이스 초기화에 실패했습니다.');
+      setLoading(false);
+      return;
+    }
     const fetchProfile = async () => {
       try {
         const ref = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
@@ -132,7 +171,7 @@ const ProfileDetailView = ({ profileId, accessCode }) => {
   );
 };
 
-// ============================== 로그인 뷰 ==============================
+// ============== 로그인 화면 =====================================
 const LoginScreen = ({ onLogin, authStatus }) => {
   const [codeInput, setCodeInput] = useState('');
   const handleSubmit = (e) => { e.preventDefault(); if (codeInput.trim()) onLogin(codeInput.trim()); };
@@ -161,7 +200,7 @@ const LoginScreen = ({ onLogin, authStatus }) => {
   );
 };
 
-// ============================== 확인 모달 ==============================
+// ============== 확인 모달 =======================================
 const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
     <div className="bg-white rounded-lg p-8 shadow-xl max-w-sm w-full mx-4">
@@ -178,7 +217,7 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   </div>
 );
 
-// ============================== 프로필 카드 ==============================
+// ============== 프로필 카드 =====================================
 const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm, accessCode }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
@@ -251,7 +290,7 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
   );
 };
 
-// ============================== 필터 섹션 ==============================
+// ============== 필터 섹션 =======================================
 const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, accessCode }) => (
   <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in">
     <div className="flex justify-between items-center mb-4">
@@ -268,14 +307,11 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, acc
   </section>
 );
 
-// ============================== 대시보드 탭 ==============================
+// ============== 대시보드 탭 =====================================
 const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
   const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
   const [searchTerm, setSearchTerm] = useState('');
   const [showMeetingProfiles, setShowMeetingProfiles] = useState(false);
-
-  const handlePieClick = (type, data) => { if (data.value === 0) return; setActiveFilter({ type, value: data.name }); };
-  const handleBarClick = (type, data) => { const value = data.name; const count = data.count || data.value; if (count === 0) return; setActiveFilter({ type, value }); };
 
   const { todayProfiles, upcomingProfiles, meetingProfiles, longTermNoContactProfiles } = useMemo(() => {
     const now = new Date();
@@ -306,8 +342,8 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
     };
   }, [profiles]);
 
-  const handleSnooze = (profileId) => { const d = new Date(); d.setMonth(d.getMonth() + 3); onUpdate(profileId, { snoozeUntil: d.toISOString() }); };
-  const handleConfirmAlarm = (profileId) => { onUpdate(profileId, { lastReviewedDate: new Date().toISOString() }); };
+  const handlePieClick = (type, data) => { if (data.value === 0) return; setActiveFilter({ type, value: data.name }); };
+  const handleBarClick = (type, data) => { const value = data.name; const count = data.count || data.value; if (count === 0) return; setActiveFilter({ type, value }); };
 
   const ageData = useMemo(() => {
     const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
@@ -344,19 +380,17 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
         const fieldMap = { '이름': 'name', '경력': 'career', '나이': 'age', '전문영역': 'expertise', '기타': 'otherInfo', '우선순위': 'priority' };
         const m = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
         if (m) {
-          const fieldName = fieldMap[m[1]]; const fieldValue = m[2].toLowerCase();
-          const profileValue = p[fieldName] ? String(p[fieldName]).toLowerCase() : '';
-          return profileValue.includes(fieldValue);
+          const f = fieldMap[m[1]], v = m[2].toLowerCase();
+          const pv = p[f] ? String(p[f]).toLowerCase() : '';
+          return pv.includes(v);
         }
         const decade = keyword.match(/^(\d{1,2})대$/);
         if (decade) {
-          const start = parseInt(decade[1], 10); if (start >= 10) {
-            const minAge = start, maxAge = start + 9;
-            return p.age && p.age >= minAge && p.age <= maxAge;
-          }
+          const start = parseInt(decade[1], 10);
+          if (start >= 10) { const min = start, max = start + 9; return p.age && p.age >= min && p.age <= max; }
         }
-        const profileText = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
-        return profileText.includes(keyword.toLowerCase());
+        const text = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
+        return text.includes(keyword.toLowerCase());
       });
     }));
   }, [searchTerm, profiles]);
@@ -384,13 +418,19 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
     }
   }, [profiles, activeFilter]);
 
+  const handleSnooze = (profileId) => { const d = new Date(); d.setMonth(d.getMonth() + 3); onUpdate(profileId, { snoozeUntil: d.toISOString() }); };
+  const handleConfirmAlarm = (profileId) => { onUpdate(profileId, { lastReviewedDate: new Date().toISOString() }); };
+
   return (
     <>
       {longTermNoContactProfiles.length > 0 && (
         <section>
           <h2 className="text-xl font-bold mb-4 flex items-center"><BellRing className="mr-2 text-orange-500" />장기 미접촉 알림 (3개월 이상)</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {longTermNoContactProfiles.map(p => <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} isAlarmCard={true} onSnooze={(id)=>{const d=new Date();d.setMonth(d.getMonth()+3);onUpdate(id,{snoozeUntil:d.toISOString()});}} onConfirmAlarm={(id)=>onUpdate(id,{lastReviewedDate:new Date().toISOString()})} accessCode={accessCode} />)}
+            {longTermNoContactProfiles.map(p => (
+              <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} isAlarmCard={true}
+                onSnooze={handleSnooze} onConfirmAlarm={handleConfirmAlarm} accessCode={accessCode} />
+            ))}
           </div>
         </section>
       )}
@@ -493,7 +533,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
       <section className="bg-white p-6 rounded-xl shadow-md">
         <h2 className="text-xl font-bold text-gray-800 mb-4">IT 기업 경력 분포</h2>
         <ResponsiveContainer width="100%" height={350}>
-          <BarChart data={keywordData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+          <BarChart data={TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length }))} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
             <defs>
               <linearGradient id="gc" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#FFBB28" stopOpacity={0.8}/>
@@ -509,6 +549,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
           </BarChart>
         </ResponsiveContainer>
       </section>
+
       {activeFilter.type === 'company' && (
         <FilterResultSection title={`"${activeFilter.value}" 경력자 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} accessCode={accessCode} />
       )}
@@ -516,9 +557,9 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
       <section className="bg-white p-6 rounded-xl shadow-md">
         <h2 className="text-xl font-bold text-gray-800 mb-4">전문영역 분포</h2>
         <ResponsiveContainer width="100%" height={350}>
-          <BarChart data={(()=>{
-            const c={}; profiles.forEach(p=>{ if(p.expertise) c[p.expertise]=(c[p.expertise]||0)+1; });
-            return Object.entries(c).map(([name,count])=>({name,count}));
+          <BarChart data={(() => {
+            const c = {}; profiles.forEach(p => { if (p.expertise) c[p.expertise] = (c[p.expertise] || 0) + 1; });
+            return Object.entries(c).map(([name, count]) => ({ name, count }));
           })()} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
             <defs>
               <linearGradient id="ge" x1="0" y1="0" x2="0" y2="1">
@@ -535,6 +576,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
           </BarChart>
         </ResponsiveContainer>
       </section>
+
       {activeFilter.type === 'expertise' && (
         <FilterResultSection title={`"${activeFilter.value}" 전문영역 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} accessCode={accessCode} />
       )}
@@ -542,10 +584,11 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
   );
 };
 
-// ============================== 관리 탭 ==============================
+// ============== 관리 탭 =========================================
 const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState, accessCode }) => {
   const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord } = formState;
   const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord } = setFormState;
+
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const PROFILES_PER_PAGE = 9;
@@ -637,7 +680,7 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
   );
 };
 
-// ============================== 페이지네이션 ==============================
+// ============== 페이지네이션 ====================================
 const Pagination = ({ totalPages, currentPage, setCurrentPage }) => {
   const nums = []; for (let i=1;i<=totalPages;i++) nums.push(i);
   if (totalPages <= 1) return null;
@@ -654,7 +697,7 @@ const Pagination = ({ totalPages, currentPage, setCurrentPage }) => {
   );
 };
 
-// ============================== 엑셀 업로더 ==============================
+// ============== 엑셀 업로더 =====================================
 const ExcelUploader = ({ onBulkAdd }) => {
   const [file, setFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -710,23 +753,23 @@ const ExcelUploader = ({ onBulkAdd }) => {
   );
 };
 
-// ============================== 메인 앱 ==============================
-export default function App() {
+// ============== 메인 App ========================================
+function CoreApp() {
   const [accessCode, setAccessCode] = useState(
     typeof window !== 'undefined' ? (localStorage.getItem('profileDbAccessCode') || null) : null
   );
   const [profiles, setProfiles] = useState([]);
   const [authStatus, setAuthStatus] = useState('authenticating');
   const [activeTab, setActiveTab] = useState(TAB_PAGE.DASHBOARD);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
+
+  const [del, setDel] = useState({ show: false, id: null, name: '' });
 
   // Google API 상태
   const [gapiClient, setGapiClient] = useState(null);
-  const [tokenClient, setTokenClient] = useState(null); // GIS token client
+  const [tokenClient, setTokenClient] = useState(null);
   const [isGoogleSignedIn, setIsGoogleSignedIn] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [googleApiReady, setGoogleApiReady] = useState(null);
-  const [googleError, setGoogleError] = useState('');
+  const [googleApiReady, setGoogleApiReady] = useState(null); // null=대기, true=사용가능, false=비활성
 
   const [newName, setNewName] = useState('');
   const [newCareer, setNewCareer] = useState('');
@@ -737,7 +780,7 @@ export default function App() {
   const [newPriority, setNewPriority] = useState('');
   const [newMeetingRecord, setNewMeetingRecord] = useState('');
 
-  // 공유 URL 파라미터(브라우저에서만)
+  // 공유 URL 파라미터
   const urlParams = useMemo(() => {
     if (typeof window === 'undefined') return new URLSearchParams('');
     return new URLSearchParams(window.location.search);
@@ -745,63 +788,82 @@ export default function App() {
   const profileIdFromUrl = urlParams.get('profile');
   const accessCodeFromUrl = urlParams.get('code');
 
-  // 외부 스크립트 로드: SheetJS, GAPI(client), GIS(oauth)
+  // 외부 스크립트 로드 (SheetJS / gapi / GIS)
   useEffect(() => {
-    const xlsxScript = document.createElement('script');
-    xlsxScript.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
-    xlsxScript.async = true; document.body.appendChild(xlsxScript);
+    // SheetJS
+    const xlsx = document.createElement('script');
+    xlsx.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
+    xlsx.async = true; document.body.appendChild(xlsx);
 
-    const gapiScript = document.createElement('script');
-    gapiScript.src = "https://apis.google.com/js/api.js";
-    gapiScript.async = true; gapiScript.defer = true; document.body.appendChild(gapiScript);
+    // gapi / GIS는 조건부 로드 (구글 끄면 로드 안 함)
+    let gapiScript, gisScript;
+    if (ENABLE_GOOGLE) {
+      gapiScript = document.createElement('script');
+      gapiScript.src = "https://apis.google.com/js/api.js";
+      gapiScript.async = true; gapiScript.defer = true; document.body.appendChild(gapiScript);
 
-    const gisScript = document.createElement('script');
-    gisScript.src = "https://accounts.google.com/gsi/client";
-    gisScript.async = true; gisScript.defer = true; document.body.appendChild(gisScript);
-
-    const onLoaded = Promise.all([
-      new Promise(res => gapiScript.onload = res),
-      new Promise(res => gisScript.onload = res),
-    ]);
-
-    onLoaded.then(() => {
-      // gapi client 초기화 (auth2 아님)
-      window.gapi.load('client', async () => {
-        try {
-          if (!GOOGLE_API_KEY || !GOOGLE_CLIENT_ID) {
-            throw new Error('환경변수(GOOGLE_API_KEY/CLIENT_ID) 누락');
-          }
-          await window.gapi.client.init({ apiKey: GOOGLE_API_KEY, discoveryDocs: DISCOVERY_DOCS });
-          setGapiClient(window.gapi);
-
-          // GIS Token Client
-          const tc = window.google.accounts.oauth2.initTokenClient({
-            client_id: GOOGLE_CLIENT_ID,
-            scope: SCOPES,
-            callback: (resp) => {
-              if (resp && resp.access_token) {
-                window.gapi.client.setToken({ access_token: resp.access_token });
-                setIsGoogleSignedIn(true);
-              }
-            },
-          });
-          setTokenClient(tc);
-          setGoogleApiReady(true);
-        } catch (err) {
-          console.error("Error initializing Google API client", err);
-          setGoogleError(err?.error || err?.message || 'Google API 초기화 실패');
-          setGoogleApiReady(false);
-        }
-      });
-    });
+      gisScript = document.createElement('script');
+      gisScript.src = "https://accounts.google.com/gsi/client";
+      gisScript.async = true; gisScript.defer = true; document.body.appendChild(gisScript);
+    }
 
     return () => {
-      [xlsxScript, gapiScript, gisScript].forEach(s => { if (s && document.body.contains(s)) document.body.removeChild(s); });
+      [xlsx, gapiScript, gisScript].forEach(s => { if (s && document.body.contains(s)) document.body.removeChild(s); });
     };
   }, []);
 
-  // Firebase 익명 인증
+  // Google API 초기화 (안전 가드)
   useEffect(() => {
+    if (!ENABLE_GOOGLE) { setGoogleApiReady(false); return; }
+    if (!GOOGLE_API_KEY || !GOOGLE_CLIENT_ID) {
+      console.warn('[Google] Missing env. Disabling calendar.');
+      setGoogleApiReady(false);
+      return;
+    }
+
+    const ready = () =>
+      typeof window !== 'undefined' &&
+      window.gapi?.client &&
+      window.google?.accounts?.oauth2;
+
+    const init = async () => {
+      try {
+        await window.gapi.client.init({ apiKey: GOOGLE_API_KEY, discoveryDocs: DISCOVERY_DOCS });
+        const tc = window.google.accounts.oauth2.initTokenClient({
+          client_id: GOOGLE_CLIENT_ID,
+          scope: SCOPES,
+          callback: (resp) => {
+            if (resp?.access_token) {
+              window.gapi.client.setToken({ access_token: resp.access_token });
+              setIsGoogleSignedIn(true);
+            }
+          },
+        });
+        setGapiClient(window.gapi);
+        setTokenClient(tc);
+        setGoogleApiReady(true);
+      } catch (e) {
+        console.error('[Google init failed]', e);
+        setGoogleApiReady(false);
+      }
+    };
+
+    let tries = 0;
+    const timer = setInterval(() => {
+      if (ready()) { clearInterval(timer); init(); }
+      else if (++tries > 60) { // ~3초
+        clearInterval(timer);
+        console.warn('[Google] scripts not ready, disabling.');
+        setGoogleApiReady(false);
+      }
+    }, 50);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  // Firebase 인증 (가드)
+  useEffect(() => {
+    if (!auth) { setAuthStatus('error'); return; }
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) setAuthStatus('authenticated');
       else {
@@ -812,17 +874,21 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Firestore 컬렉션 ref
   const profilesCollectionRef = useMemo(() => {
-    if (!accessCode) return null;
+    if (!db || !accessCode) return null;
     return collection(db, 'artifacts', appId, 'public', 'data', accessCode);
-  }, [accessCode]);
+  }, [db, accessCode]);
 
+  // 프로필 실시간 구독
   useEffect(() => {
     if (!profilesCollectionRef) { setProfiles([]); return; }
     const q = query(profilesCollectionRef);
     const unsubscribe = onSnapshot(q, (qs) => {
       const list = qs.docs.map(d => ({ ...d.data(), id: d.id }));
       setProfiles(list);
+    }, (e)=> {
+      console.error('[Firestore onSnapshot error]', e);
     });
     return () => unsubscribe();
   }, [profilesCollectionRef]);
@@ -834,13 +900,14 @@ export default function App() {
 
   const handleFormSubmit = async (e) => {
     e.preventDefault();
-    if (!newName.trim() || !newCareer.trim() || !profilesCollectionRef) return;
+    if (!profilesCollectionRef) return alert('데이터베이스 연결이 필요합니다.');
+    if (!newName.trim() || !newCareer.trim()) return;
     const eventDate = parseDateFromRecord(newMeetingRecord);
     const data = { name: newName, career: newCareer, age: newAge ? Number(newAge) : null, otherInfo: newOtherInfo, eventDate, expertise: newExpertise || null, priority: newPriority || null, meetingRecord: newMeetingRecord || null };
     try {
       await addDoc(profilesCollectionRef, data);
       setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewEventDate(''); setNewExpertise(''); setNewPriority(''); setNewMeetingRecord('');
-    } catch (err) { console.error("프로필 저장 오류: ", err); }
+    } catch (err) { console.error("프로필 저장 오류: ", err); alert('프로필 저장 중 오류가 발생했습니다.'); }
   };
 
   const handleBulkAdd = async (newProfiles) => {
@@ -859,12 +926,12 @@ export default function App() {
   };
 
   const handleUpdate = async (profileId, updatedData) => {
+    if (!profilesCollectionRef) return;
     const { id, ...data } = updatedData;
     const ref = doc(profilesCollectionRef, profileId);
     await updateDoc(ref, data);
   };
 
-  const [del, setDel] = useState({ show: false, id: null, name: '' });
   const handleDeleteRequest = (id, name) => setDel({ show: true, id, name });
   const confirmDelete = async () => {
     if (del.id && profilesCollectionRef) await deleteDoc(doc(profilesCollectionRef, del.id));
@@ -872,7 +939,7 @@ export default function App() {
   };
 
   const handleSyncToCalendar = async () => {
-    if (!isGoogleSignedIn || !gapiClient) { alert('Google 계정에 먼저 로그인해주세요.'); return; }
+    if (!gapiClient || !isGoogleSignedIn) { alert('Google 계정에 먼저 로그인해주세요.'); return; }
     setIsSyncing(true);
     let ok=0, fail=0;
     const targets = profiles.filter(p => p.eventDate);
@@ -905,7 +972,7 @@ export default function App() {
   const formState  = { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord };
   const setFormState= { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord };
 
-  // 공유 라우트
+  // 공유 전용 라우트
   if (profileIdFromUrl && accessCodeFromUrl) {
     return <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />;
   }
@@ -930,31 +997,35 @@ export default function App() {
           <span className="text-sm bg-gray-200 px-3 py-1 rounded-full font-mono">{accessCode}</span>
         </div>
         <div className="flex items-center space-x-4">
-          {googleApiReady === false && (
-            <span className="text-xs text-red-500">Google Calendar 연동 비활성화됨{googleError ? ` (${googleError})` : ' (초기화 실패)'}</span>
-          )}
-          {googleApiReady === true && (
-            isGoogleSignedIn ? (
-              <>
-                <button onClick={handleSyncToCalendar} disabled={isSyncing} className="text-sm font-semibold text-white bg-blue-500 hover:bg-blue-600 px-3 py-2 rounded-md flex items-center disabled:bg-blue-300">
-                  {isSyncing ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1.5" />}
-                  캘린더 동기화
-                </button>
-                <button
-                  onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
-                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
-                >
-                  Google 로그아웃
-                </button>
-              </>
-            ) : (
-              <button
-                onClick={() => { if (!tokenClient) return; tokenClient.requestAccessToken({ prompt:'consent' }); }}
-                className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
-              >
-                Google 로그인
-              </button>
-            )
+          {ENABLE_GOOGLE && (
+            <>
+              {googleApiReady === false && (
+                <span className="text-xs text-red-500">Google Calendar 비활성화됨 (초기화 실패 또는 설정 꺼짐)</span>
+              )}
+              {googleApiReady === true && (
+                isGoogleSignedIn ? (
+                  <>
+                    <button onClick={handleSyncToCalendar} disabled={isSyncing} className="text-sm font-semibold text-white bg-blue-500 hover:bg-blue-600 px-3 py-2 rounded-md flex items-center disabled:bg-blue-300">
+                      {isSyncing ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1.5" />}
+                      캘린더 동기화
+                    </button>
+                    <button
+                      onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
+                      className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
+                    >
+                      Google 로그아웃
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => { if (!tokenClient) return; tokenClient.requestAccessToken({ prompt:'consent' }); }}
+                    className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
+                  >
+                    Google 로그인
+                  </button>
+                )
+              )}
+            </>
           )}
           <button onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }} className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center">
             <LogOut className="w-4 h-4 mr-1.5" /> 로그아웃
@@ -964,7 +1035,7 @@ export default function App() {
 
       <div className="flex justify-center space-x-2 border-b bg-white px-6 py-2 sticky top-0 z-10">
         <button onClick={() => setActiveTab(TAB_PAGE.DASHBOARD)} className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.DASHBOARD ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg-yellow-100'}`}>대시보드</button>
-        <button onClick={() => setActiveTab(TAB_PAGE.MANAGE)} className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.MANAGE ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg黄色-100'}`}>프로필 관리</button>
+        <button onClick={() => setActiveTab(TAB_PAGE.MANAGE)} className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.MANAGE ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg-yellow-100'}`}>프로필 관리</button>
       </div>
 
       <main className="p-6 space-y-12">
@@ -972,5 +1043,35 @@ export default function App() {
         {activeTab === TAB_PAGE.MANAGE && <ManageTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} handleFormSubmit={handleFormSubmit} handleBulkAdd={handleBulkAdd} formState={formState} setFormState={setFormState} accessCode={accessCode} />}
       </main>
     </div>
+  );
+}
+
+// ============== Error Boundary (화이트스크린 방지) ===============
+class ErrorBoundary extends React.Component {
+  constructor(props){ super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error){ return { error }; }
+  componentDidCatch(error, info){ console.error('[ErrorBoundary]', error, info); }
+  render(){
+    if (this.state.error) {
+      return (
+        <div style={{padding:16}}>
+          <h2 style={{fontWeight:700, fontSize:18, marginBottom:8}}>앱 오류가 발생했어요</h2>
+          <p style={{color:'#666', marginBottom:8}}>환경변수(.env/Netlify) 또는 외부 스크립트 초기화 문제일 수 있어요.</p>
+          <pre style={{whiteSpace:'pre-wrap', background:'#f9f9f9', padding:12, borderRadius:8}}>
+            {String(this.state.error?.message || this.state.error)}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ============== Default Export ==================================
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <CoreApp />
+    </ErrorBoundary>
   );
 }
