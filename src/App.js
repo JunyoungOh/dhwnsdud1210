@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
 import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
 import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save, UploadCloud, BellRing, Share2, RefreshCw } from 'lucide-react';
@@ -17,7 +17,7 @@ const SCOPES = "https://www.googleapis.com/auth/calendar.events";
 
 
 // Firebase 구성 정보
-const firebaseConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : JSON.stringify({
+const firebaseConfig = {
   apiKey: "AIzaSyBue2ZMWEQ45L61s7ieFZM9DcQViQ-0_OY",
   authDomain: "dhwnsdud1210-bf233.firebaseapp.com",
   projectId: "dhwnsdud1210-bf233",
@@ -25,10 +25,9 @@ const firebaseConfigString = typeof __firebase_config !== 'undefined' ? __fireba
   messagingSenderId: "9275853060",
   appId: "1:9275853060:web:e5ccfa323da3493312a851",
   measurementId: "G-XS3VFNW6Y3"
-});
-const firebaseConfig = JSON.parse(firebaseConfigString);
+};
 
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'profile-db-app-junyoungoh';
+const appId = 'profile-db-app-junyoungoh';
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -938,20 +937,12 @@ export default function App() {
         if (user) {
             setAuthStatus('authenticated');
         } else {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                try {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } catch (e) {
-                    console.error("Firebase 커스텀 토큰 로그인 오류:", e);
-                    setAuthStatus('error');
-                }
-            } else {
-                try {
-                    await signInAnonymously(auth);
-                } catch (e) {
-                    console.error("Firebase 익명 로그인 오류:", e);
-                    setAuthStatus('error');
-                }
+            try {
+                await signInAnonymously(auth);
+                setAuthStatus('authenticated');
+            } catch (e) {
+                console.error("Firebase 익명 로그인 오류:", e);
+                setAuthStatus('error');
             }
         }
     });
