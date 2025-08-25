@@ -1,12 +1,23 @@
- import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc, writeBatch } from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
 import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
-import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save, UploadCloud, BellRing } from 'lucide-react';
+import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save, UploadCloud, BellRing, Share2, RefreshCw } from 'lucide-react';
+
+// ===================================================================================
+// 중요: Google API 설정
+// Google Cloud Platform(https://console.cloud.google.com/)에서 발급받은
+// API 키와 OAuth 2.0 클라이언트 ID를 아래에 입력해주세요.
+// ===================================================================================
+const GOOGLE_API_KEY = "AIzaSyBue2ZMWEQ45L61s7ieFZM9DcQViQ-0_OY"; // 여기에 API 키를 입력하세요.
+const GOOGLE_CLIENT_ID = "9275853060-01csg1l9qr9bq7ddrkn61up6vpop3tid.apps.googleusercontent.com"; // 여기에 클라이언트 ID를 입력하세요.
+const DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"];
+const SCOPES = "https://www.googleapis.com/auth/calendar.events";
+
 
 // Firebase 구성 정보
-const firebaseConfig = {
+const firebaseConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : JSON.stringify({
   apiKey: "AIzaSyBue2ZMWEQ45L61s7ieFZM9DcQViQ-0_OY",
   authDomain: "dhwnsdud1210-bf233.firebaseapp.com",
   projectId: "dhwnsdud1210-bf233",
@@ -14,9 +25,11 @@ const firebaseConfig = {
   messagingSenderId: "9275853060",
   appId: "1:9275853060:web:e5ccfa323da3493312a851",
   measurementId: "G-XS3VFNW6Y3"
-};
+});
+const firebaseConfig = JSON.parse(firebaseConfigString);
 
-const appId = 'profile-db-app-junyoungoh';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'profile-db-app-junyoungoh';
+
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
@@ -30,21 +43,109 @@ const TAB_PAGE = {
   MANAGE: 'manage'
 };
 
-// 헬퍼 함수: 미팅 기록에서 날짜 파싱
+// 헬퍼 함수: 미팅 기록에서 날짜 및 시간 파싱
 const parseDateFromRecord = (recordText) => {
     if (!recordText) return null;
-    const matches = recordText.matchAll(/\((\d{2})\.(\d{2})\.(\d{2})\)/g);
+    // (YY.MM.DD) 형식과 시간(AM/PM hh시 mm분)을 모두 파싱하는 정규식
+    const regex = /\((\d{2})\.(\d{2})\.(\d{2})\)(?:\s*(AM|PM)\s*(\d{1,2})시\s*(\d{1,2})분)?/i;
+    const matches = recordText.matchAll(regex);
+    
     let latestDate = null;
+
     for (const match of matches) {
         const year = 2000 + parseInt(match[1], 10);
-        const month = parseInt(match[2], 10) - 1; // JS months are 0-indexed
+        const month = parseInt(match[2], 10) - 1;
         const day = parseInt(match[3], 10);
-        const currentDate = new Date(year, month, day);
+        
+        const ampm = match[4];
+        let hour = match[5] ? parseInt(match[5], 10) : 0;
+        const minute = match[6] ? parseInt(match[6], 10) : 0;
+
+        if (ampm) {
+            if (ampm.toUpperCase() === 'PM' && hour !== 12) {
+                hour += 12;
+            }
+            if (ampm.toUpperCase() === 'AM' && hour === 12) { // 12 AM is 00:00
+                hour = 0;
+            }
+        }
+        
+        const currentDate = new Date(year, month, day, hour, minute);
+        
         if (!latestDate || currentDate > latestDate) {
             latestDate = currentDate;
         }
     }
     return latestDate ? latestDate.toISOString() : null;
+};
+
+// 개별 프로필 공유 뷰 컴포넌트
+const ProfileDetailView = ({ profileId, accessCode }) => {
+    const [profile, setProfile] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        const fetchProfile = async () => {
+            try {
+                const profileDocRef = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
+                const docSnap = await getDoc(profileDocRef);
+                if (docSnap.exists()) {
+                    setProfile({ ...docSnap.data(), id: docSnap.id });
+                } else {
+                    setError('프로필을 찾을 수 없습니다.');
+                }
+            } catch (err) {
+                console.error("Error fetching profile:", err);
+                setError('프로필을 불러오는 중 오류가 발생했습니다.');
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchProfile();
+    }, [profileId, accessCode]);
+    
+    if (loading) {
+        return <div className="flex justify-center items-center min-h-screen"><Loader2 className="animate-spin h-10 w-10 text-yellow-500" /></div>;
+    }
+    if (error) {
+        return <div className="flex justify-center items-center min-h-screen text-red-500">{error}</div>;
+    }
+    if (!profile) {
+        return null;
+    }
+
+    return (
+        <div className="bg-gray-100 min-h-screen p-4 sm:p-8 flex items-center justify-center">
+            <div className="w-full max-w-2xl bg-white rounded-xl shadow-2xl p-8">
+                <div className="flex items-center justify-between border-b pb-4 mb-4">
+                    <div className="flex items-baseline space-x-3">
+                        <h1 className="text-3xl font-bold text-yellow-600">{profile.name}</h1>
+                        <span className="text-xl text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
+                    </div>
+                </div>
+                {profile.expertise && <p className="text-lg font-semibold text-gray-700 mt-4">{profile.expertise}</p>}
+                <div className="mt-6 space-y-4">
+                    <div>
+                        <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">경력</h2>
+                        <p className="text-base text-gray-800 mt-1 whitespace-pre-wrap">{profile.career}</p>
+                    </div>
+                    {profile.otherInfo && (
+                        <div>
+                            <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">기타 정보</h2>
+                            <p className="text-base text-gray-600 mt-1 whitespace-pre-wrap">{profile.otherInfo}</p>
+                        </div>
+                    )}
+                    {profile.meetingRecord && (
+                        <div>
+                            <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">미팅 기록</h2>
+                            <p className="text-base text-gray-600 mt-1 whitespace-pre-wrap">{profile.meetingRecord}</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
 };
 
 
@@ -99,7 +200,7 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
 );
 
 // 프로필 카드 컴포넌트 (수정 기능 내장)
-const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm }) => {
+const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm, accessCode }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [editedProfile, setEditedProfile] = useState(profile);
     
@@ -120,6 +221,15 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
         setIsEditing(false);
     };
 
+    const handleShare = () => {
+        const shareUrl = `${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`;
+        navigator.clipboard.writeText(shareUrl).then(() => {
+            alert('공유 링크가 클립보드에 복사되었습니다.');
+        }, () => {
+            alert('링크 복사에 실패했습니다.');
+        });
+    };
+
     if (isEditing) {
         return (
             <div className="bg-white p-4 rounded-lg shadow-lg border-l-4 border-yellow-400 relative space-y-3">
@@ -131,7 +241,7 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
                     <input name="priority" type="text" value={editedProfile.priority || ''} onChange={handleInputChange} placeholder="우선순위" className="w-full p-2 border rounded text-sm" />
                 </div>
                 <textarea name="otherInfo" value={editedProfile.otherInfo || ''} onChange={handleInputChange} placeholder="기타 정보" className="w-full p-2 border rounded text-sm h-20" />
-                <textarea name="meetingRecord" value={editedProfile.meetingRecord || ''} onChange={handleInputChange} placeholder="미팅기록 (예: (25.08.14) 1차 인터뷰)" className="w-full p-2 border rounded text-sm h-20" />
+                <textarea name="meetingRecord" value={editedProfile.meetingRecord || ''} onChange={handleInputChange} placeholder="미팅기록 (예: (25.08.14) PM 7시 00분)" className="w-full p-2 border rounded text-sm h-20" />
                 <div className="flex justify-end space-x-2">
                     <button onClick={() => setIsEditing(false)} className="p-2 text-gray-500 hover:text-gray-800"><X size={20} /></button>
                     <button onClick={handleSave} className="p-2 text-green-600 hover:text-green-800"><Save size={20} /></button>
@@ -164,16 +274,17 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
                     <button onClick={() => onSnooze(profile.id)} className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-3 py-1 rounded-full hover:bg-indigo-200">3개월 후 다시 알림</button>
                 </div>
             )}
-            <div className="absolute top-2 right-2 space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:underline text-xs">수정</button>
-                <button onClick={() => onDelete(profile.id, profile.name)} className="text-red-500 hover:underline text-xs">삭제</button>
+            <div className="absolute top-2 right-2 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={handleShare} className="text-gray-500 hover:text-gray-800" title="공유 링크 복사"><Share2 size={14} /></button>
+                <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:text-blue-700" title="수정"><Edit size={14} /></button>
+                <button onClick={() => onDelete(profile.id, profile.name)} className="text-red-500 hover:text-red-700" title="삭제"><Trash2 size={14} /></button>
             </div>
         </div>
     );
 };
 
 // 필터링 결과 섹션 컴포넌트
-const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear }) => (
+const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, accessCode }) => (
     <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in">
         <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-bold text-gray-800">{title}</h2>
@@ -183,7 +294,7 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear }) =
             {profiles.length > 0 ? (
                 profiles.map((profile, index) => (
                     <div key={profile.id} className="animate-cascade" style={{ animationDelay: `${index * 50}ms` }}>
-                        <ProfileCard profile={profile} onUpdate={onUpdate} onDelete={onDelete} />
+                        <ProfileCard profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
                     </div>
                 ))
             ) : (
@@ -195,7 +306,7 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear }) =
 
 
 // 대시보드 탭 컴포넌트
-const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
+const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
     const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
     const [searchTerm, setSearchTerm] = useState('');
     const [showMeetingProfiles, setShowMeetingProfiles] = useState(false);
@@ -371,7 +482,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
               <section>
                 <h2 className="text-xl font-bold mb-4 flex items-center"><BellRing className="mr-2 text-orange-500" />장기 미접촉 알림 (3개월 이상)</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {longTermNoContactProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} isAlarmCard={true} onSnooze={handleSnooze} onConfirmAlarm={handleConfirmAlarm} />)}
+                  {longTermNoContactProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} isAlarmCard={true} onSnooze={handleSnooze} onConfirmAlarm={handleConfirmAlarm} accessCode={accessCode} />)}
                 </div>
               </section>
             )}
@@ -380,7 +491,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
               <section>
                 <h2 className="text-xl font-bold mb-4 flex items-center"><Calendar className="mr-2 text-red-500" />오늘의 일정</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {todayProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />)}
+                  {todayProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />)}
                 </div>
               </section>
             )}
@@ -389,7 +500,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
               <section>
                 <h2 className="text-xl font-bold mb-4 flex items-center"><Zap className="mr-2 text-blue-500" />다가오는 일정</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {upcomingProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />)}
+                  {upcomingProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />)}
                 </div>
               </section>
             )}
@@ -404,7 +515,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
                         <h2 className="text-xl font-bold mb-4">검색 결과</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
-                                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />
+                                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
                             )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
                         </div>
                     </div>
@@ -423,52 +534,52 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
             </section>
 
             {showMeetingProfiles && (
-                 <FilterResultSection title="미팅 진행 프로필 (최신순)" profiles={meetingProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setShowMeetingProfiles(false)} />
+                 <FilterResultSection title="미팅 진행 프로필 (최신순)" profiles={meetingProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setShowMeetingProfiles(false)} accessCode={accessCode} />
             )}
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <section className="bg-white p-6 rounded-xl shadow-md">
-                  <h2 className="text-xl font-bold text-gray-800 mb-4">세대별 분포</h2>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <PieChart>
-                      <defs>
-                        {COLORS.map((color, index) => (
-                          <radialGradient key={`gradient-age-${index}`} id={`gradient-age-${index}`} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
-                            <stop offset="0%" stopColor={color} stopOpacity={0.7} />
-                            <stop offset="100%" stopColor={color} stopOpacity={1} />
-                          </radialGradient>
-                        ))}
-                      </defs>
-                      <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(data) => handlePieClick('age', data.payload)}>
-                        {ageData.map((_, index) => <Cell key={`cell-age-${index}`} fill={`url(#gradient-age-${index})`} cursor="pointer" stroke="#fff" />)}
-                      </Pie>
-                      <Tooltip formatter={(value) => `${value}명`} />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
+                    <h2 className="text-xl font-bold text-gray-800 mb-4">세대별 분포</h2>
+                    <ResponsiveContainer width="100%" height={300}>
+                        <PieChart>
+                            <defs>
+                                {COLORS.map((color, index) => (
+                                    <radialGradient key={`gradient-age-${index}`} id={`gradient-age-${index}`} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+                                        <stop offset="0%" stopColor={color} stopOpacity={0.7} />
+                                        <stop offset="100%" stopColor={color} stopOpacity={1} />
+                                    </radialGradient>
+                                ))}
+                            </defs>
+                            <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(data) => handlePieClick('age', data.payload)}>
+                                {ageData.map((_, index) => <Cell key={`cell-age-${index}`} fill={`url(#gradient-age-${index})`} cursor="pointer" stroke="#fff" />)}
+                            </Pie>
+                            <Tooltip formatter={(value) => `${value}명`} />
+                            <Legend />
+                        </PieChart>
+                    </ResponsiveContainer>
                 </section>
                 
                 <section className="bg-white p-6 rounded-xl shadow-md">
-                  <h2 className="text-xl font-bold text-gray-800 mb-4">우선순위별 분포</h2>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <PieChart>
-                         <defs>
-                            <radialGradient id="gradient-priority-0"><stop offset="0%" stopColor="#FF4444" stopOpacity={0.7} /><stop offset="100%" stopColor="#FF4444" stopOpacity={1} /></radialGradient>
-                            <radialGradient id="gradient-priority-1"><stop offset="0%" stopColor="#FFBB28" stopOpacity={0.7} /><stop offset="100%" stopColor="#FFBB28" stopOpacity={1} /></radialGradient>
-                            <radialGradient id="gradient-priority-2"><stop offset="0%" stopColor="#00C49F" stopOpacity={0.7} /><stop offset="100%" stopColor="#00C49F" stopOpacity={1} /></radialGradient>
-                         </defs>
-                        <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(data) => handlePieClick('priority', data.payload)}>
-                            {priorityData.map((entry, index) => <Cell key={`cell-priority-${index}`} fill={`url(#gradient-priority-${index})`} cursor="pointer" stroke="#fff"/>)}
-                        </Pie>
-                        <Tooltip formatter={(value) => `${value}명`} />
-                        <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
+                    <h2 className="text-xl font-bold text-gray-800 mb-4">우선순위별 분포</h2>
+                    <ResponsiveContainer width="100%" height={300}>
+                        <PieChart>
+                               <defs>
+                                    <radialGradient id="gradient-priority-0"><stop offset="0%" stopColor="#FF4444" stopOpacity={0.7} /><stop offset="100%" stopColor="#FF4444" stopOpacity={1} /></radialGradient>
+                                    <radialGradient id="gradient-priority-1"><stop offset="0%" stopColor="#FFBB28" stopOpacity={0.7} /><stop offset="100%" stopColor="#FFBB28" stopOpacity={1} /></radialGradient>
+                                    <radialGradient id="gradient-priority-2"><stop offset="0%" stopColor="#00C49F" stopOpacity={0.7} /><stop offset="100%" stopColor="#00C49F" stopOpacity={1} /></radialGradient>
+                               </defs>
+                                <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(data) => handlePieClick('priority', data.payload)}>
+                                    {priorityData.map((entry, index) => <Cell key={`cell-priority-${index}`} fill={`url(#gradient-priority-${index})`} cursor="pointer" stroke="#fff"/>)}
+                                </Pie>
+                                <Tooltip formatter={(value) => `${value}명`} />
+                                <Legend />
+                        </PieChart>
+                    </ResponsiveContainer>
                 </section>
             </div>
             
             {(activeFilter.type === 'age' || activeFilter.type === 'priority') && (
-                <FilterResultSection title={`"${activeFilter.value}" 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} />
+                <FilterResultSection title={`"${activeFilter.value}" 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} accessCode={accessCode} />
             )}
 
             <section className="bg-white p-6 rounded-xl shadow-md">
@@ -491,7 +602,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
               </ResponsiveContainer>
             </section>
              {activeFilter.type === 'company' && (
-                <FilterResultSection title={`"${activeFilter.value}" 경력자 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} />
+                <FilterResultSection title={`"${activeFilter.value}" 경력자 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} accessCode={accessCode} />
             )}
             
             <section className="bg-white p-6 rounded-xl shadow-md">
@@ -514,14 +625,14 @@ const DashboardTab = ({ profiles, onUpdate, onDelete }) => {
               </ResponsiveContainer>
             </section>
             {activeFilter.type === 'expertise' && (
-                <FilterResultSection title={`"${activeFilter.value}" 전문영역 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} />
+                <FilterResultSection title={`"${activeFilter.value}" 전문영역 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} accessCode={accessCode} />
             )}
         </>
     );
 };
 
 // 프로필 관리 탭 컴포넌트
-const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState }) => {
+const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState, accessCode }) => {
     const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord } = formState;
     const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord } = setFormState;
     const [searchTerm, setSearchTerm] = useState('');
@@ -591,7 +702,7 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
                         <h2 className="text-xl font-bold mb-4">검색 결과</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
-                                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />
+                                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
                             )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
                         </div>
                     </div>
@@ -609,7 +720,7 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
                     <input type="text" placeholder="전문영역" value={newExpertise} onChange={e => setNewExpertise(e.target.value)} className="w-full p-2 border rounded" />
                     <textarea placeholder="경력" value={newCareer} onChange={e => setNewCareer(e.target.value)} className="w-full p-2 border rounded h-24" />
                     <textarea placeholder="기타 정보" value={newOtherInfo} onChange={e => setNewOtherInfo(e.target.value)} className="w-full p-2 border rounded h-24" />
-                    <textarea placeholder="미팅기록 (예: (25.08.14) 1차 인터뷰)" value={newMeetingRecord} onChange={e => setNewMeetingRecord(e.target.value)} className="w-full p-2 border rounded h-24" />
+                    <textarea placeholder="미팅기록 (예: (25.08.14) PM 7시 00분)" value={newMeetingRecord} onChange={e => setNewMeetingRecord(e.target.value)} className="w-full p-2 border rounded h-24" />
                     <div className="flex justify-end">
                         <button type="submit" className="bg-yellow-400 text-white px-4 py-2 rounded hover:bg-yellow-500">추가하기</button>
                     </div>
@@ -622,7 +733,7 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
                 <h2 className="text-xl font-bold text-gray-800 mb-4">전체 프로필 목록</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {currentProfiles.map(profile => (
-                       <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} />
+                       <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
                     ))}
                 </div>
                 {totalPages > 1 && (
@@ -699,8 +810,8 @@ const ExcelUploader = ({ onBulkAdd }) => {
                 }
 
                 const newProfiles = json.slice(1).map(row => ({
-                    name: row[2] || '',      // C열
-                    career: row[3] || '',    // D열
+                    name: row[2] || '',     // C열
+                    career: row[3] || '',   // D열
                     age: row[5] ? Number(row[5]) : null, // F열
                     expertise: row[7] || '', // H열
                     priority: row[9] ? String(row[9]) : '',   // J열
@@ -753,6 +864,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState(TAB_PAGE.DASHBOARD);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
 
+  const [gapiClient, setGapiClient] = useState(null);
+  const [googleAuth, setGoogleAuth] = useState(null);
+  const [isGoogleSignedIn, setIsGoogleSignedIn] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [googleApiReady, setGoogleApiReady] = useState(null);
+
   const [newName, setNewName] = useState('');
   const [newCareer, setNewCareer] = useState('');
   const [newAge, setNewAge] = useState('');
@@ -762,26 +879,81 @@ export default function App() {
   const [newPriority, setNewPriority] = useState('');
   const [newMeetingRecord, setNewMeetingRecord] = useState('');
 
+  // URL에서 프로필 ID와 접속 코드 확인
+  const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const profileIdFromUrl = urlParams.get('profile');
+  const accessCodeFromUrl = urlParams.get('code');
+
   useEffect(() => {
     const script = document.createElement('script');
     script.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
     script.async = true;
     document.body.appendChild(script);
+
+    const gapiScript = document.createElement('script');
+    gapiScript.src = "https://apis.google.com/js/api.js";
+    gapiScript.async = true;
+    gapiScript.defer = true;
+    gapiScript.onload = () => window.gapi.load('client:auth2', initClient);
+    document.body.appendChild(gapiScript);
+    
+    return () => {
+        if (document.body.contains(script)) {
+            document.body.removeChild(script);
+        }
+        if (document.body.contains(gapiScript)) {
+            document.body.removeChild(gapiScript);
+        }
+    }
   }, []);
+
+  const initClient = () => {
+    if (GOOGLE_API_KEY === "YOUR_GOOGLE_API_KEY" || GOOGLE_CLIENT_ID === "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com") {
+        console.warn("Google API Key or Client ID is not set. Calendar functionality will be disabled.");
+        setGoogleApiReady(false);
+        return;
+    }
+
+    window.gapi.client.init({
+        apiKey: GOOGLE_API_KEY,
+        clientId: GOOGLE_CLIENT_ID,
+        discoveryDocs: DISCOVERY_DOCS,
+        scope: SCOPES,
+    }).then(() => {
+        setGapiClient(window.gapi);
+        const authInstance = window.gapi.auth2.getAuthInstance();
+        setGoogleAuth(authInstance);
+        setIsGoogleSignedIn(authInstance.isSignedIn.get());
+        authInstance.isSignedIn.listen(setIsGoogleSignedIn);
+        setGoogleApiReady(true);
+    }).catch(error => {
+        console.error("Error initializing Google API client", error);
+        alert("Google API 클라이언트 초기화에 실패했습니다. API 키와 클라이언트 ID를 확인해주세요.");
+        setGoogleApiReady(false);
+    });
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        setAuthStatus('authenticated');
-      } else {
-        try {
-          await signInAnonymously(auth);
-          setAuthStatus('authenticated');
-        } catch (e) {
-          console.error("Firebase 익명 로그인 오류:", e);
-          setAuthStatus('error');
+        if (user) {
+            setAuthStatus('authenticated');
+        } else {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                try {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } catch (e) {
+                    console.error("Firebase 커스텀 토큰 로그인 오류:", e);
+                    setAuthStatus('error');
+                }
+            } else {
+                try {
+                    await signInAnonymously(auth);
+                } catch (e) {
+                    console.error("Firebase 익명 로그인 오류:", e);
+                    setAuthStatus('error');
+                }
+            }
         }
-      }
     });
     return () => unsubscribe();
   }, []);
@@ -851,7 +1023,8 @@ export default function App() {
   
   const handleUpdate = async (profileId, updatedData) => {
     const { id, ...dataToUpdate } = updatedData;
-    await updateDoc(doc(profilesCollectionRef, profileId), dataToUpdate);
+    const profileDocRef = doc(profilesCollectionRef, profileId);
+    await updateDoc(profileDocRef, dataToUpdate);
   };
 
   const handleDeleteRequest = (profileId, profileName) => {
@@ -859,14 +1032,78 @@ export default function App() {
   };
 
   const confirmDelete = async () => {
-      if (showDeleteConfirm.profileId) {
+      if (showDeleteConfirm.profileId && profilesCollectionRef) {
           await deleteDoc(doc(profilesCollectionRef, showDeleteConfirm.profileId));
       }
       setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
   };
 
+  const handleSyncToCalendar = async () => {
+    if (!isGoogleSignedIn) {
+        alert('Google 계정에 먼저 로그인해주세요.');
+        return;
+    }
+    setIsSyncing(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    const profilesWithMeetings = profiles.filter(p => p.eventDate);
+    
+    for (const profile of profilesWithMeetings) {
+        const startTime = new Date(profile.eventDate);
+        // 미팅 시간을 1시간 30분으로 설정
+        const endTime = new Date(startTime.getTime() + 90 * 60000); 
+        const shareUrl = `${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`;
+        
+        const reminders = [
+            { 'method': 'popup', 'minutes': 30 } // 미팅 30분 전 알림
+        ];
+
+        // 당일 오전 10시 알림 추가
+        const tenAmOnMeetingDay = new Date(startTime.getFullYear(), startTime.getMonth(), startTime.getDate(), 10, 0, 0);
+        if (startTime > tenAmOnMeetingDay) {
+            const minutesBefore = (startTime.getTime() - tenAmOnMeetingDay.getTime()) / 60000;
+            reminders.push({ 'method': 'popup', 'minutes': Math.round(minutesBefore) });
+        }
+
+        const event = {
+            'summary': `(영입) ${profile.name}님 미팅`,
+            'description': `${profile.name}님 프로필 보기:\n${shareUrl}`,
+            'start': {
+                'dateTime': startTime.toISOString(),
+                'timeZone': 'Asia/Seoul',
+            },
+            'end': {
+                'dateTime': endTime.toISOString(),
+                'timeZone': 'Asia/Seoul',
+            },
+            'reminders': {
+                'useDefault': false,
+                'overrides': reminders,
+            },
+        };
+
+        try {
+            await gapiClient.client.calendar.events.insert({
+                'calendarId': 'primary',
+                'resource': event,
+            });
+            successCount++;
+        } catch (error) {
+            console.error(`Error creating event for ${profile.name}:`, error);
+            failCount++;
+        }
+    }
+    setIsSyncing(false);
+    alert(`캘린더 동기화 완료!\n성공: ${successCount}건, 실패: ${failCount}건`);
+  };
+
   const formState = { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord };
   const setFormState = { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord };
+
+  if (profileIdFromUrl && accessCodeFromUrl) {
+    return <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />;
+  }
 
   if (!accessCode) {
     return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
@@ -881,15 +1118,33 @@ export default function App() {
             onCancel={() => setShowDeleteConfirm({ show: false, profileId: null, profileName: '' })}
         />
       )}
-      <header className="flex justify-between items-center p-6 border-b bg-white">
+      <header className="flex flex-wrap justify-between items-center p-4 sm:p-6 border-b bg-white gap-4">
         <div className="flex items-center space-x-3">
           <Users className="text-yellow-500 w-8 h-8" />
           <h1 className="text-2xl font-bold text-gray-800">프로필 대시보드</h1>
           <span className="text-sm bg-gray-200 px-3 py-1 rounded-full font-mono">{accessCode}</span>
         </div>
-        <button onClick={() => { setAccessCode(null); localStorage.removeItem('profileDbAccessCode'); }} className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center">
-          <LogOut className="w-4 h-4 mr-1.5" /> 로그아웃
-        </button>
+        <div className="flex items-center space-x-4">
+            {googleApiReady === false && (
+                <span className="text-xs text-red-500">Google Calendar 연동 비활성화됨 (API 키 필요)</span>
+            )}
+            {googleApiReady === true && googleAuth && (
+                isGoogleSignedIn ? (
+                    <>
+                        <button onClick={handleSyncToCalendar} disabled={isSyncing} className="text-sm font-semibold text-white bg-blue-500 hover:bg-blue-600 px-3 py-2 rounded-md flex items-center disabled:bg-blue-300">
+                           {isSyncing ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1.5" />}
+                           캘린더 동기화
+                        </button>
+                        <button onClick={() => googleAuth.signOut()} className="text-sm font-semibold text-gray-600 hover:text-yellow-600">Google 로그아웃</button>
+                    </>
+                ) : (
+                    <button onClick={() => googleAuth.signIn()} className="text-sm font-semibold text-gray-600 hover:text-yellow-600">Google 로그인</button>
+                )
+            )}
+            <button onClick={() => { setAccessCode(null); localStorage.removeItem('profileDbAccessCode'); }} className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center">
+              <LogOut className="w-4 h-4 mr-1.5" /> 로그아웃
+            </button>
+        </div>
       </header>
       
       <div className="flex justify-center space-x-2 border-b bg-white px-6 py-2 sticky top-0 z-10">
@@ -898,8 +1153,8 @@ export default function App() {
       </div>
 
       <main className="p-6 space-y-12">
-        {activeTab === TAB_PAGE.DASHBOARD && <DashboardTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} />}
-        {activeTab === TAB_PAGE.MANAGE && <ManageTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} handleFormSubmit={handleFormSubmit} handleBulkAdd={handleBulkAdd} formState={formState} setFormState={setFormState} />}
+        {activeTab === TAB_PAGE.DASHBOARD && <DashboardTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} accessCode={accessCode} />}
+        {activeTab === TAB_PAGE.MANAGE && <ManageTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} handleFormSubmit={handleFormSubmit} handleBulkAdd={handleBulkAdd} formState={formState} setFormState={setFormState} accessCode={accessCode} />}
       </main>
     </div>
   );
