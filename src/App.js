@@ -39,33 +39,23 @@ const TAB_PAGE = {
   MANAGE: 'manage'
 };
 
-// ---------- 추가: Firestore 전송 전 값 정리 유틸 ----------
-function sanitizeForFirestore(obj) {
-  const out = {};
-  Object.entries(obj || {}).forEach(([k, v]) => {
-    if (v === undefined) return; // Firestore가 undefined를 허용하지 않음
-    if (k === 'age') {
-      if (v === '' || v === null) { out[k] = null; return; }
-      const n = Number(v);
-      out[k] = Number.isNaN(n) ? null : n;
-      return;
-    }
-    out[k] = v;
-  });
-  return out;
-}
-
-// 헬퍼 함수: 미팅 기록에서 날짜 및 시간 파싱
+// ===============================
+// ✅ 헬퍼: 미팅 기록 문자열 파싱 (exec 루프 버전 - Netlify/브라우저 호환 최상)
+// ===============================
 const parseDateFromRecord = (recordText) => {
   if (!recordText) return null;
-  const regex = /\((\d{2})\.(\d{2})\.(\d{2})\)(?:\s*(AM|PM)\s*(\d{1,2})시\s*(\d{1,2})분)?/i;
-  const matches = recordText.matchAll(regex);
-  let latestDate = null;
+  const text = typeof recordText === 'string' ? recordText : String(recordText || '');
 
-  for (const match of matches) {
+  // (YY.MM.DD) [AM/PM hh시 mm분] 형태를 여러 번 찾는다.
+  const regex = /\((\d{2})\.(\d{2})\.(\d{2})\)(?:\s*(AM|PM)\s*(\d{1,2})시\s*(\d{1,2})분)?/gi;
+
+  let latestDate = null;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
     const year = 2000 + parseInt(match[1], 10);
     const month = parseInt(match[2], 10) - 1;
     const day = parseInt(match[3], 10);
+
     const ampm = match[4];
     let hour = match[5] ? parseInt(match[5], 10) : 0;
     const minute = match[6] ? parseInt(match[6], 10) : 0;
@@ -74,6 +64,7 @@ const parseDateFromRecord = (recordText) => {
       if (ampm.toUpperCase() === 'PM' && hour !== 12) hour += 12;
       if (ampm.toUpperCase() === 'AM' && hour === 12) hour = 0;
     }
+
     const currentDate = new Date(year, month, day, hour, minute);
     if (!latestDate || currentDate > latestDate) latestDate = currentDate;
   }
@@ -215,19 +206,14 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
     setEditedProfile(prev => ({ ...prev, [name]: name === 'age' ? (value ? Number(value) : '') : value }));
   };
 
-  // ---------- 수정: 저장 시 sanitize 후 업데이트 + 예외 처리 ----------
   const handleSave = async () => {
+    const eventDate = parseDateFromRecord(editedProfile.meetingRecord);
     try {
-      const eventDate = parseDateFromRecord(editedProfile.meetingRecord);
-      const payload = sanitizeForFirestore({
-        ...editedProfile,
-        eventDate,
-      });
-      await onUpdate(profile.id, payload);
+      await onUpdate(profile.id, { ...editedProfile, eventDate });
       setIsEditing(false);
-    } catch (err) {
-      console.error('프로필 저장 실패:', err);
-      alert('저장 중 오류가 발생했습니다. 콘솔을 확인해주세요.');
+    } catch (e) {
+      console.error('프로필 저장 실패:', e);
+      alert('프로필 저장 중 오류가 발생했습니다.');
     }
   };
 
@@ -1044,18 +1030,10 @@ export default function App() {
     return `${addedCount}건 추가, ${updatedCount}건 업데이트 완료.`;
   };
 
-  // ---------- 수정: Firestore 업데이트 시 sanitize + 예외 전달 ----------
   const handleUpdate = async (profileId, updatedData) => {
-    try {
-      const { id, ...rest } = updatedData || {};
-      const payload = sanitizeForFirestore(rest);
-      const profileDocRef = doc(profilesCollectionRef, profileId);
-      await updateDoc(profileDocRef, payload);
-    } catch (err) {
-      console.error("프로필 업데이트 실패:", err);
-      // 상위(카드)에서 alert를 띄울 수 있도록 예외를 전달
-      throw err;
-    }
+    const { id, ...dataToUpdate } = updatedData;
+    const profileDocRef = doc(profilesCollectionRef, profileId);
+    await updateDoc(profileDocRef, dataToUpdate);
   };
 
   const handleDeleteRequest = (profileId, profileName) => {
