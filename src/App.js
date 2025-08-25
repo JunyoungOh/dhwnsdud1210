@@ -6,99 +6,98 @@ import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, Cart
 import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save, UploadCloud, BellRing, Share2, RefreshCw } from 'lucide-react';
 
 // ===================================================================================
-// 중요: Google API 설정 (GIS 방식)
+// 환경변수 로더: Vite(import.meta.env) 우선, CRA(process.env.REACT_APP_*) 폴백
 // ===================================================================================
-const GOOGLE_API_KEY = "AIzaSyBue2ZMWEQ45L61s7ieFZM9DcQViQ-0_OY";
-const GOOGLE_CLIENT_ID = "9275853060-01csg1l9qr9bq7ddrkn61up6vpop3tid.apps.googleusercontent.com";
-const DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"];
-const SCOPES = "https://www.googleapis.com/auth/calendar.events";
+const env = (() => {
+  const v = (typeof import.meta !== 'undefined' && import.meta.env) ? import.meta.env : {};
+  const p = (typeof process !== 'undefined' && process.env) ? process.env : {};
+  // Vite가 우선, 없으면 CRA로 폴백
+  return { ...p, ...v };
+})();
 
-// Firebase 구성 정보
+// ===================================================================================
+// 중요: Google API 설정 (GIS 방식) - 반드시 .env로 주입
+// Vite: VITE_* / CRA: REACT_APP_*
+// ===================================================================================
+const GOOGLE_API_KEY   = env.VITE_GOOGLE_API_KEY   || env.REACT_APP_GOOGLE_API_KEY;
+const GOOGLE_CLIENT_ID = env.VITE_GOOGLE_CLIENT_ID || env.REACT_APP_GOOGLE_CLIENT_ID;
+const DISCOVERY_DOCS   = ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"];
+const SCOPES           = "https://www.googleapis.com/auth/calendar.events";
+
+// ===================================================================================
+// Firebase 구성 정보 - 반드시 .env로 주입
+// ===================================================================================
 const firebaseConfig = {
-  apiKey: "AIzaSyBue2ZMWEQ45L61s7ieFZM9DcQViQ-0_OY",
-  authDomain: "dhwnsdud1210-bf233.firebaseapp.com",
-  projectId: "dhwnsdud1210-bf233",
-  storageBucket: "dhwnsdud1210-bf233.appspot.com",
-  messagingSenderId: "9275853060",
-  appId: "1:9275853060:web:e5ccfa323da3493312a851",
-  measurementId: "G-XS3VFNW6Y3"
+  apiKey:            env.VITE_FIREBASE_API_KEY            || env.REACT_APP_FIREBASE_API_KEY,
+  authDomain:        env.VITE_FIREBASE_AUTH_DOMAIN        || env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId:         env.VITE_FIREBASE_PROJECT_ID         || env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket:     env.VITE_FIREBASE_STORAGE_BUCKET     || env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID|| env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId:             env.VITE_FIREBASE_APP_ID             || env.REACT_APP_FIREBASE_APP_ID,
+  measurementId:     env.VITE_FIREBASE_MEASUREMENT_ID     || env.REACT_APP_FIREBASE_MEASUREMENT_ID,
 };
 
+// 고정 앱 ID (데이터 경로 네임스페이스 용)
 const appId = 'profile-db-app-junyoungoh';
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+// Firebase init
+const app  = initializeApp(firebaseConfig);
+const db   = getFirestore(app);
 const auth = getAuth(app);
 setLogLevel('debug');
 
+// 차트/필터 상수
 const COLORS = ['#FFBB28', '#FF8042', '#00C49F', '#8884D8', '#FF4444', '#82ca9d'];
 const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아한형제들', '당근', '토스'];
+const TAB_PAGE = { DASHBOARD: 'dashboard', MANAGE: 'manage' };
 
-const TAB_PAGE = {
-  DASHBOARD: 'dashboard',
-  MANAGE: 'manage'
-};
-
-// 헬퍼 함수: 미팅 기록에서 날짜 및 시간 파싱
+// 헬퍼: 미팅 기록에서 (YY.MM.DD) 및 (AM/PM hh시 mm분) 파싱 → ISO
 const parseDateFromRecord = (recordText) => {
   if (!recordText) return null;
   const regex = /\((\d{2})\.(\d{2})\.(\d{2})\)(?:\s*(AM|PM)\s*(\d{1,2})시\s*(\d{1,2})분)?/i;
   const matches = recordText.matchAll(regex);
   let latestDate = null;
-
-  for (const match of matches) {
-    const year = 2000 + parseInt(match[1], 10);
-    const month = parseInt(match[2], 10) - 1;
-    const day = parseInt(match[3], 10);
-    const ampm = match[4];
-    let hour = match[5] ? parseInt(match[5], 10) : 0;
-    const minute = match[6] ? parseInt(match[6], 10) : 0;
-
+  for (const m of matches) {
+    const year = 2000 + parseInt(m[1], 10);
+    const month = parseInt(m[2], 10) - 1;
+    const day = parseInt(m[3], 10);
+    const ampm = m[4];
+    let hour = m[5] ? parseInt(m[5], 10) : 0;
+    const minute = m[6] ? parseInt(m[6], 10) : 0;
     if (ampm) {
       if (ampm.toUpperCase() === 'PM' && hour !== 12) hour += 12;
       if (ampm.toUpperCase() === 'AM' && hour === 12) hour = 0;
     }
-    const currentDate = new Date(year, month, day, hour, minute);
-    if (!latestDate || currentDate > latestDate) latestDate = currentDate;
+    const current = new Date(year, month, day, hour, minute);
+    if (!latestDate || current > latestDate) latestDate = current;
   }
   return latestDate ? latestDate.toISOString() : null;
 };
 
-// 개별 프로필 공유 뷰 컴포넌트
+// ============================== 공유 상세 뷰 ==============================
 const ProfileDetailView = ({ profileId, accessCode }) => {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError]     = useState('');
 
   useEffect(() => {
     const fetchProfile = async () => {
       try {
-        const profileDocRef = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
-        const docSnap = await getDoc(profileDocRef);
-        if (docSnap.exists()) {
-          setProfile({ ...docSnap.data(), id: docSnap.id });
-        } else {
-          setError('프로필을 찾을 수 없습니다.');
-        }
-      } catch (err) {
-        console.error("Error fetching profile:", err);
+        const ref = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
+        const snap = await getDoc(ref);
+        if (snap.exists()) setProfile({ ...snap.data(), id: snap.id });
+        else setError('프로필을 찾을 수 없습니다.');
+      } catch (e) {
+        console.error("Error fetching profile:", e);
         setError('프로필을 불러오는 중 오류가 발생했습니다.');
-      } finally {
-        setLoading(false);
-      }
+      } finally { setLoading(false); }
     };
     fetchProfile();
   }, [profileId, accessCode]);
 
-  if (loading) {
-    return <div className="flex justify-center items-center min-h-screen"><Loader2 className="animate-spin h-10 w-10 text-yellow-500" /></div>;
-  }
-  if (error) {
-    return <div className="flex justify-center items-center min-h-screen text-red-500">{error}</div>;
-  }
-  if (!profile) {
-    return null;
-  }
+  if (loading) return <div className="flex justify-center items-center min-h-screen"><Loader2 className="animate-spin h-10 w-10 text-yellow-500" /></div>;
+  if (error)   return <div className="flex justify-center items-center min-h-screen text-red-500">{error}</div>;
+  if (!profile) return null;
 
   return (
     <div className="bg-gray-100 min-h-screen p-4 sm:p-8 flex items-center justify-center">
@@ -133,14 +132,10 @@ const ProfileDetailView = ({ profileId, accessCode }) => {
   );
 };
 
-// 로그인 화면 컴포넌트
+// ============================== 로그인 뷰 ==============================
 const LoginScreen = ({ onLogin, authStatus }) => {
   const [codeInput, setCodeInput] = useState('');
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (codeInput.trim()) onLogin(codeInput.trim());
-  };
-
+  const handleSubmit = (e) => { e.preventDefault(); if (codeInput.trim()) onLogin(codeInput.trim()); };
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
       <div className="w-full max-w-md bg-white p-8 rounded-xl shadow-lg">
@@ -166,7 +161,7 @@ const LoginScreen = ({ onLogin, authStatus }) => {
   );
 };
 
-// 확인 모달 컴포넌트
+// ============================== 확인 모달 ==============================
 const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
     <div className="bg-white rounded-lg p-8 shadow-xl max-w-sm w-full mx-4">
@@ -183,35 +178,24 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   </div>
 );
 
-// 프로필 카드 컴포넌트
+// ============================== 프로필 카드 ==============================
 const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm, accessCode }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
-
-  const priorityColors = {
-    '3': 'bg-red-100 text-red-800',
-    '2': 'bg-yellow-100 text-yellow-800',
-    '1': 'bg-green-100 text-green-800',
-  };
+  const priorityColors = { '3': 'bg-red-100 text-red-800', '2': 'bg-yellow-100 text-yellow-800', '1': 'bg-green-100 text-green-800' };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setEditedProfile(prev => ({ ...prev, [name]: name === 'age' ? (value ? Number(value) : '') : value }));
   };
-
   const handleSave = () => {
     const eventDate = parseDateFromRecord(editedProfile.meetingRecord);
     onUpdate(profile.id, { ...editedProfile, eventDate });
     setIsEditing(false);
   };
-
   const handleShare = () => {
     const shareUrl = `${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`;
-    navigator.clipboard.writeText(shareUrl).then(() => {
-      alert('공유 링크가 클립보드에 복사되었습니다.');
-    }, () => {
-      alert('링크 복사에 실패했습니다.');
-    });
+    navigator.clipboard.writeText(shareUrl).then(() => alert('공유 링크가 클립보드에 복사되었습니다.'), () => alert('링크 복사에 실패했습니다.'));
   };
 
   if (isEditing) {
@@ -260,14 +244,14 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
       )}
       <div className="absolute top-2 right-2 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
         <button onClick={handleShare} className="text-gray-500 hover:text-gray-800" title="공유 링크 복사"><Share2 size={14} /></button>
-        <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:text-blue-700" title="수정"><Edit size={14} /></button>
         <button onClick={() => onDelete(profile.id, profile.name)} className="text-red-500 hover:text-red-700" title="삭제"><Trash2 size={14} /></button>
+        <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:text-blue-700" title="수정"><Edit size={14} /></button>
       </div>
     </div>
   );
 };
 
-// 필터링 결과 섹션
+// ============================== 필터 섹션 ==============================
 const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, accessCode }) => (
   <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in">
     <div className="flex justify-between items-center mb-4">
@@ -275,49 +259,30 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, acc
       <button onClick={onClear} className="text-sm text-gray-500 hover:text-gray-800">필터 해제</button>
     </div>
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      {profiles.length > 0 ? (
-        profiles.map((profile, index) => (
-          <div key={profile.id} className="animate-cascade" style={{ animationDelay: `${index * 50}ms` }}>
-            <ProfileCard profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
-          </div>
-        ))
-      ) : (
-        <p className="text-gray-500 text-center col-span-full">해당 조건의 프로필이 없습니다.</p>
-      )}
+      {profiles.length > 0 ? profiles.map((p, i) => (
+        <div key={p.id} className="animate-cascade" style={{ animationDelay: `${i * 50}ms` }}>
+          <ProfileCard profile={p} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
+        </div>
+      )) : <p className="text-gray-500 text-center col-span-full">해당 조건의 프로필이 없습니다.</p>}
     </div>
   </section>
 );
 
-// 대시보드 탭
+// ============================== 대시보드 탭 ==============================
 const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
   const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
   const [searchTerm, setSearchTerm] = useState('');
   const [showMeetingProfiles, setShowMeetingProfiles] = useState(false);
 
-  const handlePieClick = (type, data) => {
-    if (data.value === 0) return;
-    setActiveFilter({ type, value: data.name });
-  };
-
-  const handleBarClick = (type, data) => {
-    const value = data.name;
-    const count = data.count || data.value;
-    if (count === 0) return;
-    setActiveFilter({ type, value });
-  };
+  const handlePieClick = (type, data) => { if (data.value === 0) return; setActiveFilter({ type, value: data.name }); };
+  const handleBarClick = (type, data) => { const value = data.name; const count = data.count || data.value; if (count === 0) return; setActiveFilter({ type, value }); };
 
   const { todayProfiles, upcomingProfiles, meetingProfiles, longTermNoContactProfiles } = useMemo(() => {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const threeDaysLater = new Date(todayStart);
-    threeDaysLater.setDate(threeDaysLater.getDate() + 4);
-    const threeMonthsAgo = new Date(now);
-    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-
-    const today = [];
-    const upcoming = [];
-    const meetings = [];
-    const longTerm = [];
+    const threeDaysLater = new Date(todayStart); threeDaysLater.setDate(threeDaysLater.getDate() + 4);
+    const threeMonthsAgo = new Date(now); threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    const today = [], upcoming = [], meetings = [], longTerm = [];
 
     profiles.forEach(p => {
       if (p.eventDate) {
@@ -328,13 +293,9 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
         } else if (eventDate > now && eventDate < threeDaysLater) {
           upcoming.push(p);
         }
-
         const lastContact = p.lastReviewedDate ? new Date(p.lastReviewedDate) : eventDate;
         const snoozeUntil = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
-
-        if (lastContact < threeMonthsAgo && (!snoozeUntil || snoozeUntil < now)) {
-          longTerm.push(p);
-        }
+        if (lastContact < threeMonthsAgo && (!snoozeUntil || snoozeUntil < now)) longTerm.push(p);
       }
     });
     return {
@@ -345,15 +306,8 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
     };
   }, [profiles]);
 
-  const handleSnooze = (profileId) => {
-    const snoozeDate = new Date();
-    snoozeDate.setMonth(snoozeDate.getMonth() + 3);
-    onUpdate(profileId, { snoozeUntil: snoozeDate.toISOString() });
-  };
-
-  const handleConfirmAlarm = (profileId) => {
-    onUpdate(profileId, { lastReviewedDate: new Date().toISOString() });
-  };
+  const handleSnooze = (profileId) => { const d = new Date(); d.setMonth(d.getMonth() + 3); onUpdate(profileId, { snoozeUntil: d.toISOString() }); };
+  const handleConfirmAlarm = (profileId) => { onUpdate(profileId, { lastReviewedDate: new Date().toISOString() }); };
 
   const ageData = useMemo(() => {
     const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
@@ -368,96 +322,65 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
     return Object.entries(groups).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
   }, [profiles]);
 
-  const keywordData = useMemo(() => {
-    return TARGET_KEYWORDS.map(keyword => ({
-      name: keyword,
-      count: profiles.filter(p => p.career?.includes(keyword)).length
-    }));
-  }, [profiles]);
+  const keywordData = useMemo(() => TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length })), [profiles]);
 
   const expertiseData = useMemo(() => {
-    const expertiseCount = {};
-    profiles.forEach(p => {
-      if (p.expertise) {
-        expertiseCount[p.expertise] = (expertiseCount[p.expertise] || 0) + 1;
-      }
-    });
-    return Object.entries(expertiseCount).map(([name, count]) => ({ name, count }));
+    const cnt = {}; profiles.forEach(p => { if (p.expertise) cnt[p.expertise] = (cnt[p.expertise] || 0) + 1; });
+    return Object.entries(cnt).map(([name, count]) => ({ name, count }));
   }, [profiles]);
 
   const priorityData = useMemo(() => {
-    const priorities = { '3 (상)': 0, '2 (중)': 0, '1 (하)': 0 };
-    profiles.forEach(p => {
-      if (p.priority === '3') priorities['3 (상)']++;
-      else if (p.priority === '2') priorities['2 (중)']++;
-      else if (p.priority === '1') priorities['1 (하)']++;
-    });
-    return Object.entries(priorities).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
+    const p = { '3 (상)': 0, '2 (중)': 0, '1 (하)': 0 };
+    profiles.forEach(x => { if (x.priority === '3') p['3 (상)']++; else if (x.priority === '2') p['2 (중)']++; else if (x.priority === '1') p['1 (하)']++; });
+    return Object.entries(p).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
   }, [profiles]);
 
   const searchedProfiles = useMemo(() => {
-    const term = searchTerm.trim();
-    if (!term) return [];
-
+    const term = searchTerm.trim(); if (!term) return [];
     const orConditions = term.split(/\s+or\s+/i);
-
-    return profiles.filter(p => {
-      return orConditions.some(condition => {
-        const andKeywords = condition.split(/\s+and\s+/i).filter(k => k);
-
-        return andKeywords.every(keyword => {
-          const fieldMap = { '이름': 'name', '경력': 'career', '나이': 'age', '전문영역': 'expertise', '기타': 'otherInfo', '우선순위': 'priority' };
-          const fieldMatch = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
-
-          if (fieldMatch) {
-            const fieldName = fieldMap[fieldMatch[1]];
-            const fieldValue = fieldMatch[2].toLowerCase();
-            const profileValue = p[fieldName] ? String(p[fieldName]).toLowerCase() : '';
-            return profileValue.includes(fieldValue);
+    return profiles.filter(p => orConditions.some(cond => {
+      const andKeywords = cond.split(/\s+and\s+/i).filter(k => k);
+      return andKeywords.every(keyword => {
+        const fieldMap = { '이름': 'name', '경력': 'career', '나이': 'age', '전문영역': 'expertise', '기타': 'otherInfo', '우선순위': 'priority' };
+        const m = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
+        if (m) {
+          const fieldName = fieldMap[m[1]]; const fieldValue = m[2].toLowerCase();
+          const profileValue = p[fieldName] ? String(p[fieldName]).toLowerCase() : '';
+          return profileValue.includes(fieldValue);
+        }
+        const decade = keyword.match(/^(\d{1,2})대$/);
+        if (decade) {
+          const start = parseInt(decade[1], 10); if (start >= 10) {
+            const minAge = start, maxAge = start + 9;
+            return p.age && p.age >= minAge && p.age <= maxAge;
           }
-
-          const ageGroupMatch = keyword.match(/^(\d{1,2})대$/);
-          if (ageGroupMatch) {
-            const decadeStart = parseInt(ageGroupMatch[1], 10);
-            if (decadeStart >= 10) {
-              const minAge = decadeStart;
-              const maxAge = decadeStart + 9;
-              return p.age && p.age >= minAge && p.age <= maxAge;
-            }
-          }
-
-          const profileText = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
-          return profileText.includes(keyword.toLowerCase());
-        });
+        }
+        const profileText = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
+        return profileText.includes(keyword.toLowerCase());
       });
-    });
+    }));
   }, [searchTerm, profiles]);
 
   const filteredProfiles = useMemo(() => {
     if (!activeFilter.type) return [];
     switch (activeFilter.type) {
       case 'age': {
-        const ageGroup = activeFilter.value;
-        return profiles.filter(p => {
-          if (!p.age) return false;
-          if (ageGroup === '10대') return p.age < 20;
-          if (ageGroup === '20대') return p.age >= 20 && p.age < 30;
-          if (ageGroup === '30대') return p.age >= 30 && p.age < 40;
-          if (ageGroup === '40대') return p.age >= 40 && p.age < 50;
-          if (ageGroup === '50대 이상') return p.age >= 50;
-          return false;
-        });
+        const g = activeFilter.value;
+        return profiles.filter(p => p.age && (
+          (g === '10대' && p.age < 20) ||
+          (g === '20대' && p.age >= 20 && p.age < 30) ||
+          (g === '30대' && p.age >= 30 && p.age < 40) ||
+          (g === '40대' && p.age >= 40 && p.age < 50) ||
+          (g === '50대 이상' && p.age >= 50)
+        ));
       }
       case 'priority': {
-        const priorityValue = activeFilter.value.split(' ')[0];
-        return profiles.filter(p => p.priority === priorityValue);
+        const v = activeFilter.value.split(' ')[0];
+        return profiles.filter(p => p.priority === v);
       }
-      case 'company':
-        return profiles.filter(p => p.career?.includes(activeFilter.value));
-      case 'expertise':
-        return profiles.filter(p => p.expertise === activeFilter.value);
-      default:
-        return [];
+      case 'company': return profiles.filter(p => p.career?.includes(activeFilter.value));
+      case 'expertise': return profiles.filter(p => p.expertise === activeFilter.value);
+      default: return [];
     }
   }, [profiles, activeFilter]);
 
@@ -467,7 +390,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
         <section>
           <h2 className="text-xl font-bold mb-4 flex items-center"><BellRing className="mr-2 text-orange-500" />장기 미접촉 알림 (3개월 이상)</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {longTermNoContactProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} isAlarmCard={true} onSnooze={handleSnooze} onConfirmAlarm={handleConfirmAlarm} accessCode={accessCode} />)}
+            {longTermNoContactProfiles.map(p => <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} isAlarmCard={true} onSnooze={(id)=>{const d=new Date();d.setMonth(d.getMonth()+3);onUpdate(id,{snoozeUntil:d.toISOString()});}} onConfirmAlarm={(id)=>onUpdate(id,{lastReviewedDate:new Date().toISOString()})} accessCode={accessCode} />)}
           </div>
         </section>
       )}
@@ -476,7 +399,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
         <section>
           <h2 className="text-xl font-bold mb-4 flex items-center"><Calendar className="mr-2 text-red-500" />오늘의 일정</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {todayProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />)}
+            {todayProfiles.map(p => <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />)}
           </div>
         </section>
       )}
@@ -485,7 +408,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
         <section>
           <h2 className="text-xl font-bold mb-4 flex items-center"><Zap className="mr-2 text-blue-500" />다가오는 일정</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {upcomingProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />)}
+            {upcomingProfiles.map(p => <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />)}
           </div>
         </section>
       )}
@@ -499,8 +422,8 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
           <div className="mb-8">
             <h2 className="text-xl font-bold mb-4">검색 결과</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
-                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
+              {searchedProfiles.length > 0 ? searchedProfiles.map(p => (
+                <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
               )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
             </div>
           </div>
@@ -528,17 +451,17 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
               <defs>
-                {COLORS.map((color, index) => (
-                  <radialGradient key={`gradient-age-${index}`} id={`gradient-age-${index}`} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
-                    <stop offset="0%" stopColor={color} stopOpacity={0.7} />
-                    <stop offset="100%" stopColor={color} stopOpacity={1} />
+                {COLORS.map((c, i) => (
+                  <radialGradient key={`ga-${i}`} id={`ga-${i}`} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+                    <stop offset="0%" stopColor={c} stopOpacity={0.7} />
+                    <stop offset="100%" stopColor={c} stopOpacity={1} />
                   </radialGradient>
                 ))}
               </defs>
-              <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(data) => handlePieClick('age', data.payload)}>
-                {ageData.map((_, index) => <Cell key={`cell-age-${index}`} fill={`url(#gradient-age-${index})`} cursor="pointer" stroke="#fff" />)}
+              <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(d) => setActiveFilter({ type:'age', value:d.payload.name })}>
+                {ageData.map((_, i) => <Cell key={`ca-${i}`} fill={`url(#ga-${i})`} cursor="pointer" stroke="#fff" />)}
               </Pie>
-              <Tooltip formatter={(value) => `${value}명`} />
+              <Tooltip formatter={(v) => `${v}명`} />
               <Legend />
             </PieChart>
           </ResponsiveContainer>
@@ -549,14 +472,14 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
               <defs>
-                <radialGradient id="gradient-priority-0"><stop offset="0%" stopColor="#FF4444" stopOpacity={0.7} /><stop offset="100%" stopColor="#FF4444" stopOpacity={1} /></radialGradient>
-                <radialGradient id="gradient-priority-1"><stop offset="0%" stopColor="#FFBB28" stopOpacity={0.7} /><stop offset="100%" stopColor="#FFBB28" stopOpacity={1} /></radialGradient>
-                <radialGradient id="gradient-priority-2"><stop offset="0%" stopColor="#00C49F" stopOpacity={0.7} /><stop offset="100%" stopColor="#00C49F" stopOpacity={1} /></radialGradient>
+                <radialGradient id="gp-0"><stop offset="0%" stopColor="#FF4444" stopOpacity={0.7} /><stop offset="100%" stopColor="#FF4444" stopOpacity={1} /></radialGradient>
+                <radialGradient id="gp-1"><stop offset="0%" stopColor="#FFBB28" stopOpacity={0.7} /><stop offset="100%" stopColor="#FFBB28" stopOpacity={1} /></radialGradient>
+                <radialGradient id="gp-2"><stop offset="0%" stopColor="#00C49F" stopOpacity={0.7} /><stop offset="100%" stopColor="#00C49F" stopOpacity={1} /></radialGradient>
               </defs>
-              <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(data) => handlePieClick('priority', data.payload)}>
-                {priorityData.map((entry, index) => <Cell key={`cell-priority-${index}`} fill={`url(#gradient-priority-${index})`} cursor="pointer" stroke="#fff"/>)}
+              <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(d) => setActiveFilter({ type:'priority', value:d.payload.name })}>
+                {priorityData.map((_, i) => <Cell key={`cp-${i}`} fill={`url(#gp-${i})`} cursor="pointer" stroke="#fff" />)}
               </Pie>
-              <Tooltip formatter={(value) => `${value}명`} />
+              <Tooltip formatter={(v) => `${v}명`} />
               <Legend />
             </PieChart>
           </ResponsiveContainer>
@@ -572,7 +495,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
         <ResponsiveContainer width="100%" height={350}>
           <BarChart data={keywordData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
             <defs>
-              <linearGradient id="gradient-company" x1="0" y1="0" x2="0" y2="1">
+              <linearGradient id="gc" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#FFBB28" stopOpacity={0.8}/>
                 <stop offset="95%" stopColor="#FF8042" stopOpacity={1}/>
               </linearGradient>
@@ -580,9 +503,9 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
             <YAxis allowDecimals={false}/>
-            <Tooltip formatter={(value) => `${value}명`} />
+            <Tooltip formatter={(v) => `${v}명`} />
             <Legend />
-            <Bar dataKey="count" fill="url(#gradient-company)" onClick={(data) => handleBarClick('company', data)} cursor="pointer" />
+            <Bar dataKey="count" fill="url(#gc)" onClick={(d) => setActiveFilter({ type:'company', value:d.name })} cursor="pointer" />
           </BarChart>
         </ResponsiveContainer>
       </section>
@@ -593,9 +516,12 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
       <section className="bg-white p-6 rounded-xl shadow-md">
         <h2 className="text-xl font-bold text-gray-800 mb-4">전문영역 분포</h2>
         <ResponsiveContainer width="100%" height={350}>
-          <BarChart data={expertiseData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+          <BarChart data={(()=>{
+            const c={}; profiles.forEach(p=>{ if(p.expertise) c[p.expertise]=(c[p.expertise]||0)+1; });
+            return Object.entries(c).map(([name,count])=>({name,count}));
+          })()} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
             <defs>
-              <linearGradient id="gradient-expertise" x1="0" y1="0" x2="0" y2="1">
+              <linearGradient id="ge" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#00C49F" stopOpacity={0.8}/>
                 <stop offset="95%" stopColor="#82ca9d" stopOpacity={1}/>
               </linearGradient>
@@ -603,9 +529,9 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
             <YAxis allowDecimals={false}/>
-            <Tooltip formatter={(value) => `${value}명`} />
+            <Tooltip formatter={(v) => `${v}명`} />
             <Legend />
-            <Bar dataKey="count" fill="url(#gradient-expertise)" onClick={(data) => handleBarClick('expertise', data)} cursor="pointer" />
+            <Bar dataKey="count" fill="url(#ge)" onClick={(d) => setActiveFilter({ type:'expertise', value:d.name })} cursor="pointer" />
           </BarChart>
         </ResponsiveContainer>
       </section>
@@ -616,7 +542,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
   );
 };
 
-// 프로필 관리 탭
+// ============================== 관리 탭 ==============================
 const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState, accessCode }) => {
   const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord } = formState;
   const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord } = setFormState;
@@ -625,55 +551,37 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
   const PROFILES_PER_PAGE = 9;
 
   const searchedProfiles = useMemo(() => {
-    const term = searchTerm.trim();
-    if (!term) return [];
-
+    const term = searchTerm.trim(); if (!term) return [];
     const orConditions = term.split(/\s+or\s+/i);
-
-    return profiles.filter(p => {
-      return orConditions.some(condition => {
-        const andKeywords = condition.split(/\s+and\s+/i).filter(k => k);
-
-        return andKeywords.every(keyword => {
-          const fieldMap = { '이름': 'name', '경력': 'career', '나이': 'age', '전문영역': 'expertise', '기타': 'otherInfo', '우선순위': 'priority' };
-          const fieldMatch = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
-
-          if (fieldMatch) {
-            const fieldName = fieldMap[fieldMatch[1]];
-            const fieldValue = fieldMatch[2].toLowerCase();
-            const profileValue = p[fieldName] ? String(p[fieldName]).toLowerCase() : '';
-            return profileValue.includes(fieldValue);
-          }
-
-          const ageGroupMatch = keyword.match(/^(\d{1,2})대$/);
-          if (ageGroupMatch) {
-            const decadeStart = parseInt(ageGroupMatch[1], 10);
-            if (decadeStart >= 10) {
-              const minAge = decadeStart;
-              const maxAge = decadeStart + 9;
-              return p.age && p.age >= minAge && p.age <= maxAge;
-            }
-          }
-
-          const profileText = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
-          return profileText.includes(keyword.toLowerCase());
-        });
+    return profiles.filter(p => orConditions.some(cond => {
+      const andKeywords = cond.split(/\s+and\s+/i).filter(k => k);
+      return andKeywords.every(keyword => {
+        const fieldMap = { '이름': 'name', '경력': 'career', '나이': 'age', '전문영역': 'expertise', '기타': 'otherInfo', '우선순위': 'priority' };
+        const m = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
+        if (m) {
+          const f = fieldMap[m[1]], v = m[2].toLowerCase();
+          const pv = p[f] ? String(p[f]).toLowerCase() : '';
+          return pv.includes(v);
+        }
+        const decade = keyword.match(/^(\d{1,2})대$/);
+        if (decade) {
+          const start = parseInt(decade[1], 10);
+          if (start >= 10) { const min = start, max = start + 9; return p.age && p.age >= min && p.age <= max; }
+        }
+        const text = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
+        return text.includes(keyword.toLowerCase());
       });
-    });
+    }));
   }, [searchTerm, profiles]);
 
   const { currentProfiles, totalPages } = useMemo(() => {
-    const sortedProfiles = [...profiles].sort((a,b) => a.name.localeCompare(b.name));
-    const indexOfLastProfile = currentPage * PROFILES_PER_PAGE;
-    const indexOfFirstProfile = indexOfLastProfile - PROFILES_PER_PAGE;
-    const current = sortedProfiles.slice(indexOfFirstProfile, indexOfLastProfile);
-    const pages = Math.ceil(sortedProfiles.length / PROFILES_PER_PAGE);
-    return { currentProfiles: current, totalPages: pages };
+    const sorted = [...profiles].sort((a,b) => a.name.localeCompare(b.name));
+    const end = currentPage * PROFILES_PER_PAGE;
+    const start = end - PROFILES_PER_PAGE;
+    return { currentProfiles: sorted.slice(start, end), totalPages: Math.ceil(sorted.length / PROFILES_PER_PAGE) };
   }, [currentPage, profiles]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm]);
+  useEffect(() => { setCurrentPage(1); }, [searchTerm]);
 
   return (
     <>
@@ -686,8 +594,8 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
           <div>
             <h2 className="text-xl font-bold mb-4">검색 결과</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
-                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
+              {searchedProfiles.length > 0 ? searchedProfiles.map(p => (
+                <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
               )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
             </div>
           </div>
@@ -717,38 +625,28 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
       <section>
         <h2 className="text-xl font-bold text-gray-800 mb-4">전체 프로필 목록</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {currentProfiles.map(profile => (
-            <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
+          {currentProfiles.map(p => (
+            <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
           ))}
         </div>
         {totalPages > 1 && (
-          <Pagination
-            totalPages={totalPages}
-            currentPage={currentPage}
-            setCurrentPage={setCurrentPage}
-          />
+          <Pagination totalPages={totalPages} currentPage={currentPage} setCurrentPage={setCurrentPage} />
         )}
       </section>
     </>
   );
 };
 
+// ============================== 페이지네이션 ==============================
 const Pagination = ({ totalPages, currentPage, setCurrentPage }) => {
-  const pageNumbers = [];
-  for (let i = 1; i <= totalPages; i++) pageNumbers.push(i);
+  const nums = []; for (let i=1;i<=totalPages;i++) nums.push(i);
   if (totalPages <= 1) return null;
-
   return (
     <nav className="mt-8 flex justify-center">
       <ul className="inline-flex items-center -space-x-px">
-        {pageNumbers.map(number => (
-          <li key={number}>
-            <button
-              onClick={() => setCurrentPage(number)}
-              className={`py-2 px-4 leading-tight border border-gray-300 ${currentPage === number ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-white text-gray-600 hover:bg-gray-100'}`}
-            >
-              {number}
-            </button>
+        {nums.map(n => (
+          <li key={n}>
+            <button onClick={() => setCurrentPage(n)} className={`py-2 px-4 leading-tight border border-gray-300 ${currentPage === n ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>{n}</button>
           </li>
         ))}
       </ul>
@@ -756,24 +654,17 @@ const Pagination = ({ totalPages, currentPage, setCurrentPage }) => {
   );
 };
 
+// ============================== 엑셀 업로더 ==============================
 const ExcelUploader = ({ onBulkAdd }) => {
   const [file, setFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState('');
 
-  const handleFileChange = (e) => {
-    setFile(e.target.files[0]);
-    setMessage('');
-  };
+  const handleFileChange = (e) => { setFile(e.target.files[0]); setMessage(''); };
 
   const handleUpload = async () => {
-    if (!file) {
-      setMessage('파일을 먼저 선택해주세요.');
-      return;
-    }
-    setIsUploading(true);
-    setMessage('파일을 읽는 중...');
-
+    if (!file) { setMessage('파일을 먼저 선택해주세요.'); return; }
+    setIsUploading(true); setMessage('파일을 읽는 중...');
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
@@ -782,33 +673,18 @@ const ExcelUploader = ({ onBulkAdd }) => {
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
         const json = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-
-        if (json.length < 2) {
-          setMessage('엑셀 파일에 데이터가 없습니다 (2행부터 읽습니다).');
-          setIsUploading(false);
-          return;
-        }
-
+        if (json.length < 2) { setMessage('엑셀 파일에 데이터가 없습니다 (2행부터 읽습니다).'); setIsUploading(false); return; }
         const newProfiles = json.slice(1).map(row => ({
-          name: row[2] || '',     // C열
-          career: row[3] || '',   // D열
-          age: row[5] ? Number(row[5]) : null, // F열
-          expertise: row[7] || '', // H열
-          priority: row[9] ? String(row[9]) : '',   // J열
-          meetingRecord: row[11] || '', // L열
-          otherInfo: row[13] || '',// N열
+          name: row[2] || '', career: row[3] || '', age: row[5] ? Number(row[5]) : null, expertise: row[7] || '',
+          priority: row[9] ? String(row[9]) : '', meetingRecord: row[11] || '', otherInfo: row[13] || '',
           eventDate: parseDateFromRecord(row[11] || ''),
-        })).filter(p => p.name && p.career); // 이름과 경력은 필수
-
+        })).filter(p => p.name && p.career);
         const resultMessage = await onBulkAdd(newProfiles);
-        setMessage(resultMessage);
-        setFile(null);
-      } catch (error) {
-        console.error("엑셀 처리 오류:", error);
+        setMessage(resultMessage); setFile(null);
+      } catch (err) {
+        console.error("엑셀 처리 오류:", err);
         setMessage('엑셀 파일을 처리하는 중 오류가 발생했습니다.');
-      } finally {
-        setIsUploading(false);
-      }
+      } finally { setIsUploading(false); }
     };
     reader.readAsArrayBuffer(file);
   };
@@ -817,14 +693,12 @@ const ExcelUploader = ({ onBulkAdd }) => {
     <section className="bg-white p-6 rounded-xl shadow-md">
       <h2 className="text-xl font-bold mb-4 flex items-center"><UploadCloud className="mr-2 text-yellow-500"/>엑셀로 일괄 등록</h2>
       <div className="space-y-4">
-        <p className="text-sm text-gray-600">
-          정해진 양식의 엑셀 파일을 업로드하여 여러 프로필을 한 번에 추가할 수 있습니다.
-        </p>
+        <p className="text-sm text-gray-600">정해진 양식의 엑셀 파일을 업로드하여 여러 프로필을 한 번에 추가할 수 있습니다.</p>
         <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md border">
           <p className="font-semibold">엑셀 양식 안내:</p>
           <p>2행부터 각 행을 한 프로필로 읽습니다.</p>
-          <p>각 열의 C=이름, D=경력, F=나이, H=전문영역, J=우선순위, L=미팅기록, N=기타정보 로 입력됩니다.</p>
-          <p className="font-bold mt-1">※ 기존 프로필과 이름이 겹칠 경우, 덮어쓰기됩니다.</p>
+          <p>열 매핑: C=이름, D=경력, F=나이, H=전문영역, J=우선순위, L=미팅기록, N=기타정보</p>
+          <p className="font-bold mt-1">※ 같은 이름은 덮어쓰기됩니다.</p>
         </div>
         <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100"/>
         <button onClick={handleUpload} disabled={!file || isUploading} className="w-full flex justify-center items-center py-2 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
@@ -836,6 +710,7 @@ const ExcelUploader = ({ onBulkAdd }) => {
   );
 };
 
+// ============================== 메인 앱 ==============================
 export default function App() {
   const [accessCode, setAccessCode] = useState(
     typeof window !== 'undefined' ? (localStorage.getItem('profileDbAccessCode') || null) : null
@@ -846,12 +721,12 @@ export default function App() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
 
   // Google API 상태
-  const [gapiClient, setGapiClient] = useState(null);          // window.gapi
-  const [tokenClient, setTokenClient] = useState(null);        // GIS token client
+  const [gapiClient, setGapiClient] = useState(null);
+  const [tokenClient, setTokenClient] = useState(null); // GIS token client
   const [isGoogleSignedIn, setIsGoogleSignedIn] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [googleApiReady, setGoogleApiReady] = useState(null);  // true/false
-  const [googleError, setGoogleError] = useState('');          // 실패 메시지(옵션)
+  const [googleApiReady, setGoogleApiReady] = useState(null);
+  const [googleError, setGoogleError] = useState('');
 
   const [newName, setNewName] = useState('');
   const [newCareer, setNewCareer] = useState('');
@@ -862,7 +737,7 @@ export default function App() {
   const [newPriority, setNewPriority] = useState('');
   const [newMeetingRecord, setNewMeetingRecord] = useState('');
 
-  // URL에서 프로필 ID와 접속 코드 확인 (브라우저에서만)
+  // 공유 URL 파라미터(브라우저에서만)
   const urlParams = useMemo(() => {
     if (typeof window === 'undefined') return new URLSearchParams('');
     return new URLSearchParams(window.location.search);
@@ -870,27 +745,19 @@ export default function App() {
   const profileIdFromUrl = urlParams.get('profile');
   const accessCodeFromUrl = urlParams.get('code');
 
-  // 외부 스크립트 로드 (SheetJS, GAPI, GIS)
+  // 외부 스크립트 로드: SheetJS, GAPI(client), GIS(oauth)
   useEffect(() => {
-    // SheetJS
     const xlsxScript = document.createElement('script');
     xlsxScript.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
-    xlsxScript.async = true;
-    document.body.appendChild(xlsxScript);
+    xlsxScript.async = true; document.body.appendChild(xlsxScript);
 
-    // GAPI (client 용)
     const gapiScript = document.createElement('script');
     gapiScript.src = "https://apis.google.com/js/api.js";
-    gapiScript.async = true;
-    gapiScript.defer = true;
-    document.body.appendChild(gapiScript);
+    gapiScript.async = true; gapiScript.defer = true; document.body.appendChild(gapiScript);
 
-    // GIS (OAuth)
     const gisScript = document.createElement('script');
     gisScript.src = "https://accounts.google.com/gsi/client";
-    gisScript.async = true;
-    gisScript.defer = true;
-    document.body.appendChild(gisScript);
+    gisScript.async = true; gisScript.defer = true; document.body.appendChild(gisScript);
 
     const onLoaded = Promise.all([
       new Promise(res => gapiScript.onload = res),
@@ -898,16 +765,16 @@ export default function App() {
     ]);
 
     onLoaded.then(() => {
-      // gapi client 초기화 (auth2 아님!)
+      // gapi client 초기화 (auth2 아님)
       window.gapi.load('client', async () => {
         try {
-          await window.gapi.client.init({
-            apiKey: GOOGLE_API_KEY,
-            discoveryDocs: DISCOVERY_DOCS,
-          });
+          if (!GOOGLE_API_KEY || !GOOGLE_CLIENT_ID) {
+            throw new Error('환경변수(GOOGLE_API_KEY/CLIENT_ID) 누락');
+          }
+          await window.gapi.client.init({ apiKey: GOOGLE_API_KEY, discoveryDocs: DISCOVERY_DOCS });
           setGapiClient(window.gapi);
 
-          // GIS token client 준비
+          // GIS Token Client
           const tc = window.google.accounts.oauth2.initTokenClient({
             client_id: GOOGLE_CLIENT_ID,
             scope: SCOPES,
@@ -922,32 +789,24 @@ export default function App() {
           setGoogleApiReady(true);
         } catch (err) {
           console.error("Error initializing Google API client", err);
-          setGoogleError(err?.error || err?.details || 'Google API 초기화 실패');
+          setGoogleError(err?.error || err?.message || 'Google API 초기화 실패');
           setGoogleApiReady(false);
         }
       });
     });
 
     return () => {
-      [xlsxScript, gapiScript, gisScript].forEach(s => {
-        if (s && document.body.contains(s)) document.body.removeChild(s);
-      });
+      [xlsxScript, gapiScript, gisScript].forEach(s => { if (s && document.body.contains(s)) document.body.removeChild(s); });
     };
   }, []);
 
   // Firebase 익명 인증
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        setAuthStatus('authenticated');
-      } else {
-        try {
-          await signInAnonymously(auth);
-          setAuthStatus('authenticated');
-        } catch (e) {
-          console.error("Firebase 익명 로그인 오류:", e);
-          setAuthStatus('error');
-        }
+      if (user) setAuthStatus('authenticated');
+      else {
+        try { await signInAnonymously(auth); setAuthStatus('authenticated'); }
+        catch (e) { console.error("Firebase 익명 로그인 오류:", e); setAuthStatus('error'); }
       }
     });
     return () => unsubscribe();
@@ -959,144 +818,94 @@ export default function App() {
   }, [accessCode]);
 
   useEffect(() => {
-    if (!profilesCollectionRef) {
-      setProfiles([]);
-      return;
-    }
+    if (!profilesCollectionRef) { setProfiles([]); return; }
     const q = query(profilesCollectionRef);
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const profilesData = querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-      setProfiles(profilesData);
+    const unsubscribe = onSnapshot(q, (qs) => {
+      const list = qs.docs.map(d => ({ ...d.data(), id: d.id }));
+      setProfiles(list);
     });
     return () => unsubscribe();
   }, [profilesCollectionRef]);
 
   const handleLogin = (code) => {
     setAccessCode(code);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('profileDbAccessCode', code);
-    }
+    if (typeof window !== 'undefined') localStorage.setItem('profileDbAccessCode', code);
   };
 
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!newName.trim() || !newCareer.trim() || !profilesCollectionRef) return;
-
     const eventDate = parseDateFromRecord(newMeetingRecord);
-
-    const profileData = { name: newName, career: newCareer, age: newAge ? Number(newAge) : null, otherInfo: newOtherInfo, eventDate, expertise: newExpertise || null, priority: newPriority || null, meetingRecord: newMeetingRecord || null };
+    const data = { name: newName, career: newCareer, age: newAge ? Number(newAge) : null, otherInfo: newOtherInfo, eventDate, expertise: newExpertise || null, priority: newPriority || null, meetingRecord: newMeetingRecord || null };
     try {
-      await addDoc(profilesCollectionRef, profileData);
+      await addDoc(profilesCollectionRef, data);
       setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewEventDate(''); setNewExpertise(''); setNewPriority(''); setNewMeetingRecord('');
-    } catch (err) {
-      console.error("프로필 저장 오류: ", err);
-    }
+    } catch (err) { console.error("프로필 저장 오류: ", err); }
   };
 
   const handleBulkAdd = async (newProfiles) => {
     if (!profilesCollectionRef || newProfiles.length === 0) return '업로드할 프로필이 없습니다.';
-
-    const existingProfilesMap = new Map(profiles.map(p => [p.name, p.id]));
+    const map = new Map(profiles.map(p => [p.name, p.id]));
     const batch = writeBatch(db);
-    let updatedCount = 0;
-    let addedCount = 0;
-
-    newProfiles.forEach(profile => {
-      const existingId = existingProfilesMap.get(profile.name);
-      if (existingId) {
-        const docRef = doc(profilesCollectionRef, existingId);
-        batch.set(docRef, profile);
-        updatedCount++;
-      } else {
-        const docRef = doc(profilesCollectionRef);
-        batch.set(docRef, profile);
-        addedCount++;
-      }
+    let upd=0, add=0;
+    newProfiles.forEach(p => {
+      const existingId = map.get(p.name);
+      const ref = existingId ? doc(profilesCollectionRef, existingId) : doc(profilesCollectionRef);
+      batch.set(ref, p);
+      existingId ? upd++ : add++;
     });
-
     await batch.commit();
-    return `${addedCount}건 추가, ${updatedCount}건 업데이트 완료.`;
+    return `${add}건 추가, ${upd}건 업데이트 완료.`;
   };
 
   const handleUpdate = async (profileId, updatedData) => {
-    const { id, ...dataToUpdate } = updatedData;
-    const profileDocRef = doc(profilesCollectionRef, profileId);
-    await updateDoc(profileDocRef, dataToUpdate);
+    const { id, ...data } = updatedData;
+    const ref = doc(profilesCollectionRef, profileId);
+    await updateDoc(ref, data);
   };
 
-  const handleDeleteRequest = (profileId, profileName) => {
-    setShowDeleteConfirm({ show: true, profileId, profileName });
-  };
-
+  const [del, setDel] = useState({ show: false, id: null, name: '' });
+  const handleDeleteRequest = (id, name) => setDel({ show: true, id, name });
   const confirmDelete = async () => {
-    if (showDeleteConfirm.profileId && profilesCollectionRef) {
-      await deleteDoc(doc(profilesCollectionRef, showDeleteConfirm.profileId));
-    }
-    setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
+    if (del.id && profilesCollectionRef) await deleteDoc(doc(profilesCollectionRef, del.id));
+    setDel({ show: false, id: null, name: '' });
   };
 
   const handleSyncToCalendar = async () => {
-    if (!isGoogleSignedIn || !gapiClient) {
-      alert('Google 계정에 먼저 로그인해주세요.');
-      return;
-    }
+    if (!isGoogleSignedIn || !gapiClient) { alert('Google 계정에 먼저 로그인해주세요.'); return; }
     setIsSyncing(true);
-    let successCount = 0;
-    let failCount = 0;
-
-    const profilesWithMeetings = profiles.filter(p => p.eventDate);
-
-    for (const profile of profilesWithMeetings) {
-      const startTime = new Date(profile.eventDate);
-      const endTime = new Date(startTime.getTime() + 90 * 60000); // 1시간 30분
-      const shareUrl = `${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`;
-
-      const reminders = [
-        { 'method': 'popup', 'minutes': 30 }
-      ];
-
-      const tenAmOnMeetingDay = new Date(startTime.getFullYear(), startTime.getMonth(), startTime.getDate(), 10, 0, 0);
-      if (startTime > tenAmOnMeetingDay) {
-        const minutesBefore = (startTime.getTime() - tenAmOnMeetingDay.getTime()) / 60000;
-        reminders.push({ 'method': 'popup', 'minutes': Math.round(minutesBefore) });
-      }
-
+    let ok=0, fail=0;
+    const targets = profiles.filter(p => p.eventDate);
+    for (const p of targets) {
+      const start = new Date(p.eventDate);
+      const end   = new Date(start.getTime() + 90*60000);
+      const shareUrl = `${window.location.origin}${window.location.pathname}?profile=${p.id}&code=${accessCode}`;
+      const reminders = [{ method:'popup', minutes:30 }];
+      const tenAM = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 10, 0, 0);
+      if (start > tenAM) reminders.push({ method:'popup', minutes: Math.round((start - tenAM)/60000) });
       const event = {
-        'summary': `(영입) ${profile.name}님 미팅`,
-        'description': `${profile.name}님 프로필 보기:\n${shareUrl}`,
-        'start': {
-          'dateTime': startTime.toISOString(),
-          'timeZone': 'Asia/Seoul',
-        },
-        'end': {
-          'dateTime': endTime.toISOString(),
-          'timeZone': 'Asia/Seoul',
-        },
-        'reminders': {
-          'useDefault': false,
-          'overrides': reminders,
-        },
+        summary: `(영입) ${p.name}님 미팅`,
+        description: `${p.name}님 프로필 보기:\n${shareUrl}`,
+        start: { dateTime: start.toISOString(), timeZone: 'Asia/Seoul' },
+        end:   { dateTime: end.toISOString(),   timeZone: 'Asia/Seoul' },
+        reminders: { useDefault:false, overrides:reminders },
       };
-
       try {
-        await gapiClient.client.calendar.events.insert({
-          'calendarId': 'primary',
-          'resource': event,
-        });
-        successCount++;
-      } catch (error) {
-        console.error(`Error creating event for ${profile.name}:`, error);
-        failCount++;
+        await gapiClient.client.calendar.events.insert({ calendarId:'primary', resource:event });
+        ok++;
+      } catch (e) {
+        console.error(`Error creating event for ${p.name}:`, e);
+        fail++;
       }
     }
     setIsSyncing(false);
-    alert(`캘린더 동기화 완료!\n성공: ${successCount}건, 실패: ${failCount}건`);
+    alert(`캘린더 동기화 완료!\n성공: ${ok}건, 실패: ${fail}건`);
   };
 
-  const formState = { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord };
-  const setFormState = { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord };
+  const formState  = { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord };
+  const setFormState= { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord };
 
-  // 공유 모드 라우팅
+  // 공유 라우트
   if (profileIdFromUrl && accessCodeFromUrl) {
     return <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />;
   }
@@ -1107,11 +916,11 @@ export default function App() {
 
   return (
     <div className="bg-gray-50 min-h-screen font-sans">
-      {showDeleteConfirm.show && (
+      {del.show && (
         <ConfirmationModal
-          message={`'${showDeleteConfirm.profileName}' 프로필을 정말로 삭제하시겠습니까?`}
+          message={`'${del.name}' 프로필을 정말로 삭제하시겠습니까?`}
           onConfirm={confirmDelete}
-          onCancel={() => setShowDeleteConfirm({ show: false, profileId: null, profileName: '' })}
+          onCancel={() => setDel({ show:false, id:null, name:'' })}
         />
       )}
       <header className="flex flex-wrap justify-between items-center p-4 sm:p-6 border-b bg-white gap-4">
@@ -1122,9 +931,7 @@ export default function App() {
         </div>
         <div className="flex items-center space-x-4">
           {googleApiReady === false && (
-            <span className="text-xs text-red-500">
-              Google Calendar 연동 비활성화됨{googleError ? ` (${googleError})` : ' (초기화 실패)'}
-            </span>
+            <span className="text-xs text-red-500">Google Calendar 연동 비활성화됨{googleError ? ` (${googleError})` : ' (초기화 실패)'}</span>
           )}
           {googleApiReady === true && (
             isGoogleSignedIn ? (
@@ -1134,10 +941,7 @@ export default function App() {
                   캘린더 동기화
                 </button>
                 <button
-                  onClick={() => {
-                    if (window.gapi?.client) window.gapi.client.setToken(null);
-                    setIsGoogleSignedIn(false);
-                  }}
+                  onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
                   className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
                 >
                   Google 로그아웃
@@ -1145,11 +949,7 @@ export default function App() {
               </>
             ) : (
               <button
-                onClick={() => {
-                  if (!tokenClient) return;
-                  // 최초 로그인: consent로 동의창
-                  tokenClient.requestAccessToken({ prompt: 'consent' });
-                }}
+                onClick={() => { if (!tokenClient) return; tokenClient.requestAccessToken({ prompt:'consent' }); }}
                 className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
               >
                 Google 로그인
@@ -1164,7 +964,7 @@ export default function App() {
 
       <div className="flex justify-center space-x-2 border-b bg-white px-6 py-2 sticky top-0 z-10">
         <button onClick={() => setActiveTab(TAB_PAGE.DASHBOARD)} className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.DASHBOARD ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg-yellow-100'}`}>대시보드</button>
-        <button onClick={() => setActiveTab(TAB_PAGE.MANAGE)} className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.MANAGE ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg-yellow-100'}`}>프로필 관리</button>
+        <button onClick={() => setActiveTab(TAB_PAGE.MANAGE)} className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.MANAGE ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg黄色-100'}`}>프로필 관리</button>
       </div>
 
       <main className="p-6 space-y-12">
