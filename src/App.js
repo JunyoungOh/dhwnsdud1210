@@ -39,6 +39,22 @@ const TAB_PAGE = {
   MANAGE: 'manage'
 };
 
+// ---------- 추가: Firestore 전송 전 값 정리 유틸 ----------
+function sanitizeForFirestore(obj) {
+  const out = {};
+  Object.entries(obj || {}).forEach(([k, v]) => {
+    if (v === undefined) return; // Firestore가 undefined를 허용하지 않음
+    if (k === 'age') {
+      if (v === '' || v === null) { out[k] = null; return; }
+      const n = Number(v);
+      out[k] = Number.isNaN(n) ? null : n;
+      return;
+    }
+    out[k] = v;
+  });
+  return out;
+}
+
 // 헬퍼 함수: 미팅 기록에서 날짜 및 시간 파싱
 const parseDateFromRecord = (recordText) => {
   if (!recordText) return null;
@@ -199,10 +215,20 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
     setEditedProfile(prev => ({ ...prev, [name]: name === 'age' ? (value ? Number(value) : '') : value }));
   };
 
-  const handleSave = () => {
-    const eventDate = parseDateFromRecord(editedProfile.meetingRecord);
-    onUpdate(profile.id, { ...editedProfile, eventDate });
-    setIsEditing(false);
+  // ---------- 수정: 저장 시 sanitize 후 업데이트 + 예외 처리 ----------
+  const handleSave = async () => {
+    try {
+      const eventDate = parseDateFromRecord(editedProfile.meetingRecord);
+      const payload = sanitizeForFirestore({
+        ...editedProfile,
+        eventDate,
+      });
+      await onUpdate(profile.id, payload);
+      setIsEditing(false);
+    } catch (err) {
+      console.error('프로필 저장 실패:', err);
+      alert('저장 중 오류가 발생했습니다. 콘솔을 확인해주세요.');
+    }
   };
 
   const handleShare = () => {
@@ -1018,10 +1044,18 @@ export default function App() {
     return `${addedCount}건 추가, ${updatedCount}건 업데이트 완료.`;
   };
 
+  // ---------- 수정: Firestore 업데이트 시 sanitize + 예외 전달 ----------
   const handleUpdate = async (profileId, updatedData) => {
-    const { id, ...dataToUpdate } = updatedData;
-    const profileDocRef = doc(profilesCollectionRef, profileId);
-    await updateDoc(profileDocRef, dataToUpdate);
+    try {
+      const { id, ...rest } = updatedData || {};
+      const payload = sanitizeForFirestore(rest);
+      const profileDocRef = doc(profilesCollectionRef, profileId);
+      await updateDoc(profileDocRef, payload);
+    } catch (err) {
+      console.error("프로필 업데이트 실패:", err);
+      // 상위(카드)에서 alert를 띄울 수 있도록 예외를 전달
+      throw err;
+    }
   };
 
   const handleDeleteRequest = (profileId, profileName) => {
