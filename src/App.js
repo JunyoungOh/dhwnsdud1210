@@ -10,15 +10,8 @@ import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit
 // ==============================
 const GOOGLE_API_KEY   = process.env.REACT_APP_GOOGLE_API_KEY;
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
-const DISCOVERY_DOCS   = [
-  "https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest",
-  "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest" // ✅ Drive 추가
-];
-// Calendar + Drive(file) 권한
-const SCOPES = [
-  "https://www.googleapis.com/auth/calendar.events",
-  "https://www.googleapis.com/auth/drive.file" // ✅ Drive 업로드용
-].join(" ");
+const DISCOVERY_DOCS   = ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"];
+const SCOPES           = "https://www.googleapis.com/auth/calendar.events";
 
 const firebaseConfig = {
   apiKey:            process.env.REACT_APP_FIREBASE_API_KEY,
@@ -63,13 +56,15 @@ function formatDateOnlyInTZ(date, timeZone = TZ) {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-// ✅ 다양한 표기 인식
+// ✅ 다양한 표기 인식: (25.08.14) AM/PM/오전/오후 7시 30분 / 2025-08-14 19:30 / 2025-08-14 등
+// 반환: { start: Date, hadTime: boolean }
 function parseDateTimeFromRecord(recordText) {
   if (!recordText) return null;
   const text = typeof recordText === 'string' ? recordText : String(recordText || '');
   let best = null; // { date: Date, hadTime: boolean }
 
-  // (YY.MM.DD) [AM|PM|오전|오후]? hh[:mm]|hh시[ mm분]?
+  // 패턴 A: (YY.MM.DD) [AM|PM|오전|오후]? hh[:mm]|hh시[ mm분]?
+  // 예: (25.08.14) PM 7시 00분 / (25.08.14) 오후 7시 / (25.08.14) 19:30
   const reA = /\((\d{2})\.(\d{2})\.(\d{2})\)\s*(?:(AM|PM|오전|오후)?\s*(\d{1,2})(?::(\d{2}))?(?:\s*시)?(?:\s*(\d{1,2})\s*분?)?)?/gi;
   let m;
   while ((m = reA.exec(text)) !== null) {
@@ -81,6 +76,7 @@ function parseDateTimeFromRecord(recordText) {
 
     if (m[5] || m[6] || m[4]) {
       hadTime = true;
+      // m[5]=hh(:mm의 hh), m[6]=mm, m[7]=분 표기 mm
       hour   = m[5] ? parseInt(m[5], 10) : 0;
       minute = m[6] ? parseInt(m[6], 10) : (m[7] ? parseInt(m[7], 10) : 0);
       const ampm = m[4] ? m[4].toUpperCase() : '';
@@ -92,12 +88,12 @@ function parseDateTimeFromRecord(recordText) {
     if (!best || d > best.date) best = { date: d, hadTime };
   }
 
-  // YYYY-MM-DD[ HH:mm]
+  // 패턴 B: YYYY-MM-DD[ HH:mm]
   const reB = /(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2}))?/g;
   while ((m = reB.exec(text)) !== null) {
     const year  = parseInt(m[1], 10);
     const month = parseInt(m[2], 10) - 1;
-       const day   = parseInt(m[3], 10);
+    const day   = parseInt(m[3], 10);
     let hadTime = false;
     let hour = 0, minute = 0;
     if (m[4]) { hadTime = true; hour = parseInt(m[4], 10); minute = parseInt(m[5] || '0', 10); }
@@ -105,6 +101,7 @@ function parseDateTimeFromRecord(recordText) {
     if (!best || d > best.date) best = { date: d, hadTime };
   }
 
+  // 결과 없으면 null
   return best ? best : null;
 }
 
@@ -328,8 +325,8 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
       {/* 액션 버튼 */}
       <div className="absolute top-2 right-2 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
         <button onClick={handleShare} className="text-gray-500 hover:text-gray-800" title="공유 링크 복사"><Share2 size={14} /></button>
-        <button onClick={() => onDelete(profile.id, profile.name)} className="text-red-500 hover:text-red-700" title="삭제"><Trash2 size={14} /></button>
         <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:text-blue-700" title="수정"><Edit size={14} /></button>
+        <button onClick={() => onDelete(profile.id, profile.name)} className="text-red-500 hover:text-red-700" title="삭제"><Trash2 size={14} /></button>
       </div>
 
       {isAlarmCard && (
@@ -343,7 +340,7 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
 };
 
 // ===============================
-// 필터링 섹션 / 대시보드 탭 (차트 일부 생략)
+// 필터링 섹션 / 대시보드 탭 (기존 동일)
 // ===============================
 const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, accessCode, onSyncOne }) => (
   <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in">
@@ -369,6 +366,9 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
   const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
   const [searchTerm, setSearchTerm] = useState('');
   const [showMeetingProfiles, setShowMeetingProfiles] = useState(false);
+
+  const handlePieClick = (type, data) => { if (data.value === 0) return; setActiveFilter({ type, value: data.name }); };
+  const handleBarClick = (type, data) => { const value = data.name; const count = data.count || data.value; if (count === 0) return; setActiveFilter({ type, value }); };
 
   const { todayProfiles, upcomingProfiles, meetingProfiles, longTermNoContactProfiles } = useMemo(() => {
     const now = new Date();
@@ -404,6 +404,32 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
     onUpdate(profileId, { snoozeUntil: snoozeDate.toISOString() });
   };
   const handleConfirmAlarm = (profileId) => onUpdate(profileId, { lastReviewedDate: new Date().toISOString() });
+
+  const ageData = useMemo(() => {
+    const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
+    profiles.forEach(({ age }) => {
+      if (!age) return;
+      if (age < 20) groups['10대']++;
+      else if (age < 30) groups['20대']++;
+      else if (age < 40) groups['30대']++;
+      else if (age < 50) groups['40대']++;
+      else groups['50대 이상']++;
+    });
+    return Object.entries(groups).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
+  }, [profiles]);
+
+  const keywordData = useMemo(() => TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length })), [profiles]);
+
+  const expertiseData = useMemo(() => {
+    const c = {}; profiles.forEach(p => { if (p.expertise) c[p.expertise] = (c[p.expertise] || 0) + 1; });
+    return Object.entries(c).map(([name, count]) => ({ name, count }));
+  }, [profiles]);
+
+  const priorityData = useMemo(() => {
+    const p = { '3 (상)': 0, '2 (중)': 0, '1 (하)': 0 };
+    profiles.forEach(x => { if (x.priority === '3') p['3 (상)']++; else if (x.priority === '2') p['2 (중)']++; else if (x.priority === '1') p['1 (하)']++; });
+    return Object.entries(p).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
+  }, [profiles]);
 
   const searchedProfiles = useMemo(() => {
     const term = searchTerm.trim(); if (!term) return [];
@@ -490,17 +516,103 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
         )}
       </section>
 
-      {/* 차트 섹션 (원 코드에 있던 부분 사용 시 유지) */}
-      {/* ... */}
+      <section className="mb-8 flex space-x-4">
+        <div className="bg-white p-4 rounded-xl shadow-md">
+          <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
+          <p className="text-3xl font-bold text-yellow-500 mt-1">{profiles.length}</p>
+        </div>
+        <div className="bg-white p-4 rounded-xl shadow-md cursor-pointer hover:bg-gray-50" onClick={() => setShowMeetingProfiles(!showMeetingProfiles)}>
+          <h3 className="text-base font-medium text-gray-500">미팅 진행 프로필</h3>
+          <p className="text-3xl font-bold text-yellow-500 mt-1">{meetingProfiles.length}</p>
+        </div>
+      </section>
+
+      {showMeetingProfiles && (
+        <FilterResultSection title="미팅 진행 프로필 (최신순)" profiles={meetingProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setShowMeetingProfiles(false)} accessCode={accessCode} onSyncOne={onSyncOne} />
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <section className="bg-white p-6 rounded-xl shadow-md">
+          <h2 className="text-xl font-bold text-gray-800 mb-4">세대별 분포</h2>
+          <ResponsiveContainer width="100%" height={300}>
+            <PieChart>
+              <defs>
+                {COLORS.map((c, i) => (
+                  <radialGradient key={`g-age-${i}`} id={`g-age-${i}`} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+                    <stop offset="0%" stopColor={c} stopOpacity={0.7} />
+                    <stop offset="100%" stopColor={c} stopOpacity={1} />
+                  </radialGradient>
+                ))}
+              </defs>
+              <Pie data={useMemo(()=>{const g={'10대':0,'20대':0,'30대':0,'40대':0,'50대 이상':0}; profiles.forEach(({age})=>{if(!age)return; if(age<20)g['10대']++; else if(age<30)g['20대']++; else if(age<40)g['30대']++; else if(age<50)g['40대']++; else g['50대 이상']++;}); return Object.entries(g).map(([name,value])=>({name,value})).filter(d=>d.value>0);},[profiles])} cx="50%" cy="50%" outerRadius={100} dataKey="value" label>
+                {useMemo(()=>{const g={'10대':0,'20대':0,'30대':0,'40대':0,'50대 이상':0}; profiles.forEach(({age})=>{if(!age)return; if(age<20)g['10대']++; else if(age<30)g['20대']++; else if(age<40)g['30대']++; else if(age<50)g['40대']++; else g['50대 이상']++;}); return Object.entries(g).map(([_,v],i)=><Cell key={`cell-age-${i}`} fill={`url(#g-age-${i})`} stroke="#fff" />);},[profiles])}
+              </Pie>
+              <Tooltip formatter={(v) => `${v}명`} /><Legend />
+            </PieChart>
+          </ResponsiveContainer>
+        </section>
+
+        <section className="bg-white p-6 rounded-xl shadow-md">
+          <h2 className="text-xl font-bold text-gray-800 mb-4">우선순위별 분포</h2>
+          <ResponsiveContainer width="100%" height={300}>
+            <PieChart>
+              <defs>
+                <radialGradient id="gp-0"><stop offset="0%" stopColor="#FF4444" stopOpacity={0.7} /><stop offset="100%" stopColor="#FF4444" stopOpacity={1} /></radialGradient>
+                <radialGradient id="gp-1"><stop offset="0%" stopColor="#FFBB28" stopOpacity={0.7} /><stop offset="100%" stopColor="#FFBB28" stopOpacity={1} /></radialGradient>
+                <radialGradient id="gp-2"><stop offset="0%" stopColor="#00C49F" stopOpacity={0.7} /><stop offset="100%" stopColor="#00C49F" stopOpacity={1} /></radialGradient>
+              </defs>
+              <Pie data={useMemo(()=>{const p={'3 (상)':0,'2 (중)':0,'1 (하)':0}; profiles.forEach(x=>{if(x.priority==='3')p['3 (상)']++; else if(x.priority==='2')p['2 (중)']++; else if(x.priority==='1')p['1 (하)']++;}); return Object.entries(p).map(([name,value])=>({name,value})).filter(d=>d.value>0);},[profiles])} cx="50%" cy="50%" outerRadius={100} dataKey="value" label>
+                {useMemo(()=>[{},{},{}].map((_,i)=><Cell key={`cell-p-${i}`} fill={`url(#gp-${i})`} stroke="#fff" />),[])}
+              </Pie>
+              <Tooltip formatter={(v) => `${v}명`} /><Legend />
+            </PieChart>
+          </ResponsiveContainer>
+        </section>
+      </div>
+
       {(activeFilter.type === 'age' || activeFilter.type === 'priority') && (
         <FilterResultSection title={`"${activeFilter.value}" 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} accessCode={accessCode} onSyncOne={onSyncOne} />
+      )}
+
+      <section className="bg-white p-6 rounded-xl shadow-md">
+        <h2 className="text-xl font-bold text-gray-800 mb-4">IT 기업 경력 분포</h2>
+        <ResponsiveContainer width="100%" height={350}>
+          <BarChart data={TARGET_KEYWORDS.map(k=>({name:k, count: profiles.filter(p=>p.career?.includes(k)).length}))} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+            <defs>
+              <linearGradient id="gradient-company" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#FFBB28" stopOpacity={0.8}/><stop offset="95%" stopColor="#FF8042" stopOpacity={1}/></linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
+            <YAxis allowDecimals={false}/><Tooltip formatter={(v)=>`${v}명`} /><Legend />
+            <Bar dataKey="count" fill="url(#gradient-company)" />
+          </BarChart>
+        </ResponsiveContainer>
+      </section>
+
+      <section className="bg-white p-6 rounded-xl shadow-md">
+        <h2 className="text-xl font-bold text-gray-800 mb-4">전문영역 분포</h2>
+        <ResponsiveContainer width="100%" height={350}>
+          <BarChart data={useMemo(()=>{const c={}; profiles.forEach(p=>{if(p.expertise) c[p.expertise]=(c[p.expertise]||0)+1;}); return Object.entries(c).map(([name,count])=>({name,count}));},[profiles])} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+            <defs>
+              <linearGradient id="gradient-expertise" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00C49F" stopOpacity={0.8}/><stop offset="95%" stopColor="#82ca9d" stopOpacity={1}/></linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
+            <YAxis allowDecimals={false}/><Tooltip formatter={(v)=>`${v}명`} /><Legend />
+            <Bar dataKey="count" fill="url(#gradient-expertise)" />
+          </BarChart>
+        </ResponsiveContainer>
+      </section>
+
+      {activeFilter.type === 'expertise' && (
+        <FilterResultSection title={`"${activeFilter.value}" 전문영역 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} accessCode={accessCode} onSyncOne={onSyncOne} />
       )}
     </>
   );
 };
 
 // ===============================
-// 관리 탭 (기존 동일)
+// 관리 탭 (기존 동일, 카드에 onSyncOne 전달)
 // ===============================
 const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState, accessCode, onSyncOne }) => {
   const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord } = formState;
@@ -660,56 +772,6 @@ const ExcelUploader = ({ onBulkAdd }) => {
 };
 
 // ===============================
-// (NEW) Google Drive 업로드 유틸
-// ===============================
-async function uploadImageToDriveFromUrl(gapiClient, imageUrl, filename = "profile.png") {
-  const token = gapiClient?.client?.getToken?.()?.access_token;
-  if (!token) throw new Error("Google 토큰이 없습니다.");
-
-  // 1) 이미지 가져오기
-  const res = await fetch(imageUrl, { mode: "cors" });
-  if (!res.ok) throw new Error("이미지 다운로드 실패");
-  const blob = await res.blob();
-
-  // 2) multipart 업로드 구성
-  const boundary = "-------314159265358979323846";
-  const delimiter = `\r\n--${boundary}\r\n`;
-  const closeDelim = `\r\n--${boundary}--`;
-  const meta = { name: filename, mimeType: blob.type || "image/png" };
-  const metaPart = `Content-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}`;
-  const arrayBuffer = await blob.arrayBuffer();
-  const mediaHeader = `Content-Type: ${blob.type || "application/octet-stream"}\r\n\r\n`;
-  const multipartBody = new Blob(
-    [delimiter, metaPart, delimiter, mediaHeader, new Uint8Array(arrayBuffer), closeDelim],
-    { type: `multipart/related; boundary=${boundary}` }
-  );
-
-  // 3) Drive 업로드
-  const upload = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${token}`, "Content-Type": multipartBody.type },
-    body: multipartBody,
-  });
-  if (!upload.ok) throw new Error("Drive 업로드 실패: " + (await upload.text()));
-  const file = await upload.json(); // { id, ... }
-
-  // 4) (옵션) 누구나 보기
-  await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}/permissions`, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ role: "reader", type: "anyone" }),
-  });
-
-  // 5) 파일 정보 조회
-  const infoRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${file.id}?fields=id,name,mimeType,webViewLink,webContentLink,iconLink`,
-    { headers: { "Authorization": `Bearer ${token}` } }
-  );
-  if (!infoRes.ok) throw new Error("Drive 파일 조회 실패");
-  return await infoRes.json();
-}
-
-// ===============================
 // App
 // ===============================
 export default function App() {
@@ -725,7 +787,7 @@ export default function App() {
   const [isGoogleSignedIn, setIsGoogleSignedIn] = useState(false);
   const [googleApiReady, setGoogleApiReady]     = useState(null);
   const [googleError, setGoogleError]           = useState('');
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false); // (헤더 일괄 버튼용이었지만 남겨둠)
 
   // 신규 입력 폼 상태
   const [newName, setNewName] = useState('');
@@ -863,13 +925,14 @@ export default function App() {
   };
 
   // -------------------------------
-  // ✅ 개별 캘린더 동기화 (+ 모바일 링크 개선 + 이미지 첨부)
+  // ✅ 개별 캘린더 동기화
   // -------------------------------
   const ensureGoogleAuth = () => {
     return new Promise((resolve, reject) => {
       const token = gapiClient?.client?.getToken?.();
       if (token?.access_token) { setIsGoogleSignedIn(true); resolve(true); return; }
       if (!tokenClient) { reject(new Error('Google API 초기화 전입니다. 잠시 후 다시 시도해주세요.')); return; }
+      // 토큰 요청 후 이어서 진행
       tokenClient.callback = (resp) => {
         if (resp && resp.access_token) {
           gapiClient.client.setToken({ access_token: resp.access_token });
@@ -891,53 +954,25 @@ export default function App() {
     // 1) 시간 파싱
     let parsed = parseDateTimeFromRecord(profile.meetingRecord);
     if (!parsed && profile.eventDate) {
-      parsed = { date: new Date(profile.eventDate), hadTime: true };
+      parsed = { date: new Date(profile.eventDate), hadTime: true }; // 기존 eventDate가 있으면 시간 있는 것으로 간주
     }
     if (!parsed) { alert('미팅 날짜/시간을 인식할 수 없습니다. "미팅기록"에 날짜를 입력해주세요.'); return; }
 
-    // 2) 모바일에서도 클릭되는 링크 세팅
-    const shareUrl = `${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`;
-    const baseEvent = {
-      summary: `(영입) ${profile.name}님 미팅`,
-      description: `${shareUrl}\n\n${profile.name}님 프로필 링크입니다.`,
-      location: shareUrl, // ✅ 모바일 클라이언트에서 링크 처리 안정화
-      source: { title: `${profile.name} 프로필`, url: shareUrl }, // ✅ 일부 클라이언트가 별도 링크로 노출
-    };
-
-    // 3) 프로필 이미지가 있으면 Drive에 업로드 후 첨부
-    let attachments = [];
-    if (profile.photoURL) {
-      try {
-        const driveFile = await uploadImageToDriveFromUrl(
-          gapiClient,
-          profile.photoURL,
-          `Profile_${profile.name}_${profile.id}.png`
-        );
-        attachments.push({
-          fileId: driveFile.id,
-          fileUrl: driveFile.webViewLink,
-          title: `${profile.name} 프로필 이미지`,
-          mimeType: driveFile.mimeType || "image/png",
-        });
-      } catch (e) {
-        console.warn("프로필 이미지 첨부 실패(Drive 업로드 실패). 첨부 없이 진행:", e);
-      }
-    }
-
-    // 4) 이벤트 시간 만들기
+    // 2) 이벤트 시간 만들기 (hadTime 없으면 올데이)
     const startDate = parsed.date;
-    let eventResource = { ...baseEvent };
+    let eventResource;
     if (parsed.hadTime) {
       const startLocal = formatRFC3339InTZ(startDate, TZ);
       const endDate = new Date(startDate.getTime() + 90 * 60000); // 1시간 30분
       const endLocal = formatRFC3339InTZ(endDate, TZ);
       eventResource = {
-        ...eventResource,
+        summary: `(영입) ${profile.name}님 미팅`,
+        description: `${profile.name}님 프로필 보기:\n${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`,
         start: { dateTime: startLocal, timeZone: TZ },
         end:   { dateTime: endLocal,   timeZone: TZ },
         reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 30 }] },
       };
-      // 당일 오전 10시 추가 알림(시작보다 전이면)
+      // 당일 오전 10시 알림 추가(시작보다 전이면)
       const ten = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 10, 0, 0);
       if (startDate > ten) {
         const minutesBefore = Math.round((startDate.getTime() - ten.getTime()) / 60000);
@@ -945,30 +980,35 @@ export default function App() {
       }
     } else {
       const dateStr = formatDateOnlyInTZ(startDate, TZ);
+      // 올데이는 end가 다음날(Exclusive)
       const end = new Date(startDate); end.setDate(end.getDate() + 1);
       const endStr = formatDateOnlyInTZ(end, TZ);
-      eventResource = { ...eventResource, start: { date: dateStr }, end: { date: endStr } };
+      eventResource = {
+        summary: `(영입) ${profile.name}님 미팅`,
+        description: `${profile.name}님 프로필 보기:\n${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`,
+        start: { date: dateStr },
+        end:   { date: endStr  },
+      };
     }
-
-    if (attachments.length) eventResource.attachments = attachments; // ✅ 첨부 적용
 
     try {
       let result;
       if (profile.gcalEventId) {
+        // 수정 (patch)
         result = await gapiClient.client.calendar.events.patch({
           calendarId: 'primary',
           eventId: profile.gcalEventId,
           resource: eventResource,
-          supportsAttachments: true, // ✅ 중요
         });
       } else {
+        // 생성 (insert)
         result = await gapiClient.client.calendar.events.insert({
           calendarId: 'primary',
           resource: eventResource,
-          supportsAttachments: true, // ✅ 중요
         });
       }
       const ev = result.result || {};
+      // 3) 문서에 저장
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', accessCode, profile.id), {
         gcalEventId: ev.id || profile.gcalEventId || null,
         gcalHtmlLink: ev.htmlLink || profile.gcalHtmlLink || null,
@@ -1015,7 +1055,7 @@ export default function App() {
           {googleApiReady === true && (
             isGoogleSignedIn ? (
               <>
-                {/* 필요 시 일괄 동기화 버튼 복구 가능
+                {/* 필요 시 일괄 동기화 버튼을 다시 살릴 수도 있습니다.
                 <button onClick={...} disabled={isSyncing} className="text-sm font-semibold text-white bg-blue-500 hover:bg-blue-600 px-3 py-2 rounded-md flex items-center disabled:bg-blue-300">
                   {isSyncing ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1.5" />}
                   전체 동기화
