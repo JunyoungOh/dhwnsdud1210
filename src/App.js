@@ -56,15 +56,13 @@ function formatDateOnlyInTZ(date, timeZone = TZ) {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-// ✅ 다양한 표기 인식: (25.08.14) AM/PM/오전/오후 7시 30분 / 2025-08-14 19:30 / 2025-08-14 등
-// 반환: { start: Date, hadTime: boolean }
+// ✅ 다양한 표기 인식
 function parseDateTimeFromRecord(recordText) {
   if (!recordText) return null;
   const text = typeof recordText === 'string' ? recordText : String(recordText || '');
-  let best = null; // { date: Date, hadTime: boolean }
+  let best = null;
 
   // 패턴 A: (YY.MM.DD) [AM|PM|오전|오후]? hh[:mm]|hh시[ mm분]?
-  // 예: (25.08.14) PM 7시 00분 / (25.08.14) 오후 7시 / (25.08.14) 19:30
   const reA = /\((\d{2})\.(\d{2})\.(\d{2})\)\s*(?:(AM|PM|오전|오후)?\s*(\d{1,2})(?::(\d{2}))?(?:\s*시)?(?:\s*(\d{1,2})\s*분?)?)?/gi;
   let m;
   while ((m = reA.exec(text)) !== null) {
@@ -76,7 +74,6 @@ function parseDateTimeFromRecord(recordText) {
 
     if (m[5] || m[6] || m[4]) {
       hadTime = true;
-      // m[5]=hh(:mm의 hh), m[6]=mm, m[7]=분 표기 mm
       hour   = m[5] ? parseInt(m[5], 10) : 0;
       minute = m[6] ? parseInt(m[6], 10) : (m[7] ? parseInt(m[7], 10) : 0);
       const ampm = m[4] ? m[4].toUpperCase() : '';
@@ -101,7 +98,6 @@ function parseDateTimeFromRecord(recordText) {
     if (!best || d > best.date) best = { date: d, hadTime };
   }
 
-  // 결과 없으면 null
   return best ? best : null;
 }
 
@@ -325,8 +321,8 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
       {/* 액션 버튼 */}
       <div className="absolute top-2 right-2 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
         <button onClick={handleShare} className="text-gray-500 hover:text-gray-800" title="공유 링크 복사"><Share2 size={14} /></button>
-        <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:text-blue-700" title="수정"><Edit size={14} /></button>
         <button onClick={() => onDelete(profile.id, profile.name)} className="text-red-500 hover:text-red-700" title="삭제"><Trash2 size={14} /></button>
+        <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:text-blue-700" title="수정"><Edit size={14} /></button>
       </div>
 
       {isAlarmCard && (
@@ -787,7 +783,7 @@ export default function App() {
   const [isGoogleSignedIn, setIsGoogleSignedIn] = useState(false);
   const [googleApiReady, setGoogleApiReady]     = useState(null);
   const [googleError, setGoogleError]           = useState('');
-  const [isSyncing, setIsSyncing] = useState(false); // (헤더 일괄 버튼용이었지만 남겨둠)
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // 신규 입력 폼 상태
   const [newName, setNewName] = useState('');
@@ -925,14 +921,13 @@ export default function App() {
   };
 
   // -------------------------------
-  // ✅ 개별 캘린더 동기화
+  // ✅ 개별 캘린더 동기화 (모바일 링크 열림 개선 패치 적용)
   // -------------------------------
   const ensureGoogleAuth = () => {
     return new Promise((resolve, reject) => {
       const token = gapiClient?.client?.getToken?.();
       if (token?.access_token) { setIsGoogleSignedIn(true); resolve(true); return; }
       if (!tokenClient) { reject(new Error('Google API 초기화 전입니다. 잠시 후 다시 시도해주세요.')); return; }
-      // 토큰 요청 후 이어서 진행
       tokenClient.callback = (resp) => {
         if (resp && resp.access_token) {
           gapiClient.client.setToken({ access_token: resp.access_token });
@@ -954,25 +949,32 @@ export default function App() {
     // 1) 시간 파싱
     let parsed = parseDateTimeFromRecord(profile.meetingRecord);
     if (!parsed && profile.eventDate) {
-      parsed = { date: new Date(profile.eventDate), hadTime: true }; // 기존 eventDate가 있으면 시간 있는 것으로 간주
+      parsed = { date: new Date(profile.eventDate), hadTime: true };
     }
     if (!parsed) { alert('미팅 날짜/시간을 인식할 수 없습니다. "미팅기록"에 날짜를 입력해주세요.'); return; }
 
-    // 2) 이벤트 시간 만들기 (hadTime 없으면 올데이)
+    // ✅ 공유 링크 (첫 줄 단독, source.url & location에도 동일 링크)
+    const shareUrl = `${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`;
+    const baseEvent = {
+      summary: `(영입) ${profile.name}님 미팅`,
+      description: `${shareUrl}\n\n${profile.name}님 프로필 보기 링크입니다.\n모바일에서 링크가 안 열리면 길게 눌러 열기/복사를 사용하세요.`,
+      location: shareUrl,
+      source: { title: `${profile.name} 프로필`, url: shareUrl },
+    };
+
+    // 2) 이벤트 시간 만들기
     const startDate = parsed.date;
     let eventResource;
     if (parsed.hadTime) {
       const startLocal = formatRFC3339InTZ(startDate, TZ);
-      const endDate = new Date(startDate.getTime() + 90 * 60000); // 1시간 30분
+      const endDate = new Date(startDate.getTime() + 90 * 60000);
       const endLocal = formatRFC3339InTZ(endDate, TZ);
       eventResource = {
-        summary: `(영입) ${profile.name}님 미팅`,
-        description: `${profile.name}님 프로필 보기:\n${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`,
+        ...baseEvent,
         start: { dateTime: startLocal, timeZone: TZ },
         end:   { dateTime: endLocal,   timeZone: TZ },
         reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 30 }] },
       };
-      // 당일 오전 10시 알림 추가(시작보다 전이면)
       const ten = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 10, 0, 0);
       if (startDate > ten) {
         const minutesBefore = Math.round((startDate.getTime() - ten.getTime()) / 60000);
@@ -980,35 +982,31 @@ export default function App() {
       }
     } else {
       const dateStr = formatDateOnlyInTZ(startDate, TZ);
-      // 올데이는 end가 다음날(Exclusive)
       const end = new Date(startDate); end.setDate(end.getDate() + 1);
       const endStr = formatDateOnlyInTZ(end, TZ);
       eventResource = {
-        summary: `(영입) ${profile.name}님 미팅`,
-        description: `${profile.name}님 프로필 보기:\n${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`,
+        ...baseEvent,
         start: { date: dateStr },
         end:   { date: endStr  },
       };
     }
 
+    // 3) 생성/수정
     try {
       let result;
       if (profile.gcalEventId) {
-        // 수정 (patch)
         result = await gapiClient.client.calendar.events.patch({
           calendarId: 'primary',
           eventId: profile.gcalEventId,
           resource: eventResource,
         });
       } else {
-        // 생성 (insert)
         result = await gapiClient.client.calendar.events.insert({
           calendarId: 'primary',
           resource: eventResource,
         });
       }
       const ev = result.result || {};
-      // 3) 문서에 저장
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', accessCode, profile.id), {
         gcalEventId: ev.id || profile.gcalEventId || null,
         gcalHtmlLink: ev.htmlLink || profile.gcalHtmlLink || null,
@@ -1055,7 +1053,7 @@ export default function App() {
           {googleApiReady === true && (
             isGoogleSignedIn ? (
               <>
-                {/* 필요 시 일괄 동기화 버튼을 다시 살릴 수도 있습니다.
+                {/* 필요 시 일괄 동기화 버튼 가능
                 <button onClick={...} disabled={isSyncing} className="text-sm font-semibold text-white bg-blue-500 hover:bg-blue-600 px-3 py-2 rounded-md flex items-center disabled:bg-blue-300">
                   {isSyncing ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1.5" />}
                   전체 동기화
@@ -1083,7 +1081,9 @@ export default function App() {
       </header>
 
       <div className="flex justify-center space-x-2 border-b bg-white px-6 py-2 sticky top-0 z-10">
-        <button onClick={() => setActiveTab(TAB_PAGE.DASHBOARD)} className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.DASHBOARD ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg-yellow-100'}`}>대시보드</button>
+        <button onClick={() => setActiveTab(TAB_PAGE.DASHBOARD)} className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.DASHBOARD ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg黄色-100'}`.replace('黄色','yellow')}>{/* fix some IME */}
+          대시보드
+        </button>
         <button onClick={() => setActiveTab(TAB_PAGE.MANAGE)} className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.MANAGE ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg-yellow-100'}`}>프로필 관리</button>
       </div>
 
