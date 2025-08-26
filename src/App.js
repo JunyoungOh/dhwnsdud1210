@@ -2,21 +2,24 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import {
-  getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query,
-  setLogLevel, updateDoc, writeBatch, getDoc
+  getFirestore, collection, addDoc, onSnapshot, doc,
+  deleteDoc, query, setLogLevel, updateDoc, writeBatch, getDoc
 } from 'firebase/firestore';
 import {
-  getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL
+  getStorage, ref as storageRef, uploadBytesResumable,
+  getDownloadURL, setMaxUploadRetryTime
 } from 'firebase/storage';
 import {
   PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer
 } from 'recharts';
 import {
-  Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2,
-  Edit, Trash2, ShieldAlert, X, Save, UploadCloud, BellRing, Share2, RefreshCw, Image as ImageIcon, FileArchive
+  Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2,
+  ShieldAlert, X, Save, UploadCloud, BellRing, Share2, RefreshCw, Image as ImageIcon
 } from 'lucide-react';
 
-// ========================= Google API (GIS) & Firebase env =========================
+/* ===================================================================================
+   환경변수 (.env / Netlify vars)
+   =================================================================================== */
 const GOOGLE_API_KEY   = process.env.REACT_APP_GOOGLE_API_KEY;
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
 const DISCOVERY_DOCS   = ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"];
@@ -32,35 +35,39 @@ const firebaseConfig = {
   measurementId:     process.env.REACT_APP_FIREBASE_MEASUREMENT_ID
 };
 
-const appId  = 'profile-db-app-junyoungoh';
-const app    = initializeApp(firebaseConfig);
-const db     = getFirestore(app);
-const auth   = getAuth(app);
+const appId = 'profile-db-app-junyoungoh';
+
+/* ===================================================================================
+   Firebase 초기화
+   =================================================================================== */
+const app     = initializeApp(firebaseConfig);
+const db      = getFirestore(app);
+const auth    = getAuth(app);
 const storage = getStorage(app);
+
+// 네트워크 느릴 때 0%로 오래 보이는 현상 완화
+setMaxUploadRetryTime(storage, 60_000);
 setLogLevel('debug');
 
+/* ===================================================================================
+   상수/유틸
+   =================================================================================== */
 const COLORS = ['#FFBB28', '#FF8042', '#00C49F', '#8884D8', '#FF4444', '#82ca9d'];
 const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아한형제들', '당근', '토스'];
-
 const TAB_PAGE = { DASHBOARD: 'dashboard', MANAGE: 'manage' };
 
-// ============== Helpers ==============
-/** (YY.MM.DD) (옵션: AM/PM hh시 mm분) → ISO string */
+// 날짜 파서 (matchAll 사용 시 정규식은 반드시 g 플래그!)
 const parseDateFromRecord = (recordText) => {
   if (!recordText) return null;
-  // 반드시 글로벌 플래그 g 사용 (matchAll 요구)
-  const regex = /\((\d{2})\.(\d{2})\.(\d{2})\)(?:\s*(AM|PM)\s*(\d{1,2})시\s*(\d{1,2})분)?/gi;
-  const matches = recordText.matchAll(regex);
+  const regex = /\((\d{2})\.(\d{2})\.(\d{2})\)(?:\s*(AM|PM)\s*(\d{1,2})시\s*(\d{1,2})분)?/ig;
   let latestDate = null;
-
-  for (const match of matches) {
+  for (const match of recordText.matchAll(regex)) {
     const year = 2000 + parseInt(match[1], 10);
     const month = parseInt(match[2], 10) - 1;
     const day = parseInt(match[3], 10);
     const ampm = match[4];
-    let hour   = match[5] ? parseInt(match[5], 10) : 0;
+    let hour = match[5] ? parseInt(match[5], 10) : 0;
     const minute = match[6] ? parseInt(match[6], 10) : 0;
-
     if (ampm) {
       if (ampm.toUpperCase() === 'PM' && hour !== 12) hour += 12;
       if (ampm.toUpperCase() === 'AM' && hour === 12) hour = 0;
@@ -71,62 +78,84 @@ const parseDateFromRecord = (recordText) => {
   return latestDate ? latestDate.toISOString() : null;
 };
 
-/** 이미지 업로드 (진행률 콜백 지원)  */
-async function uploadAvatar(file, accessCode, profileId, onProgress) {
-  if (!file) throw new Error('파일이 비었습니다.');
-  if (!accessCode || !profileId) throw new Error('업로드 경로 정보(accessCode/profileId)가 없습니다.');
-
-  // 클라이언트 가드 (5MB 제한 예시)
-  const MAX = 5 * 1024 * 1024;
-  if (file.size > MAX) {
-    throw new Error('이미지 용량이 5MB를 초과합니다.');
-  }
-
-  const ext  = (file.name?.split('.').pop() || 'jpg').toLowerCase();
-  const path = `profiles/${accessCode}/${profileId}/avatar-${Date.now()}.${ext}`;
-  const ref  = storageRef(storage, path);
-  const metadata = { contentType: file.type || 'image/jpeg', cacheControl: 'public,max-age=604800' };
-
+/* ===================================================================================
+   업로드 안정화 헬퍼
+   =================================================================================== */
+// 익명 로그인 포함 “인증 준비” 보장
+async function ensureAuthReady(authInstance) {
+  if (authInstance.currentUser) return authInstance.currentUser;
   return await new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => reject(new Error('인증 대기 타임아웃(10s)')), 10_000);
+    const un = onAuthStateChanged(authInstance, (u) => {
+      if (u) { clearTimeout(timeoutId); un(); resolve(u); }
+    }, (err) => { clearTimeout(timeoutId); un(); reject(err); });
+  });
+}
+
+// Storage 규칙에서 문서 존재 확인을 요구하는 경우 사전 확인
+async function assertProfileDocExists(dbInstance, appId, accessCode, profileId) {
+  const ref = doc(dbInstance, 'artifacts', appId, 'public', 'data', accessCode, profileId);
+  const snapshot = await getDoc(ref);
+  if (!snapshot.exists()) throw new Error('업로드 경로에 해당하는 프로필 문서가 존재하지 않습니다.');
+}
+
+// 프로필 아바타 업로드 (진행률/에러 처리 포함)
+function uploadAvatar({ file, accessCode, profileId }) {
+  return new Promise((resolve, reject) => {
+    if (!file) return resolve(null);
+    const path = `profiles/${accessCode}/${profileId}/avatar/${Date.now()}_${file.name}`;
+    const ref  = storageRef(storage, path);
+    const metadata = { contentType: file.type || 'image/jpeg', cacheControl: 'public,max-age=31536000' };
+
     const task = uploadBytesResumable(ref, file, metadata);
-    task.on(
-      'state_changed',
-      (snap) => {
-        const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
-        if (onProgress) onProgress(pct);
-      },
-      (err) => {
-        const hint = (code) => {
-          if (code === 'storage/unauthorized') return '권한이 없습니다 (Storage 규칙/경로 확인).';
-          if (code === 'storage/canceled') return '업로드가 취소되었습니다.';
-          if (code === 'storage/retry-limit-exceeded') return '네트워크 문제로 재시도 한도 초과.';
-          return '';
-        };
-        reject(new Error(`${err.code || ''} ${hint(err.code)}`.trim()));
-      },
+
+    // 15초간 0바이트면 stuck으로 판단
+    let lastBytes = 0;
+    const guard = setInterval(() => {
+      const cur = task.snapshot?.bytesTransferred ?? 0;
+      if (cur === 0 && lastBytes === 0) {
+        try { task.cancel(); } catch {}
+        clearInterval(guard);
+        reject(new Error('업로드가 시작되지 않았습니다. (권한/도메인/규칙 확인)'));
+      } else {
+        lastBytes = cur;
+      }
+    }, 15_000);
+
+    task.on('state_changed',
+      // onProgress
+      () => {},
+      // onError
+      (err) => { clearInterval(guard); reject(err); },
+      // onComplete
       async () => {
-        const url = await getDownloadURL(task.snapshot.ref);
-        resolve(url);
+        clearInterval(guard);
+        try {
+          const url = await getDownloadURL(task.snapshot.ref);
+          resolve(url);
+        } catch (e) { reject(e); }
       }
     );
   });
 }
 
-// ============== 공유 상세 뷰 ==============
+/* ===================================================================================
+   공유 보기 컴포넌트
+   =================================================================================== */
 const ProfileDetailView = ({ profileId, accessCode }) => {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState('');
+  const [error,   setError]   = useState('');
 
   useEffect(() => {
     const fetchProfile = async () => {
       try {
         const profileDocRef = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
-        const docSnap = await getDoc(profileDocRef);
-        if (docSnap.exists()) setProfile({ ...docSnap.data(), id: docSnap.id });
+        const snap = await getDoc(profileDocRef);
+        if (snap.exists()) setProfile({ ...snap.data(), id: snap.id });
         else setError('프로필을 찾을 수 없습니다.');
-      } catch (err) {
-        console.error("Error fetching profile:", err);
+      } catch (e) {
+        console.error('Error fetching profile:', e);
         setError('프로필을 불러오는 중 오류가 발생했습니다.');
       } finally { setLoading(false); }
     };
@@ -142,11 +171,15 @@ const ProfileDetailView = ({ profileId, accessCode }) => {
       <div className="w-full max-w-2xl bg-white rounded-xl shadow-2xl p-8">
         <div className="flex items-center justify-between border-b pb-4 mb-4">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden">
-              {profile.photoURL ? <img src={profile.photoURL} alt={profile.name} className="w-full h-full object-cover" /> : null}
+            <div className="w-12 h-12 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center">
+              {profile.photoURL
+                ? <img src={profile.photoURL} alt="avatar" className="w-full h-full object-cover" />
+                : <ImageIcon className="text-gray-400 w-6 h-6" />}
             </div>
-            <h1 className="text-3xl font-bold text-yellow-600">{profile.name}</h1>
-            <span className="text-xl text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
+            <div className="flex items-baseline space-x-3">
+              <h1 className="text-3xl font-bold text-yellow-600">{profile.name}</h1>
+              <span className="text-xl text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
+            </div>
           </div>
         </div>
         {profile.expertise && <p className="text-lg font-semibold text-gray-700 mt-4">{profile.expertise}</p>}
@@ -173,13 +206,12 @@ const ProfileDetailView = ({ profileId, accessCode }) => {
   );
 };
 
-// ============== 로그인 화면 ==============
+/* ===================================================================================
+   공용 컴포넌트
+   =================================================================================== */
 const LoginScreen = ({ onLogin, authStatus }) => {
   const [codeInput, setCodeInput] = useState('');
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (codeInput.trim()) onLogin(codeInput.trim());
-  };
+  const handleSubmit = (e) => { e.preventDefault(); if (codeInput.trim()) onLogin(codeInput.trim()); };
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
@@ -193,11 +225,11 @@ const LoginScreen = ({ onLogin, authStatus }) => {
           <div className="relative">
             <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
             <input type="text" placeholder="Access Code" className="w-full pl-10 pr-3 py-3 border rounded-lg"
-              value={codeInput} onChange={(e) => setCodeInput(e.target.value)} />
+                   value={codeInput} onChange={(e) => setCodeInput(e.target.value)} />
           </div>
           <div>
             <button type="submit" disabled={authStatus !== 'authenticated'}
-              className="w-full flex justify-center py-3 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
+                    className="w-full flex justify-center py-3 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
               {authStatus === 'authenticating' && <Loader2 className="animate-spin mr-2" />}
               {authStatus === 'authenticated' ? '데이터 불러오기' : '인증 중...'}
             </button>
@@ -208,7 +240,6 @@ const LoginScreen = ({ onLogin, authStatus }) => {
   );
 };
 
-// ============== 확인 모달 ==============
 const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
     <div className="bg-white rounded-lg p-8 shadow-xl max-w-sm w-full mx-4">
@@ -225,13 +256,12 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   </div>
 );
 
-// ============== 프로필 카드 ==============
-const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm, accessCode, onUploadAvatar }) => {
+/* ===================================================================================
+   프로필 카드
+   =================================================================================== */
+const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm, accessCode }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
-  const [newPhotoFile, setNewPhotoFile] = useState(null);
-  const [uploadPct, setUploadPct] = useState(0);
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => { setEditedProfile(profile); }, [profile]);
 
@@ -246,73 +276,74 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
     setEditedProfile(prev => ({ ...prev, [name]: name === 'age' ? (value ? Number(value) : '') : value }));
   };
 
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0] || null;
+    setEditedProfile(prev => ({ ...prev, _avatarFile: file }));
+  };
+
   const handleSave = async () => {
-    setSaving(true);
     try {
       const eventDate = parseDateFromRecord(editedProfile.meetingRecord);
       let photoURL = editedProfile.photoURL || null;
+      const file = editedProfile._avatarFile;
 
-      if (newPhotoFile && onUploadAvatar) {
-        photoURL = await onUploadAvatar(newPhotoFile, profile.id, setUploadPct);
+      if (file) {
+        await ensureAuthReady(auth);
+        await assertProfileDocExists(db, appId, accessCode, profile.id);
+        photoURL = await uploadAvatar({ file, accessCode, profileId: profile.id });
       }
-      await onUpdate(profile.id, { ...editedProfile, eventDate, photoURL });
+
+      const { _avatarFile, ...rest } = editedProfile;
+      await onUpdate(profile.id, { ...rest, eventDate, photoURL });
       setIsEditing(false);
-      setNewPhotoFile(null);
-      setUploadPct(0);
     } catch (e) {
       console.error('프로필 저장 실패:', e);
-      alert(`프로필 저장 실패: ${e.message || e}`);
-    } finally {
-      setSaving(false);
+      alert(e.message || '저장 중 오류가 발생했습니다.');
     }
   };
 
   const handleShare = () => {
     const shareUrl = `${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`;
-    navigator.clipboard.writeText(shareUrl).then(
-      () => alert('공유 링크가 클립보드에 복사되었습니다.'),
-      () => alert('링크 복사에 실패했습니다.')
-    );
+    navigator.clipboard.writeText(shareUrl)
+      .then(() => alert('공유 링크가 클립보드에 복사되었습니다.'))
+      .catch(() => alert('링크 복사에 실패했습니다.'));
   };
 
   if (isEditing) {
     return (
       <div className="bg-white p-4 rounded-lg shadow-lg border-l-4 border-yellow-400 relative space-y-3">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-full bg-gray-200 overflow-hidden flex-shrink-0">
-            {newPhotoFile ? (
-              <img src={URL.createObjectURL(newPhotoFile)} alt="preview" className="w-full h-full object-cover" />
-            ) : (editedProfile.photoURL ? (
-              <img src={editedProfile.photoURL} alt={editedProfile.name} className="w-full h-full object-cover" />
-            ) : null)}
+        <div className="flex items-center space-x-3">
+          <div className="w-12 h-12 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center">
+            {editedProfile.photoURL
+              ? <img src={editedProfile.photoURL} alt="avatar" className="w-full h-full object-cover" />
+              : <ImageIcon className="text-gray-400 w-6 h-6" />}
           </div>
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <ImageIcon size={16} />
-            <span>사진 선택</span>
-            <input type="file" accept="image/*" className="hidden" onChange={(e)=>setNewPhotoFile(e.target.files?.[0] || null)} />
-          </label>
-          {saving && newPhotoFile ? <span className="text-xs text-gray-500">{uploadPct}%</span> : null}
+          <input
+            type="file" accept="image/*" onChange={handleFileChange}
+            className="text-sm"
+          />
         </div>
 
-        <input name="name" value={editedProfile.name} onChange={handleInputChange} placeholder="이름" className="w-full p-2 border rounded text-sm font-bold" />
-        <input name="expertise" value={editedProfile.expertise || ''} onChange={handleInputChange} placeholder="전문영역" className="w-full p-2 border rounded text-sm" />
-        <textarea name="career" value={editedProfile.career} onChange={handleInputChange} placeholder="경력" className="w-full p-2 border rounded text-sm h-20" />
+        <input name="name" value={editedProfile.name} onChange={handleInputChange}
+               placeholder="이름" className="w-full p-2 border rounded text-sm font-bold" />
+        <input name="expertise" value={editedProfile.expertise || ''} onChange={handleInputChange}
+               placeholder="전문영역" className="w-full p-2 border rounded text-sm" />
+        <textarea name="career" value={editedProfile.career} onChange={handleInputChange}
+                  placeholder="경력" className="w-full p-2 border rounded text-sm h-20" />
         <div className="grid grid-cols-2 gap-2">
-          <input name="age" type="number" value={editedProfile.age || ''} onChange={handleInputChange} placeholder="나이" className="w-full p-2 border rounded text-sm" />
-          <input name="priority" type="text" value={editedProfile.priority || ''} onChange={handleInputChange} placeholder="우선순위" className="w-full p-2 border rounded text-sm" />
+          <input name="age" type="number" value={editedProfile.age || ''} onChange={handleInputChange}
+                 placeholder="나이" className="w-full p-2 border rounded text-sm" />
+          <input name="priority" type="text" value={editedProfile.priority || ''} onChange={handleInputChange}
+                 placeholder="우선순위" className="w-full p-2 border rounded text-sm" />
         </div>
-        <textarea name="otherInfo" value={editedProfile.otherInfo || ''} onChange={handleInputChange} placeholder="기타 정보" className="w-full p-2 border rounded text-sm h-20" />
-        <textarea name="meetingRecord" value={editedProfile.meetingRecord || ''} onChange={handleInputChange} placeholder="미팅기록 (예: (25.08.14) PM 7시 00분)" className="w-full p-2 border rounded text-sm h-20" />
+        <textarea name="otherInfo" value={editedProfile.otherInfo || ''} onChange={handleInputChange}
+                  placeholder="기타 정보" className="w-full p-2 border rounded text-sm h-20" />
+        <textarea name="meetingRecord" value={editedProfile.meetingRecord || ''} onChange={handleInputChange}
+                  placeholder="미팅기록 (예: (25.08.14) PM 7시 00분)" className="w-full p-2 border rounded text-sm h-20" />
 
         <div className="flex justify-end space-x-2">
-          <button onClick={() => setIsEditing(false)} disabled={saving}
-            className={`p-2 ${saving ? 'opacity-50 cursor-not-allowed' : 'text-gray-500 hover:text-gray-800'}`}>
-            <X size={20} />
-          </button>
-          <button onClick={handleSave} disabled={saving}
-            className={`p-2 ${saving ? 'opacity-50 cursor-not-allowed' : 'text-green-600 hover:text-green-800'}`}>
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save size={20} />}
-          </button>
+          <button onClick={() => setIsEditing(false)} className="p-2 text-gray-500 hover:text-gray-800"><X size={20} /></button>
+          <button onClick={handleSave} className="p-2 text-green-600 hover:text-green-800"><Save size={20} /></button>
         </div>
       </div>
     );
@@ -321,19 +352,27 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
   return (
     <div className="bg-white p-4 rounded-lg shadow relative group">
       <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 rounded-full bg-gray-200 overflow-hidden flex-shrink-0">
-            {profile.photoURL ? <img src={profile.photoURL} alt={profile.name} className="w-full h-full object-cover" /> : null}
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center">
+            {profile.photoURL
+              ? <img src={profile.photoURL} alt="avatar" className="w-full h-full object-cover" />
+              : <ImageIcon className="text-gray-400 w-5 h-5" />}
           </div>
-          <h3 className="font-bold text-yellow-600">{profile.name}</h3>
-          <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
+          <div className="flex items-baseline space-x-2">
+            <h3 className="font-bold text-yellow-600">{profile.name}</h3>
+            <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
+          </div>
         </div>
-        {profile.priority && <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${priorityColors[profile.priority] || 'bg-gray-100 text-gray-800'}`}>{profile.priority}</span>}
+        {profile.priority &&
+          <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${priorityColors[profile.priority] || 'bg-gray-100 text-gray-800'}`}>
+            {profile.priority}
+          </span>}
       </div>
 
       {profile.expertise && <p className="text-sm font-semibold text-gray-600 mt-1">{profile.expertise}</p>}
       <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
       {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
+
       {profile.meetingRecord && (
         <div className="mt-2 pt-2 border-t">
           <p className="text-xs font-semibold text-gray-500">미팅기록:</p>
@@ -357,8 +396,10 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
   );
 };
 
-// ============== 필터 결과 섹션 ==============
-const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, accessCode, onUploadAvatar }) => (
+/* ===================================================================================
+   필터 결과 섹션
+   =================================================================================== */
+const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, accessCode }) => (
   <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in">
     <div className="flex justify-between items-center mb-4">
       <h2 className="text-xl font-bold text-gray-800">{title}</h2>
@@ -368,8 +409,7 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, acc
       {profiles.length > 0 ? (
         profiles.map((profile, index) => (
           <div key={profile.id} className="animate-cascade" style={{ animationDelay: `${index * 50}ms` }}>
-            <ProfileCard profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode}
-              onUploadAvatar={(file, id, onProgress)=>onUploadAvatar(file, id, onProgress)} />
+            <ProfileCard profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
           </div>
         ))
       ) : (
@@ -379,21 +419,18 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, acc
   </section>
 );
 
-// ============== 대시보드 탭 ==============
-const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onUploadAvatar }) => {
+/* ===================================================================================
+   대시보드 탭
+   =================================================================================== */
+const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode }) => {
   const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
   const [searchTerm, setSearchTerm] = useState('');
   const [showMeetingProfiles, setShowMeetingProfiles] = useState(false);
 
-  const handlePieClick = (type, data) => {
-    if (data.value === 0) return;
-    setActiveFilter({ type, value: data.name });
-  };
+  const handlePieClick = (type, data) => { if (data.value === 0) return; setActiveFilter({ type, value: data.name }); };
   const handleBarClick = (type, data) => {
-    const value = data.name;
-    const count = data.count || data.value;
-    if (count === 0) return;
-    setActiveFilter({ type, value });
+    const value = data.name; const count = data.count || data.value;
+    if (count === 0) return; setActiveFilter({ type, value });
   };
 
   const { todayProfiles, upcomingProfiles, meetingProfiles, longTermNoContactProfiles } = useMemo(() => {
@@ -403,7 +440,6 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onUploadAvatar
     const threeMonthsAgo = new Date(now); threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
     const today = [], upcoming = [], meetings = [], longTerm = [];
-
     profiles.forEach(p => {
       if (p.eventDate) {
         meetings.push(p);
@@ -426,16 +462,13 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onUploadAvatar
     };
   }, [profiles]);
 
-  const handleSnooze = (profileId) => {
-    const snoozeDate = new Date(); snoozeDate.setMonth(snoozeDate.getMonth() + 3);
-    onUpdate(profileId, { snoozeUntil: snoozeDate.toISOString() });
-  };
-  const handleConfirmAlarm = (profileId) => onUpdate(profileId, { lastReviewedDate: new Date().toISOString() });
+  const handleSnooze = (profileId) => { const d = new Date(); d.setMonth(d.getMonth() + 3); onUpdate(profileId, { snoozeUntil: d.toISOString() }); };
+  const handleConfirmAlarm = (profileId) => { onUpdate(profileId, { lastReviewedDate: new Date().toISOString() }); };
 
   const ageData = useMemo(() => {
     const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
     profiles.forEach(({ age }) => {
-      if (!age) return;
+      if (!age && age !== 0) return;
       if (age < 20) groups['10대']++;
       else if (age < 30) groups['20대']++;
       else if (age < 40) groups['30대']++;
@@ -445,58 +478,49 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onUploadAvatar
     return Object.entries(groups).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
   }, [profiles]);
 
-  const keywordData = useMemo(() => {
-    return TARGET_KEYWORDS.map(keyword => ({
-      name: keyword,
-      count: profiles.filter(p => p.career?.includes(keyword)).length
-    }));
-  }, [profiles]);
+  const keywordData = useMemo(() => TARGET_KEYWORDS.map(k => ({
+    name: k, count: profiles.filter(p => p.career?.includes(k)).length
+  })), [profiles]);
 
   const expertiseData = useMemo(() => {
-    const expertiseCount = {};
-    profiles.forEach(p => { if (p.expertise) expertiseCount[p.expertise] = (expertiseCount[p.expertise] || 0) + 1; });
-    return Object.entries(expertiseCount).map(([name, count]) => ({ name, count }));
+    const cnt = {}; profiles.forEach(p => { if (p.expertise) cnt[p.expertise] = (cnt[p.expertise] || 0) + 1; });
+    return Object.entries(cnt).map(([name, count]) => ({ name, count }));
   }, [profiles]);
 
   const priorityData = useMemo(() => {
-    const priorities = { '3 (상)': 0, '2 (중)': 0, '1 (하)': 0 };
-    profiles.forEach(p => {
-      if (p.priority === '3') priorities['3 (상)']++;
-      else if (p.priority === '2') priorities['2 (중)']++;
-      else if (p.priority === '1') priorities['1 (하)']++;
+    const p = { '3 (상)': 0, '2 (중)': 0, '1 (하)': 0 };
+    profiles.forEach(x => {
+      if (x.priority === '3') p['3 (상)']++; else if (x.priority === '2') p['2 (중)']++; else if (x.priority === '1') p['1 (하)']++;
     });
-    return Object.entries(priorities).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
+    return Object.entries(p).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
   }, [profiles]);
 
   const searchedProfiles = useMemo(() => {
-    const term = searchTerm.trim();
-    if (!term) return [];
-    const orConditions = term.split(/\s+or\s+/i);
-    return profiles.filter(p => {
-      return orConditions.some(condition => {
-        const andKeywords = condition.split(/\s+and\s+/i).filter(k => k);
-        return andKeywords.every(keyword => {
-          const fieldMap = { '이름': 'name', '경력': 'career', '나이': 'age', '전문영역': 'expertise', '기타': 'otherInfo', '우선순위': 'priority' };
-          const fieldMatch = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
-          if (fieldMatch) {
-            const fieldName = fieldMap[fieldMatch[1]];
-            const fieldValue = fieldMatch[2].toLowerCase();
-            const profileValue = p[fieldName] ? String(p[fieldName]).toLowerCase() : '';
-            return profileValue.includes(fieldValue);
+    const term = searchTerm.trim(); if (!term) return [];
+    const orConds = term.split(/\s+or\s+/i);
+    return profiles.filter(p => orConds.some(condition => {
+      const andKeywords = condition.split(/\s+and\s+/i).filter(Boolean);
+      return andKeywords.every(keyword => {
+        const fieldMap = { '이름': 'name', '경력': 'career', '나이': 'age', '전문영역': 'expertise', '기타': 'otherInfo', '우선순위': 'priority' };
+        const fieldMatch = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
+        if (fieldMatch) {
+          const fieldName = fieldMap[fieldMatch[1]];
+          const fieldValue = fieldMatch[2].toLowerCase();
+          const profileValue = p[fieldName] ? String(p[fieldName]).toLowerCase() : '';
+          return profileValue.includes(fieldValue);
+        }
+        const ageGroupMatch = keyword.match(/^(\d{1,2})대$/);
+        if (ageGroupMatch) {
+          const decadeStart = parseInt(ageGroupMatch[1], 10);
+          if (decadeStart >= 10) {
+            const minAge = decadeStart; const maxAge = decadeStart + 9;
+            return p.age && p.age >= minAge && p.age <= maxAge;
           }
-          const ageGroupMatch = keyword.match(/^(\d{1,2})대$/);
-          if (ageGroupMatch) {
-            const decadeStart = parseInt(ageGroupMatch[1], 10);
-            if (decadeStart >= 10) {
-              const minAge = decadeStart; const maxAge = decadeStart + 9;
-              return p.age && p.age >= minAge && p.age <= maxAge;
-            }
-          }
-          const profileText = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
-          return profileText.includes(keyword.toLowerCase());
-        });
+        }
+        const profileText = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
+        return profileText.includes(keyword.toLowerCase());
       });
-    });
+    }));
   }, [searchTerm, profiles]);
 
   const filteredProfiles = useMemo(() => {
@@ -532,10 +556,9 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onUploadAvatar
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {longTermNoContactProfiles.map(profile => (
               <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete}
-                isAlarmCard={true} onSnooze={(id)=>onUpdate(id,{snoozeUntil:new Date(new Date().setMonth(new Date().getMonth()+3)).toISOString()})}
-                onConfirmAlarm={(id)=>onUpdate(id,{lastReviewedDate:new Date().toISOString()})}
-                accessCode={accessCode}
-                onUploadAvatar={(file, id, onProgress)=>onUploadAvatar(file, id, onProgress)}
+                           isAlarmCard={true} onSnooze={(id)=>{const d=new Date();d.setMonth(d.getMonth()+3);onUpdate(id,{snoozeUntil:d.toISOString()});}}
+                           onConfirmAlarm={(id)=>onUpdate(id,{lastReviewedDate:new Date().toISOString()})}
+                           accessCode={accessCode}
               />
             ))}
           </div>
@@ -546,12 +569,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onUploadAvatar
         <section>
           <h2 className="text-xl font-bold mb-4 flex items-center"><Calendar className="mr-2 text-red-500" />오늘의 일정</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {todayProfiles.map(profile => (
-              <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete}
-                accessCode={accessCode}
-                onUploadAvatar={(file, id, onProgress)=>onUploadAvatar(file, id, onProgress)}
-              />
-            ))}
+            {todayProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />)}
           </div>
         </section>
       )}
@@ -560,12 +578,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onUploadAvatar
         <section>
           <h2 className="text-xl font-bold mb-4 flex items-center"><Zap className="mr-2 text-blue-500" />다가오는 일정</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {upcomingProfiles.map(profile => (
-              <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete}
-                accessCode={accessCode}
-                onUploadAvatar={(file, id, onProgress)=>onUploadAvatar(file, id, onProgress)}
-              />
-            ))}
+            {upcomingProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />)}
           </div>
         </section>
       )}
@@ -573,19 +586,16 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onUploadAvatar
       <section>
         <div className="relative mb-6">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input type="text" placeholder="검색... (예: 경력:네이버 AND 20대)"
-            value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-            className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
+          <input type="text" placeholder="검색... (예: 경력:네이버 AND 20대)" value={searchTerm}
+                 onChange={e => setSearchTerm(e.target.value)}
+                 className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
         </div>
         {searchTerm.trim() && (
           <div className="mb-8">
             <h2 className="text-xl font-bold mb-4">검색 결과</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
-                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete}
-                  accessCode={accessCode}
-                  onUploadAvatar={(file, id, onProgress)=>onUploadAvatar(file, id, onProgress)}
-                />
+                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
               )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
             </div>
           </div>
@@ -597,7 +607,8 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onUploadAvatar
           <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
           <p className="text-3xl font-bold text-yellow-500 mt-1">{profiles.length}</p>
         </div>
-        <div className="bg-white p-4 rounded-xl shadow-md cursor-pointer hover:bg-gray-50" onClick={() => setShowMeetingProfiles(!showMeetingProfiles)}>
+        <div className="bg-white p-4 rounded-xl shadow-md cursor-pointer hover:bg-gray-50"
+             onClick={() => setShowMeetingProfiles(!showMeetingProfiles)}>
           <h3 className="text-base font-medium text-gray-500">미팅 진행 프로필</h3>
           <p className="text-3xl font-bold text-yellow-500 mt-1">{meetingProfiles.length}</p>
         </div>
@@ -605,11 +616,8 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onUploadAvatar
 
       {showMeetingProfiles && (
         <FilterResultSection title="미팅 진행 프로필 (최신순)" profiles={meetingProfiles}
-          onUpdate={onUpdate} onDelete={onDelete}
-          onClear={() => setShowMeetingProfiles(false)}
-          accessCode={accessCode}
-          onUploadAvatar={(file, id, onProgress)=>onUploadAvatar(file, id, onProgress)}
-        />
+                             onUpdate={onUpdate} onDelete={onDelete}
+                             onClear={() => setShowMeetingProfiles(false)} accessCode={accessCode} />
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -625,11 +633,10 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onUploadAvatar
                   </radialGradient>
                 ))}
               </defs>
-              <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label
-                onClick={(data) => handlePieClick('age', data.payload)}>
+              <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(d) => setActiveFilter({ type: 'age', value: d.payload.name })}>
                 {ageData.map((_, index) => <Cell key={`cell-age-${index}`} fill={`url(#gradient-age-${index})`} cursor="pointer" stroke="#fff" />)}
               </Pie>
-              <Tooltip formatter={(value) => `${value}명`} />
+              <Tooltip formatter={(v) => `${v}명`} />
               <Legend />
             </PieChart>
           </ResponsiveContainer>
@@ -644,11 +651,10 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onUploadAvatar
                 <radialGradient id="gradient-priority-1"><stop offset="0%" stopColor="#FFBB28" stopOpacity={0.7} /><stop offset="100%" stopColor="#FFBB28" stopOpacity={1} /></radialGradient>
                 <radialGradient id="gradient-priority-2"><stop offset="0%" stopColor="#00C49F" stopOpacity={0.7} /><stop offset="100%" stopColor="#00C49F" stopOpacity={1} /></radialGradient>
               </defs>
-              <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label
-                onClick={(data) => handlePieClick('priority', data.payload)}>
+              <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label onClick={(d) => setActiveFilter({ type: 'priority', value: d.payload.name })}>
                 {priorityData.map((_, index) => <Cell key={`cell-priority-${index}`} fill={`url(#gradient-priority-${index})`} cursor="pointer" stroke="#fff"/>)}
               </Pie>
-              <Tooltip formatter={(value) => `${value}명`} />
+              <Tooltip formatter={(v) => `${v}명`} />
               <Legend />
             </PieChart>
           </ResponsiveContainer>
@@ -657,11 +663,8 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onUploadAvatar
 
       {(activeFilter.type === 'age' || activeFilter.type === 'priority') && (
         <FilterResultSection title={`"${activeFilter.value}" 필터 결과`} profiles={filteredProfiles}
-          onUpdate={onUpdate} onDelete={onDelete}
-          onClear={() => setActiveFilter({ type: null, value: null })}
-          accessCode={accessCode}
-          onUploadAvatar={(file, id, onProgress)=>onUploadAvatar(file, id, onProgress)}
-        />
+                             onUpdate={onUpdate} onDelete={onDelete}
+                             onClear={() => setActiveFilter({ type: null, value: null })} accessCode={accessCode} />
       )}
 
       <section className="bg-white p-6 rounded-xl shadow-md">
@@ -677,9 +680,9 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onUploadAvatar
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
             <YAxis allowDecimals={false}/>
-            <Tooltip formatter={(value) => `${value}명`} />
+            <Tooltip formatter={(v) => `${v}명`} />
             <Legend />
-            <Bar dataKey="count" fill="url(#gradient-company)" onClick={(data) => handleBarClick('company', data)} cursor="pointer" />
+            <Bar dataKey="count" fill="url(#gradient-company)" onClick={(d) => setActiveFilter({ type: 'company', value: d.name })} cursor="pointer" />
           </BarChart>
         </ResponsiveContainer>
       </section>
@@ -697,79 +700,66 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onUploadAvatar
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
             <YAxis allowDecimals={false}/>
-            <Tooltip formatter={(value) => `${value}명`} />
+            <Tooltip formatter={(v) => `${v}명`} />
             <Legend />
-            <Bar dataKey="count" fill="url(#gradient-expertise)" onClick={(data) => handleBarClick('expertise', data)} cursor="pointer" />
+            <Bar dataKey="count" fill="url(#gradient-expertise)" onClick={(d) => setActiveFilter({ type: 'expertise', value: d.name })} cursor="pointer" />
           </BarChart>
         </ResponsiveContainer>
       </section>
 
-      {activeFilter.type === 'expertise' && (
-        <FilterResultSection title={`"${activeFilter.value}" 전문영역 필터 결과`} profiles={filteredProfiles}
-          onUpdate={onUpdate} onDelete={onDelete}
-          onClear={() => setActiveFilter({ type: null, value: null })}
-          accessCode={accessCode}
-          onUploadAvatar={(file, id, onProgress)=>onUploadAvatar(file, id, onProgress)}
-        />
+      {activeFilter.type === 'company' && (
+        <FilterResultSection title={`"${activeFilter.value}" 경력자 필터 결과`} profiles={filteredProfiles}
+                             onUpdate={onUpdate} onDelete={onDelete}
+                             onClear={() => setActiveFilter({ type: null, value: null })} accessCode={accessCode} />
       )}
     </>
   );
 };
 
-// ============== 관리 탭 ==============
-const ManageTab = ({
-  profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd,
-  formState, setFormState, accessCode, onUploadAvatar, onBulkPhotoApply
-}) => {
-  const {
-    newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord, newPhotoFile
-  } = formState;
-  const {
-    setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord, setNewPhotoFile
-  } = setFormState;
+/* ===================================================================================
+   관리 탭 (새 프로필 + 검색/페이지)
+   =================================================================================== */
+const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState, accessCode }) => {
+  const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord, newAvatarFile } = formState;
+  const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord, setNewAvatarFile } = setFormState;
 
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const PROFILES_PER_PAGE = 9;
 
   const searchedProfiles = useMemo(() => {
-    const term = searchTerm.trim();
-    if (!term) return [];
-    const orConditions = term.split(/\s+or\s+/i);
-    return profiles.filter(p => {
-      return orConditions.some(condition => {
-        const andKeywords = condition.split(/\s+and\s+/i).filter(k => k);
-        return andKeywords.every(keyword => {
-          const fieldMap = { '이름': 'name', '경력': 'career', '나이': 'age', '전문영역': 'expertise', '기타': 'otherInfo', '우선순위': 'priority' };
-          const fieldMatch = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
-          if (fieldMatch) {
-            const fieldName = fieldMap[fieldMatch[1]];
-            const fieldValue = fieldMatch[2].toLowerCase();
-            const profileValue = p[fieldName] ? String(p[fieldName]).toLowerCase() : '';
-            return profileValue.includes(fieldValue);
+    const term = searchTerm.trim(); if (!term) return [];
+    const orConds = term.split(/\s+or\s+/i);
+    return profiles.filter(p => orConds.some(condition => {
+      const andKeywords = condition.split(/\s+and\s+/i).filter(Boolean);
+      return andKeywords.every(keyword => {
+        const fieldMap = { '이름': 'name', '경력': 'career', '나이': 'age', '전문영역': 'expertise', '기타': 'otherInfo', '우선순위': 'priority' };
+        const fieldMatch = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
+        if (fieldMatch) {
+          const fieldName = fieldMap[fieldMatch[1]];
+          const fieldValue = fieldMatch[2].toLowerCase();
+          const profileValue = p[fieldName] ? String(p[fieldName]).toLowerCase() : '';
+          return profileValue.includes(fieldValue);
+        }
+        const ageGroupMatch = keyword.match(/^(\d{1,2})대$/);
+        if (ageGroupMatch) {
+          const decadeStart = parseInt(ageGroupMatch[1], 10);
+          if (decadeStart >= 10) {
+            const minAge = decadeStart; const maxAge = decadeStart + 9;
+            return p.age && p.age >= minAge && p.age <= maxAge;
           }
-          const ageGroupMatch = keyword.match(/^(\d{1,2})대$/);
-          if (ageGroupMatch) {
-            const decadeStart = parseInt(ageGroupMatch[1], 10);
-            if (decadeStart >= 10) {
-              const minAge = decadeStart; const maxAge = decadeStart + 9;
-              return p.age && p.age >= minAge && p.age <= maxAge;
-            }
-          }
-          const profileText = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
-          return profileText.includes(keyword.toLowerCase());
-        });
+        }
+        const profileText = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
+        return profileText.includes(keyword.toLowerCase());
       });
-    });
+    }));
   }, [searchTerm, profiles]);
 
   const { currentProfiles, totalPages } = useMemo(() => {
-    const sortedProfiles = [...profiles].sort((a,b) => a.name.localeCompare(b.name));
-    const indexOfLastProfile = currentPage * PROFILES_PER_PAGE;
-    const indexOfFirstProfile = indexOfLastProfile - PROFILES_PER_PAGE;
-    const current = sortedProfiles.slice(indexOfFirstProfile, indexOfLastProfile);
-    const pages = Math.ceil(sortedProfiles.length / PROFILES_PER_PAGE);
-    return { currentProfiles: current, totalPages: pages };
+    const sorted = [...profiles].sort((a,b) => a.name.localeCompare(b.name));
+    const last = currentPage * PROFILES_PER_PAGE;
+    const first = last - PROFILES_PER_PAGE;
+    return { currentProfiles: sorted.slice(first, last), totalPages: Math.ceil(sorted.length / PROFILES_PER_PAGE) };
   }, [currentPage, profiles]);
 
   useEffect(() => { setCurrentPage(1); }, [searchTerm]);
@@ -780,18 +770,15 @@ const ManageTab = ({
         <div className="relative mb-6">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
           <input type="text" placeholder="검색... (예: 경력:네이버 AND 20대)"
-            value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-            className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
+                 value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+                 className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
         </div>
         {searchTerm.trim() && (
           <div>
             <h2 className="text-xl font-bold mb-4">검색 결과</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
-                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete}
-                  accessCode={accessCode}
-                  onUploadAvatar={(file, id, onProgress)=>onUploadAvatar(file, id, onProgress)}
-                />
+                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
               )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
             </div>
           </div>
@@ -800,38 +787,29 @@ const ManageTab = ({
 
       <section className="bg-white p-6 rounded-xl shadow-md">
         <h2 className="text-xl font-bold mb-4 flex items-center"><UserPlus className="mr-2 text-yellow-500"/>새 프로필 추가</h2>
-        <form onSubmit={handleFormSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden flex-shrink-0">
-                {newPhotoFile ? (
-                  <img src={URL.createObjectURL(newPhotoFile)} alt="preview" className="w-full h-full object-cover" />
-                ) : null}
+        <form onSubmit={(e) => handleFormSubmit(e)} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-[auto_1fr_1fr_1fr] gap-4 items-center">
+            <div className="flex items-center space-x-2">
+              <div className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center">
+                {newAvatarFile
+                  ? <img src={URL.createObjectURL(newAvatarFile)} alt="preview" className="w-full h-full object-cover" />
+                  : <ImageIcon className="text-gray-400 w-5 h-5" />}
               </div>
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <ImageIcon size={16} />
-                <span>사진 파일</span>
-                <input type="file" accept="image/*" className="hidden"
-                  onChange={(e)=> setNewPhotoFile(e.target.files?.[0] || null)} />
+              <label className="text-sm">
+                <span className="sr-only">사진 업로드</span>
+                <input type="file" accept="image/*"
+                       onChange={(e) => setNewAvatarFile(e.target.files?.[0] || null)}
+                       className="text-sm" />
               </label>
             </div>
-            <input type="text" placeholder="이름" value={newName}
-              onChange={e => setNewName(e.target.value)} className="w-full p-2 border rounded" />
-            <input type="number" placeholder="나이" value={newAge}
-              onChange={e => setNewAge(e.target.value)} className="w-full p-2 border rounded" />
-            <input type="text" placeholder="우선순위" value={newPriority}
-              onChange={e => setNewPriority(e.target.value)} className="w-full p-2 border rounded" />
+            <input type="text" placeholder="이름" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-2 border rounded" />
+            <input type="number" placeholder="나이" value={newAge} onChange={e => setNewAge(e.target.value)} className="w-full p-2 border rounded" />
+            <input type="text" placeholder="우선순위" value={newPriority} onChange={e => setNewPriority(e.target.value)} className="w-full p-2 border rounded" />
           </div>
-
-          <input type="text" placeholder="전문영역" value={newExpertise}
-            onChange={e => setNewExpertise(e.target.value)} className="w-full p-2 border rounded" />
-          <textarea placeholder="경력" value={newCareer}
-            onChange={e => setNewCareer(e.target.value)} className="w-full p-2 border rounded h-24" />
-          <textarea placeholder="기타 정보" value={newOtherInfo}
-            onChange={e => setNewOtherInfo(e.target.value)} className="w-full p-2 border rounded h-24" />
-          <textarea placeholder="미팅기록 (예: (25.08.14) PM 7시 00분)" value={newMeetingRecord}
-            onChange={e => setNewMeetingRecord(e.target.value)} className="w-full p-2 border rounded h-24" />
-
+          <input type="text" placeholder="전문영역" value={newExpertise} onChange={e => setNewExpertise(e.target.value)} className="w-full p-2 border rounded" />
+          <textarea placeholder="경력" value={newCareer} onChange={e => setNewCareer(e.target.value)} className="w-full p-2 border rounded h-24" />
+          <textarea placeholder="기타 정보" value={newOtherInfo} onChange={e => setNewOtherInfo(e.target.value)} className="w-full p-2 border rounded h-24" />
+          <textarea placeholder="미팅기록 (예: (25.08.14) PM 7시 00분)" value={newMeetingRecord} onChange={e => setNewMeetingRecord(e.target.value)} className="w-full p-2 border rounded h-24" />
           <div className="flex justify-end">
             <button type="submit" className="bg-yellow-400 text-white px-4 py-2 rounded hover:bg-yellow-500">추가하기</button>
           </div>
@@ -840,24 +818,11 @@ const ManageTab = ({
 
       <ExcelUploader onBulkAdd={handleBulkAdd} />
 
-      <PhotoBulkUploader
-        profiles={profiles}
-        accessCode={accessCode}
-        onUploadAvatar={(file, profileId, onProgress)=>onUploadAvatar(file, profileId, onProgress)}
-        onAfterUpdate={async (profileId, url)=> {
-          const colRef = collection(db, 'artifacts', appId, 'public', 'data', accessCode);
-          await updateDoc(doc(colRef, profileId), { photoURL: url });
-        }}
-      />
-
       <section>
         <h2 className="text-xl font-bold text-gray-800 mb-4">전체 프로필 목록</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {currentProfiles.map(profile => (
-            <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete}
-              accessCode={accessCode}
-              onUploadAvatar={(file, id, onProgress)=>onUploadAvatar(file, id, onProgress)}
-            />
+            <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} />
           ))}
         </div>
         {totalPages > 1 && (
@@ -869,16 +834,16 @@ const ManageTab = ({
 };
 
 const Pagination = ({ totalPages, currentPage, setCurrentPage }) => {
-  const pageNumbers = []; for (let i = 1; i <= totalPages; i++) pageNumbers.push(i);
+  const pages = Array.from({ length: totalPages }, (_, i) => i + 1);
   if (totalPages <= 1) return null;
   return (
     <nav className="mt-8 flex justify-center">
       <ul className="inline-flex items-center -space-x-px">
-        {pageNumbers.map(number => (
-          <li key={number}>
-            <button onClick={() => setCurrentPage(number)}
-              className={`py-2 px-4 leading-tight border border-gray-300 ${currentPage === number ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>
-              {number}
+        {pages.map(n => (
+          <li key={n}>
+            <button onClick={() => setCurrentPage(n)}
+                    className={`py-2 px-4 leading-tight border border-gray-300 ${currentPage === n ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>
+              {n}
             </button>
           </li>
         ))}
@@ -887,7 +852,6 @@ const Pagination = ({ totalPages, currentPage, setCurrentPage }) => {
   );
 };
 
-// ============== 엑셀 업로더 (기존) ==============
 const ExcelUploader = ({ onBulkAdd }) => {
   const [file, setFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -908,23 +872,28 @@ const ExcelUploader = ({ onBulkAdd }) => {
         const worksheet = workbook.Sheets[sheetName];
         const json = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-        if (json.length < 2) { setMessage('엑셀 파일에 데이터가 없습니다 (2행부터 읽습니다).'); setIsUploading(false); return; }
+        if (json.length < 2) {
+          setMessage('엑셀 파일에 데이터가 없습니다 (2행부터 읽습니다).');
+          setIsUploading(false);
+          return;
+        }
 
         const newProfiles = json.slice(1).map(row => ({
-          name: row[2] || '',     // C열
-          career: row[3] || '',   // D열
-          age: row[5] ? Number(row[5]) : null, // F열
-          expertise: row[7] || '', // H열
-          priority: row[9] ? String(row[9]) : '',   // J열
-          meetingRecord: row[11] || '', // L열
-          otherInfo: row[13] || '',// N열
+          name: row[2] || '',
+          career: row[3] || '',
+          age: row[5] ? Number(row[5]) : null,
+          expertise: row[7] || '',
+          priority: row[9] ? String(row[9]) : '',
+          meetingRecord: row[11] || '',
+          otherInfo: row[13] || '',
           eventDate: parseDateFromRecord(row[11] || ''),
         })).filter(p => p.name && p.career);
 
         const resultMessage = await onBulkAdd(newProfiles);
-        setMessage(resultMessage); setFile(null);
-      } catch (error) {
-        console.error("엑셀 처리 오류:", error);
+        setMessage(resultMessage);
+        setFile(null);
+      } catch (err) {
+        console.error('엑셀 처리 오류:', err);
         setMessage('엑셀 파일을 처리하는 중 오류가 발생했습니다.');
       } finally { setIsUploading(false); }
     };
@@ -935,18 +904,17 @@ const ExcelUploader = ({ onBulkAdd }) => {
     <section className="bg-white p-6 rounded-xl shadow-md">
       <h2 className="text-xl font-bold mb-4 flex items-center"><UploadCloud className="mr-2 text-yellow-500"/>엑셀로 일괄 등록</h2>
       <div className="space-y-4">
-        <p className="text-sm text-gray-600">정해진 양식의 엑셀 파일을 업로드하여 여러 프로필을 한 번에 추가할 수 있습니다.</p>
+        <p className="text-sm text-gray-600">정해진 양식의 엑셀을 업로드하여 여러 프로필을 한 번에 추가할 수 있습니다.</p>
         <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md border">
           <p className="font-semibold">엑셀 양식 안내:</p>
           <p>2행부터 각 행을 한 프로필로 읽습니다.</p>
-          <p>각 열의 C=이름, D=경력, F=나이, H=전문영역, J=우선순위, L=미팅기록, N=기타정보 로 입력됩니다.</p>
+          <p>C=이름, D=경력, F=나이, H=전문영역, J=우선순위, L=미팅기록, N=기타정보</p>
           <p className="font-bold mt-1">※ 기존 프로필과 이름이 겹칠 경우, 덮어쓰기됩니다.</p>
         </div>
-        <input type="file" accept=".xlsx, .xls"
-          onChange={handleFileChange}
-          className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100"/>
+        <input type="file" accept=".xlsx, .xls" onChange={handleFileChange}
+               className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100"/>
         <button onClick={handleUpload} disabled={!file || isUploading}
-          className="w-full flex justify-center items-center py-2 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
+                className="w-full flex justify-center items-center py-2 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
           {isUploading ? <Loader2 className="animate-spin" /> : '업로드 및 추가'}
         </button>
         {message && <p className="text-sm text-center text-gray-600">{message}</p>}
@@ -955,149 +923,38 @@ const ExcelUploader = ({ onBulkAdd }) => {
   );
 };
 
-// ============== 사진 대량 등록 (Zip/여러 파일) ==============
-const PhotoBulkUploader = ({ profiles, accessCode, onUploadAvatar, onAfterUpdate }) => {
-  const [imgFiles, setImgFiles] = useState([]);
-  const [zipFile, setZipFile]   = useState(null);
-  const [log, setLog] = useState([]);
-  const [busy, setBusy] = useState(false);
-
-  const profileIndexByName = useMemo(() => {
-    const map = new Map();
-    profiles.forEach(p => map.set(p.name.trim().toLowerCase(), p));
-    return map;
-  }, [profiles]);
-
-  const appendLog = (line) => setLog(prev => [...prev, line]);
-
-  const extractZipImages = async (file) => {
-    if (!window.JSZip) throw new Error('JSZip 로더가 아직 준비되지 않았습니다.');
-    const zip = await window.JSZip.loadAsync(file);
-    const files = [];
-    await Promise.all(Object.keys(zip.files).map(async (key) => {
-      const entry = zip.files[key];
-      if (entry.dir) return;
-      const ext = key.split('.').pop()?.toLowerCase() || '';
-      if (!['jpg','jpeg','png','gif','webp'].includes(ext)) return;
-      const blob = await entry.async('blob');
-      files.push(new File([blob], key, { type: `image/${ext==='jpg'?'jpeg':ext}` }));
-    }));
-    return files;
-  };
-
-  const handleRun = async () => {
-    if (!accessCode) return alert('Access code가 필요합니다.');
-    const candidates = [...imgFiles];
-
-    setBusy(true); setLog([]);
-
-    try {
-      if (zipFile) {
-        appendLog(`ZIP 해제 중: ${zipFile.name}`);
-        const extracted = await extractZipImages(zipFile);
-        appendLog(`ZIP에서 ${extracted.length}개 이미지 추출`);
-        candidates.push(...extracted);
-      }
-
-      if (candidates.length === 0) {
-        appendLog('업로드할 이미지가 없습니다.');
-        setBusy(false); return;
-      }
-
-      // 파일명(확장자 제거) → 프로필 이름 매칭
-      for (const file of candidates) {
-        const base = file.name.replace(/\.[^.]+$/, '').trim().toLowerCase();
-        const matched = profileIndexByName.get(base);
-        if (!matched) {
-          appendLog(`매칭 실패: ${file.name} (일치하는 프로필 이름 없음)`);
-          continue;
-        }
-        try {
-          appendLog(`업로드 시작: ${file.name} → ${matched.name} (${matched.id})`);
-          const url = await onUploadAvatar(file, matched.id, (pct)=> {
-            appendLog(`진행률 ${matched.name}: ${pct}%`);
-          });
-          await onAfterUpdate(matched.id, url);
-          appendLog(`완료: ${matched.name} → ${url}`);
-        } catch (e) {
-          appendLog(`오류: ${matched.name} → ${e.message || e}`);
-        }
-      }
-      appendLog('대량 업로드 완료');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <section className="bg-white p-6 rounded-xl shadow-md">
-      <h2 className="text-xl font-bold mb-4 flex items-center"><ImageIcon className="mr-2 text-yellow-500"/>사진 등록 (대량)</h2>
-      <p className="text-sm text-gray-600 mb-3">
-        파일명(확장자 제외)이 프로필의 <b>이름</b>과 일치하면 자동으로 매칭하여 사진을 적용합니다.<br/>
-        예) <code>홍길동.jpg</code> → 이름이 ‘홍길동’인 프로필에 적용.
-      </p>
-      <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md border mb-4">
-        <p className="font-semibold">업로드 안내:</p>
-        <ul className="list-disc pl-4 space-y-1">
-          <li>여러 이미지를 직접 선택하거나, <b>ZIP 파일</b>로 묶어 한 번에 올릴 수 있습니다.</li>
-          <li>권장 용량: 파일당 5MB 이하</li>
-          <li>확장자: jpg, jpeg, png, gif, webp</li>
-        </ul>
-      </div>
-      <div className="flex flex-col md:flex-row gap-3 items-start">
-        <label className="flex items-center gap-2 text-sm cursor-pointer">
-          <ImageIcon size={16} />
-          <span>이미지 선택(여러 개)</span>
-          <input type="file" accept="image/*" multiple className="hidden"
-            onChange={(e)=> setImgFiles(Array.from(e.target.files || []))} />
-        </label>
-        <label className="flex items-center gap-2 text-sm cursor-pointer">
-          <FileArchive size={16} />
-          <span>ZIP 선택</span>
-          <input type="file" accept=".zip" className="hidden"
-            onChange={(e)=> setZipFile(e.target.files?.[0] || null)} />
-        </label>
-        <button onClick={handleRun} disabled={busy}
-          className={`px-4 py-2 rounded text-white ${busy ? 'bg-yellow-300 cursor-not-allowed' : 'bg-yellow-400 hover:bg-yellow-500'}`}>
-          {busy ? '진행 중...' : '대량 적용'}
-        </button>
-      </div>
-      <div className="mt-3 text-sm bg-gray-50 p-3 rounded border h-40 overflow-auto whitespace-pre-wrap">
-        {log.map((l, i) => <div key={i}>• {l}</div>)}
-      </div>
-    </section>
-  );
-};
-
-// ============== 메인 앱 ==============
+/* ===================================================================================
+   메인 App
+   =================================================================================== */
 export default function App() {
   const [accessCode, setAccessCode] = useState(
     typeof window !== 'undefined' ? (localStorage.getItem('profileDbAccessCode') || null) : null
   );
-  const [profiles, setProfiles]     = useState([]);
-  const [authStatus, setAuthStatus] = useState('authenticating');
-  const [activeTab, setActiveTab]   = useState(TAB_PAGE.DASHBOARD);
+  const [profiles, setProfiles]         = useState([]);
+  const [authStatus, setAuthStatus]     = useState('authenticating');
+  const [activeTab, setActiveTab]       = useState(TAB_PAGE.DASHBOARD);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
 
-  // Google API 상태 (GIS 방식)
-  const [gapiClient, setGapiClient] = useState(null);
-  const [tokenClient, setTokenClient] = useState(null);
+  // Google API 상태 (GIS)
+  const [gapiClient, setGapiClient]     = useState(null);
+  const [tokenClient, setTokenClient]   = useState(null);
   const [isGoogleSignedIn, setIsGoogleSignedIn] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncing, setIsSyncing]       = useState(false);
   const [googleApiReady, setGoogleApiReady] = useState(null);
-  const [googleError, setGoogleError] = useState('');
+  const [googleError, setGoogleError]   = useState('');
 
-  const [newName, setNewName]                     = useState('');
-  const [newCareer, setNewCareer]                 = useState('');
-  const [newAge, setNewAge]                       = useState('');
-  const [newOtherInfo, setNewOtherInfo]           = useState('');
-  const [newEventDate, setNewEventDate]           = useState('');
-  const [newExpertise, setNewExpertise]           = useState('');
-  const [newPriority, setNewPriority]             = useState('');
-  const [newMeetingRecord, setNewMeetingRecord]   = useState('');
-  const [newPhotoFile, setNewPhotoFile]           = useState(null);
+  // 새 프로필 폼 상태
+  const [newName, setNewName]                 = useState('');
+  const [newCareer, setNewCareer]             = useState('');
+  const [newAge, setNewAge]                   = useState('');
+  const [newOtherInfo, setNewOtherInfo]       = useState('');
+  const [newEventDate, setNewEventDate]       = useState('');
+  const [newExpertise, setNewExpertise]       = useState('');
+  const [newPriority, setNewPriority]         = useState('');
+  const [newMeetingRecord, setNewMeetingRecord] = useState('');
+  const [newAvatarFile, setNewAvatarFile]     = useState(null);
 
-  // 공유 모드 파라미터
+  // 공유 모드 라우팅
   const urlParams = useMemo(() => {
     if (typeof window === 'undefined') return new URLSearchParams('');
     return new URLSearchParams(window.location.search);
@@ -1105,37 +962,34 @@ export default function App() {
   const profileIdFromUrl = urlParams.get('profile');
   const accessCodeFromUrl = urlParams.get('code');
 
-  // 외부 스크립트 로드: SheetJS + GAPI + GIS + JSZip
+  // 외부 스크립트: SheetJS + GAPI + GIS
   useEffect(() => {
     const xlsxScript = document.createElement('script');
     xlsxScript.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
-    xlsxScript.async = true; document.body.appendChild(xlsxScript);
+    xlsxScript.async = true;
+    document.body.appendChild(xlsxScript);
 
     const gapiScript = document.createElement('script');
     gapiScript.src = "https://apis.google.com/js/api.js";
-    gapiScript.async = true; gapiScript.defer = true; document.body.appendChild(gapiScript);
+    gapiScript.async = true; gapiScript.defer = true;
+    document.body.appendChild(gapiScript);
 
     const gisScript = document.createElement('script');
     gisScript.src = "https://accounts.google.com/gsi/client";
-    gisScript.async = true; gisScript.defer = true; document.body.appendChild(gisScript);
+    gisScript.async = true; gisScript.defer = true;
+    document.body.appendChild(gisScript);
 
-    const jszipScript = document.createElement('script');
-    jszipScript.src = "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js";
-    jszipScript.async = true; document.body.appendChild(jszipScript);
-
-    const onLoaded = Promise.all([
+    Promise.all([
       new Promise(res => gapiScript.onload = res),
-      new Promise(res => gisScript.onload  = res),
-    ]);
-
-    onLoaded.then(() => {
+      new Promise(res => gisScript.onload = res),
+    ]).then(() => {
       window.gapi.load('client', async () => {
         try {
           await window.gapi.client.init({ apiKey: GOOGLE_API_KEY, discoveryDocs: DISCOVERY_DOCS });
           setGapiClient(window.gapi);
-
           const tc = window.google.accounts.oauth2.initTokenClient({
-            client_id: GOOGLE_CLIENT_ID, scope: SCOPES,
+            client_id: GOOGLE_CLIENT_ID,
+            scope: SCOPES,
             callback: (resp) => {
               if (resp && resp.access_token) {
                 window.gapi.client.setToken({ access_token: resp.access_token });
@@ -1154,9 +1008,7 @@ export default function App() {
     });
 
     return () => {
-      [xlsxScript, gapiScript, gisScript, jszipScript].forEach(s => {
-        if (s && document.body.contains(s)) document.body.removeChild(s);
-      });
+      [xlsxScript, gapiScript, gisScript].forEach(s => { if (s && document.body.contains(s)) document.body.removeChild(s); });
     };
   }, []);
 
@@ -1165,13 +1017,8 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) setAuthStatus('authenticated');
       else {
-        try {
-          await signInAnonymously(auth);
-          setAuthStatus('authenticated');
-        } catch (e) {
-          console.error("Firebase 익명 로그인 오류:", e);
-          setAuthStatus('error');
-        }
+        try { await signInAnonymously(auth); setAuthStatus('authenticated'); }
+        catch (e) { console.error("Firebase 익명 로그인 오류:", e); setAuthStatus('error'); }
       }
     });
     return () => unsubscribe();
@@ -1185,8 +1032,8 @@ export default function App() {
   useEffect(() => {
     if (!profilesCollectionRef) { setProfiles([]); return; }
     const q = query(profilesCollectionRef);
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const profilesData = querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+    const unsubscribe = onSnapshot(q, (qs) => {
+      const profilesData = qs.docs.map(d => ({ ...d.data(), id: d.id }));
       setProfiles(profilesData);
     });
     return () => unsubscribe();
@@ -1197,95 +1044,95 @@ export default function App() {
     if (typeof window !== 'undefined') localStorage.setItem('profileDbAccessCode', code);
   };
 
+  // 새 프로필 추가 (사진 포함)
   const handleFormSubmit = async (e) => {
     e.preventDefault();
-    if (!newName.trim() || !newCareer.trim() || !profilesCollectionRef) return;
+    if (!profilesCollectionRef) return;
+    if (!newName.trim() || !newCareer.trim()) return;
 
     const eventDate = parseDateFromRecord(newMeetingRecord);
-    const profileData = {
-      name: newName.trim(),
-      career: newCareer.trim(),
+    const baseData = {
+      name: newName,
+      career: newCareer,
       age: newAge ? Number(newAge) : null,
-      otherInfo: newOtherInfo || null,
+      otherInfo: newOtherInfo,
       eventDate,
       expertise: newExpertise || null,
       priority: newPriority || null,
       meetingRecord: newMeetingRecord || null,
-      photoURL: null,
+      photoURL: null
     };
+
     try {
-      // 1) 문서 선생성 → 2) 사진이 있으면 업로드 후 URL 업데이트
-      const docRef = await addDoc(profilesCollectionRef, profileData);
-      if (newPhotoFile) {
-        const url = await uploadAvatar(newPhotoFile, accessCode, docRef.id);
-        await updateDoc(docRef, { photoURL: url });
+      // 1) 문서 선생성
+      const docRef = await addDoc(profilesCollectionRef, baseData);
+
+      // 2) 사진 있으면 업로드 → URL 업데이트
+      if (newAvatarFile) {
+        await ensureAuthReady(auth);
+        await assertProfileDocExists(db, appId, accessCode, docRef.id);
+        const url = await uploadAvatar({ file: newAvatarFile, accessCode, profileId: docRef.id });
+        await updateDoc(doc(profilesCollectionRef, docRef.id), { photoURL: url });
       }
-      // reset
+
+      // 3) 폼 리셋
       setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo('');
       setNewEventDate(''); setNewExpertise(''); setNewPriority(''); setNewMeetingRecord('');
-      setNewPhotoFile(null);
+      setNewAvatarFile(null);
     } catch (err) {
-      console.error("프로필 저장 오류: ", err);
-      alert(`프로필 저장 실패: ${err.code || err.message}`);
+      console.error("프로필 저장 오류:", err);
+      alert(err.message || '프로필 저장 중 오류가 발생했습니다.');
     }
   };
 
+  // 엑셀 벌크 추가
   const handleBulkAdd = async (newProfiles) => {
     if (!profilesCollectionRef || newProfiles.length === 0) return '업로드할 프로필이 없습니다.';
-    const existingProfilesMap = new Map(profiles.map(p => [p.name.trim(), p.id]));
+    const existingProfilesMap = new Map(profiles.map(p => [p.name, p.id]));
     const batch = writeBatch(db);
     let updatedCount = 0, addedCount = 0;
 
     newProfiles.forEach(profile => {
-      const key = (profile.name || '').trim();
-      if (!key) return;
-      const existingId = existingProfilesMap.get(key);
+      const existingId = existingProfilesMap.get(profile.name);
       if (existingId) {
-        batch.set(doc(profilesCollectionRef, existingId), profile, { merge: true });
+        batch.set(doc(profilesCollectionRef, existingId), profile);
         updatedCount++;
       } else {
         batch.set(doc(profilesCollectionRef), profile);
         addedCount++;
       }
     });
-
     await batch.commit();
     return `${addedCount}건 추가, ${updatedCount}건 업데이트 완료.`;
   };
 
+  // 단건 업데이트/삭제
   const handleUpdate = async (profileId, updatedData) => {
-    const { id, ...dataToUpdate } = updatedData;
-    const profileDocRef = doc(profilesCollectionRef, profileId);
-    await updateDoc(profileDocRef, dataToUpdate);
+    const { id, _avatarFile, ...data } = updatedData;
+    await updateDoc(doc(profilesCollectionRef, profileId), data);
   };
-
   const handleDeleteRequest = (profileId, profileName) => setShowDeleteConfirm({ show: true, profileId, profileName });
   const confirmDelete = async () => {
-    if (showDeleteConfirm.profileId && profilesCollectionRef) {
-      await deleteDoc(doc(profilesCollectionRef, showDeleteConfirm.profileId));
-    }
+    if (showDeleteConfirm.profileId && profilesCollectionRef) await deleteDoc(doc(profilesCollectionRef, showDeleteConfirm.profileId));
     setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
   };
 
   // 구글 캘린더 동기화 (전체)
   const handleSyncToCalendar = async () => {
-    if (!isGoogleSignedIn || !gapiClient) return alert('Google 계정에 먼저 로그인해주세요.');
-    setIsSyncing(true);
-    let successCount = 0, failCount = 0;
+    if (!isGoogleSignedIn || !gapiClient) { alert('Google 계정에 먼저 로그인해주세요.'); return; }
+    setIsSyncing(true); let successCount = 0, failCount = 0;
 
     const profilesWithMeetings = profiles.filter(p => p.eventDate);
     for (const profile of profilesWithMeetings) {
       const startTime = new Date(profile.eventDate);
-      const endTime   = new Date(startTime.getTime() + 90 * 60000);
-      const shareUrl  = `${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`;
-
+      const endTime = new Date(startTime.getTime() + 90 * 60000);
+      const shareUrl = `${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`;
       const reminders = [{ method: 'popup', minutes: 30 }];
       const tenAm = new Date(startTime.getFullYear(), startTime.getMonth(), startTime.getDate(), 10, 0, 0);
       if (startTime > tenAm) {
-        const minutesBefore = Math.round((startTime.getTime() - tenAm.getTime()) / 60000);
-        reminders.push({ method: 'popup', minutes: minutesBefore });
+        const minutesBefore = (startTime.getTime() - tenAm.getTime()) / 60000;
+        reminders.push({ method: 'popup', minutes: Math.round(minutesBefore) });
       }
-
       const event = {
         summary: `(영입) ${profile.name}님 미팅`,
         description: `${profile.name}님 프로필 보기:\n${shareUrl}`,
@@ -1293,26 +1140,27 @@ export default function App() {
         end:   { dateTime: endTime.toISOString(),   timeZone: 'Asia/Seoul' },
         reminders: { useDefault: false, overrides: reminders },
       };
-
       try {
         await gapiClient.client.calendar.events.insert({ calendarId: 'primary', resource: event });
         successCount++;
-      } catch (error) {
-        console.error(`Error creating event for ${profile.name}:`, error);
-        failCount++;
-      }
+      } catch (e) { console.error(`Error creating event for ${profile.name}:`, e); failCount++; }
     }
     setIsSyncing(false);
     alert(`캘린더 동기화 완료!\n성공: ${successCount}건, 실패: ${failCount}건`);
   };
 
-  const formState   = { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord, newPhotoFile };
-  const setFormState = { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord, setNewPhotoFile };
+  const formState = {
+    newName, newCareer, newAge, newOtherInfo, newEventDate,
+    newExpertise, newPriority, newMeetingRecord, newAvatarFile
+  };
+  const setFormState = {
+    setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate,
+    setNewExpertise, setNewPriority, setNewMeetingRecord, setNewAvatarFile
+  };
 
-  // 공유 링크 전용 화면
-  if (profileIdFromUrl && accessCodeFromUrl) {
-    return <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />;
-  }
+  // 공유 모드
+  if (profileIdFromUrl && accessCodeFromUrl) return <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />;
+
   if (!accessCode) return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
 
   return (
@@ -1331,32 +1179,37 @@ export default function App() {
           <h1 className="text-2xl font-bold text-gray-800">프로필 대시보드</h1>
           <span className="text-sm bg-gray-200 px-3 py-1 rounded-full font-mono">{accessCode}</span>
         </div>
+
         <div className="flex items-center space-x-4">
           {googleApiReady === false && (
-            <span className="text-xs text-red-500">Google Calendar 연동 비활성화됨{googleError ? ` (${googleError})` : ' (초기화 실패)'}</span>
+            <span className="text-xs text-red-500">
+              Google Calendar 연동 비활성화됨{googleError ? ` (${googleError})` : ' (초기화 실패)'}
+            </span>
           )}
+
           {googleApiReady === true && (
             isGoogleSignedIn ? (
               <>
                 <button onClick={handleSyncToCalendar} disabled={isSyncing}
-                  className="text-sm font-semibold text-white bg-blue-500 hover:bg-blue-600 px-3 py-2 rounded-md flex items-center disabled:bg-blue-300">
+                        className="text-sm font-semibold text-white bg-blue-500 hover:bg-blue-600 px-3 py-2 rounded-md flex items-center disabled:bg-blue-300">
                   {isSyncing ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1.5" />}
                   캘린더 동기화
                 </button>
                 <button onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
-                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
+                        className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
                   Google 로그아웃
                 </button>
               </>
             ) : (
-              <button onClick={() => { if (!tokenClient) return; tokenClient.requestAccessToken({ prompt: 'consent' }); }}
-                className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
+              <button onClick={() => tokenClient && tokenClient.requestAccessToken({ prompt: 'consent' })}
+                      className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
                 Google 로그인
               </button>
             )
           )}
+
           <button onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }}
-            className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center">
+                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center">
             <LogOut className="w-4 h-4 mr-1.5" /> 로그아웃
           </button>
         </div>
@@ -1364,24 +1217,18 @@ export default function App() {
 
       <div className="flex justify-center space-x-2 border-b bg-white px-6 py-2 sticky top-0 z-10">
         <button onClick={() => setActiveTab(TAB_PAGE.DASHBOARD)}
-          className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.DASHBOARD ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg-yellow-100'}`}>
+                className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.DASHBOARD ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg-yellow-100'}`}>
           대시보드
         </button>
         <button onClick={() => setActiveTab(TAB_PAGE.MANAGE)}
-          className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.MANAGE ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg-yellow-100'}`}>
+                className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.MANAGE ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg-yellow-100'}`}>
           프로필 관리
         </button>
       </div>
 
       <main className="p-6 space-y-12">
         {activeTab === TAB_PAGE.DASHBOARD && (
-          <DashboardTab
-            profiles={profiles}
-            onUpdate={handleUpdate}
-            onDelete={handleDeleteRequest}
-            accessCode={accessCode}
-            onUploadAvatar={(file, profileId, onProgress)=>uploadAvatar(file, accessCode, profileId, onProgress)}
-          />
+          <DashboardTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} accessCode={accessCode} />
         )}
         {activeTab === TAB_PAGE.MANAGE && (
           <ManageTab
@@ -1393,7 +1240,6 @@ export default function App() {
             formState={formState}
             setFormState={setFormState}
             accessCode={accessCode}
-            onUploadAvatar={(file, profileId, onProgress)=>uploadAvatar(file, accessCode, profileId, onProgress)}
           />
         )}
       </main>
