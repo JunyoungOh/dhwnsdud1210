@@ -709,7 +709,7 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
         </form>
       </section>
 
-      <ExcelUploader onBulkAdd={onBulkAdd} />
+      <ExcelUploader onBulkAdd={handleBulkAdd} />
 
       <section>
         <h2 className="text-xl font-bold text-gray-800 mb-4">전체 프로필 목록</h2>
