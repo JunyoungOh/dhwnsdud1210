@@ -106,6 +106,116 @@ function parseDateTimeFromRecord(recordText) {
 }
 
 // ===============================
+// 추천 알고리즘 유틸 (클라이언트 로컬 계산)
+// ===============================
+const STOPWORDS = new Set([
+  '및','그리고','또는','으로','에서','에게','대한','관련','기반','이용','업무','경력','프로젝트','참여','운영',
+  '개발','출시','서비스','회사','팀','부서','역할','기간','활동','책임','성과','분야','지원','관리','리드','협업',
+  '진행','담당','기획','데이터','제품','플랫폼','시스템','웹','모바일','앱'
+]);
+
+function normalizeKoEn(text) {
+  return (text || '')
+    .toLowerCase()
+    .replace(/[^가-힣a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenize(text) {
+  const norm = normalizeKoEn(text);
+  const tokens = norm.split(' ').filter(t => t.length >= 2 && !STOPWORDS.has(t));
+  return tokens;
+}
+
+function buildTfIdf(profiles) {
+  const docs = profiles.map(p => {
+    const text = [p.career, p.expertise, p.otherInfo].filter(Boolean).join(' ');
+    const toks = tokenize(text);
+    return { id: p.id, tokens: toks };
+  });
+
+  const df = new Map(); // token -> doc freq
+  docs.forEach(d => {
+    const uniq = new Set(d.tokens);
+    uniq.forEach(t => df.set(t, (df.get(t) || 0) + 1));
+  });
+
+  const N = docs.length || 1;
+  const idf = new Map();
+  df.forEach((c, t) => idf.set(t, Math.log((N + 1) / (c + 1)) + 1));
+
+  const vectors = new Map();
+  const norms   = new Map();
+  docs.forEach(d => {
+    const tf = new Map();
+    d.tokens.forEach(t => tf.set(t, (tf.get(t) || 0) + 1));
+    const denom = d.tokens.length || 1;
+    const vec = new Map();
+    let sumSq = 0;
+    tf.forEach((f, t) => {
+      const w = (f / denom) * (idf.get(t) || 0);
+      if (w > 0) { vec.set(t, w); sumSq += w * w; }
+    });
+    vectors.set(d.id, vec);
+    norms.set(d.id, Math.sqrt(sumSq) || 1e-9);
+  });
+
+  function cosineSim(idA, idB) {
+    const A = vectors.get(idA) || new Map();
+    const B = vectors.get(idB) || new Map();
+    if (!A.size || !B.size) return 0;
+    let dot = 0;
+    const small = A.size < B.size ? A : B;
+    const big   = A.size < B.size ? B : A;
+    small.forEach((wa, t) => {
+      const wb = big.get(t);
+      if (wb) dot += wa * wb;
+    });
+    const denom = (norms.get(idA) || 1) * (norms.get(idB) || 1);
+    return dot / denom;
+  }
+
+  function topSharedTerms(idA, idB, k = 5) {
+    const A = vectors.get(idA) || new Map();
+    const B = vectors.get(idB) || new Map();
+    const entries = [];
+    A.forEach((wa, t) => {
+      const wb = B.get(t);
+      if (wb) entries.push([t, wa + wb]);
+    });
+    return entries.sort((a,b)=>b[1]-a[1]).slice(0,k).map(([t])=>t);
+  }
+
+  return { vectors, idf, cosineSim, topSharedTerms };
+}
+
+// 재접촉 점수: 최근성 + 우선순위 + 텍스트 신호 + 지난 미팅 보너스
+function scoreRecontact(p, now = new Date()) {
+  const snoozeUntil = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
+  if (snoozeUntil && snoozeUntil > now) return -1e9;
+
+  const last = p.lastReviewedDate ? new Date(p.lastReviewedDate)
+             : p.eventDate ? new Date(p.eventDate)
+             : null;
+  if (!last) return 0;
+
+  const days = Math.max(0, Math.floor((now - last) / 86400000));
+  let score = days;
+
+  if (p.priority === '3') score += 30;
+  else if (p.priority === '2') score += 15;
+
+  const mr = (p.meetingRecord || '').toLowerCase();
+  const cues = ['후속','팔로업','연락','리마인드','보류','관심','이직','검토','논의','합류'];
+  if (cues.some(k=>mr.includes(k))) score += 20;
+
+  if (p.eventDate && new Date(p.eventDate) < now) score += 10;
+
+  return score;
+}
+
+// ===============================
 // 공유 보기
 // ===============================
 const ProfileDetailView = ({ profileId, accessCode }) => {
@@ -167,6 +277,50 @@ const ProfileDetailView = ({ profileId, accessCode }) => {
 };
 
 // ===============================
+// 유사 네트워크 모달
+// ===============================
+const SimilarModal = ({ base, similar, onClose, onUpdate, accessCode, onSyncOne }) => {
+  if (!base) return null;
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-gray-800">“{base.name}” 유사 네트워크</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-800"><X size={20}/></button>
+        </div>
+        {similar.length === 0 ? (
+          <p className="text-sm text-gray-500">유사한 프로필이 없습니다.</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {similar.map(({ profile, score, terms }) => (
+              <div key={profile.id} className="border rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div className="font-semibold text-yellow-700">{profile.name}</div>
+                  <div className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">유사도 {(score*100).toFixed(0)}%</div>
+                </div>
+                {profile.expertise && <div className="text-sm text-gray-700 mt-1">{profile.expertise}</div>}
+                <div className="text-xs text-gray-500 mt-2 line-clamp-3 whitespace-pre-wrap">{profile.career}</div>
+                {terms?.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {terms.map(t => <span key={t} className="text-[10px] bg-yellow-50 text-yellow-700 px-2 py-0.5 rounded-full">#{t}</span>)}
+                  </div>
+                )}
+                <div className="mt-3 flex justify-end gap-2">
+                  {onSyncOne && (
+                    <button onClick={()=>onSyncOne(profile)} className="text-xs bg-blue-500 text-white px-2 py-1 rounded">캘린더</button>
+                  )}
+                  <button onClick={()=>onUpdate(profile.id,{ lastReviewedDate: new Date().toISOString() })} className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded">팔로업 확인</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ===============================
 // 로그인 화면
 // ===============================
 const LoginScreen = ({ onLogin, authStatus }) => {
@@ -218,9 +372,9 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
 );
 
 // ===============================
-// 프로필 카드 (개별 캘린더 연동 버튼 추가)
+// 프로필 카드 (개별 캘린더 연동 + 유사 네트워크 버튼)
 // ===============================
-const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm, accessCode, onSyncOne }) => {
+const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm, accessCode, onSyncOne, onShowSimilar }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
   const [syncing, setSyncing] = useState(false);
@@ -308,7 +462,7 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
         </div>
       )}
 
-      {/* 개별 캘린더 연동 버튼 */}
+      {/* 개별 캘린더 연동 + 유사 네트워크 버튼 */}
       <div className="mt-3 flex items-center justify-between">
         {profile.gcalEventId ? (
           <a href={profile.gcalHtmlLink || '#'} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
@@ -316,10 +470,17 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
           </a>
         ) : <span className="text-xs text-gray-400">캘린더 미연동</span>}
 
-        <button onClick={handleSyncClick} disabled={syncing} className="text-xs bg-blue-500 text-white font-semibold px-3 py-1 rounded-full hover:bg-blue-600 disabled:bg-blue-300 flex items-center">
-          {syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <CalendarPlus className="w-3 h-3 mr-1" />}
-          {profile.gcalEventId ? '캘린더 수정' : '캘린더 등록'}
-        </button>
+        <div className="flex items-center gap-2">
+          {onShowSimilar && (
+            <button onClick={() => onShowSimilar(profile)} className="text-xs bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-full hover:bg-gray-200">
+              유사 네트워크
+            </button>
+          )}
+          <button onClick={handleSyncClick} disabled={syncing} className="text-xs bg-blue-500 text-white font-semibold px-3 py-1 rounded-full hover:bg-blue-600 disabled:bg-blue-300 flex items-center">
+            {syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <CalendarPlus className="w-3 h-3 mr-1" />}
+            {profile.gcalEventId ? '캘린더 수정' : '캘린더 등록'}
+          </button>
+        </div>
       </div>
 
       {/* 액션 버튼 */}
@@ -340,9 +501,9 @@ const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onCon
 };
 
 // ===============================
-// 필터링 섹션 / 대시보드 탭 (기존 동일)
+// 필터링 섹션 / 대시보드 탭 (유사 네트워크 버튼 전달)
 // ===============================
-const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, accessCode, onSyncOne }) => (
+const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, accessCode, onSyncOne, onShowSimilar }) => (
   <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in">
     <div className="flex justify-between items-center mb-4">
       <h2 className="text-xl font-bold text-gray-800">{title}</h2>
@@ -352,7 +513,7 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, acc
       {profiles.length > 0 ? (
         profiles.map((profile, index) => (
           <div key={profile.id} className="animate-cascade" style={{ animationDelay: `${index * 50}ms` }}>
-            <ProfileCard profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} />
+            <ProfileCard profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} />
           </div>
         ))
       ) : (
@@ -470,13 +631,78 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
     }
   }, [profiles, activeFilter]);
 
+  // ===== 추천: TF-IDF 유사도 준비 =====
+  const { cosineSim, topSharedTerms } = useMemo(() => buildTfIdf(profiles), [profiles]);
+  const [similarBase, setSimilarBase] = useState(null);
+
+  const getSimilarList = useMemo(() => {
+    return (base, topK = 8) => {
+      if (!base) return [];
+      const baseId = base.id;
+      const scored = profiles
+        .filter(p => p.id !== baseId)
+        .map(p => {
+          const s = cosineSim(baseId, p.id);
+          return { profile: p, score: s };
+        })
+        .filter(x => x.score > 0)
+        .sort((a,b)=>b.score - a.score)
+        .slice(0, topK)
+        .map(x => ({ ...x, terms: topSharedTerms(baseId, x.profile.id, 5) }));
+      return scored;
+    };
+  }, [profiles, cosineSim, topSharedTerms]);
+
+  // ===== 추천: 다시 접촉해야 할 인물 =====
+  const recontactRecommended = useMemo(() => {
+    const now = new Date();
+    const scored = profiles.map(p => ({ p, score: scoreRecontact(p, now) }))
+      .filter(x => x.score > 0)
+      .sort((a,b)=>b.score - a.score)
+      .slice(0, 6);
+    return scored.map(x => ({ ...x.p, _recontactScore: x.score }));
+  }, [profiles]);
+
   return (
     <>
+      {/* 추천: 다시 접촉 */}
+      {recontactRecommended.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-xl font-bold mb-4">추천: 다시 접촉해야 할 인물</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {recontactRecommended.map(profile => (
+              <ProfileCard
+                key={profile.id}
+                profile={profile}
+                onUpdate={onUpdate}
+                onDelete={onDelete}
+                accessCode={accessCode}
+                onSyncOne={onSyncOne}
+                onShowSimilar={(p)=>setSimilarBase(p)}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       {longTermNoContactProfiles.length > 0 && (
         <section>
           <h2 className="text-xl font-bold mb-4 flex items-center"><BellRing className="mr-2 text-orange-500" />장기 미접촉 알림 (3개월 이상)</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {longTermNoContactProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} isAlarmCard={true} onSnooze={(id)=>onUpdate(id,{snoozeUntil:new Date(new Date().setMonth(new Date().getMonth()+3)).toISOString()})} onConfirmAlarm={(id)=>onUpdate(id,{lastReviewedDate:new Date().toISOString()})} accessCode={accessCode} onSyncOne={onSyncOne} />)}
+            {longTermNoContactProfiles.map(profile => (
+              <ProfileCard
+                key={profile.id}
+                profile={profile}
+                onUpdate={onUpdate}
+                onDelete={onDelete}
+                isAlarmCard={true}
+                onSnooze={(id)=>onUpdate(id,{snoozeUntil:new Date(new Date().setMonth(new Date().getMonth()+3)).toISOString()})}
+                onConfirmAlarm={(id)=>onUpdate(id,{lastReviewedDate:new Date().toISOString()})}
+                accessCode={accessCode}
+                onSyncOne={onSyncOne}
+                onShowSimilar={(p)=>setSimilarBase(p)}
+              />
+            ))}
           </div>
         </section>
       )}
@@ -485,7 +711,17 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
         <section>
           <h2 className="text-xl font-bold mb-4 flex items-center"><Calendar className="mr-2 text-red-500" />오늘의 일정</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {todayProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} />)}
+            {todayProfiles.map(profile => (
+              <ProfileCard
+                key={profile.id}
+                profile={profile}
+                onUpdate={onUpdate}
+                onDelete={onDelete}
+                accessCode={accessCode}
+                onSyncOne={onSyncOne}
+                onShowSimilar={(p)=>setSimilarBase(p)}
+              />
+            ))}
           </div>
         </section>
       )}
@@ -494,7 +730,17 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
         <section>
           <h2 className="text-xl font-bold mb-4 flex items-center"><Zap className="mr-2 text-blue-500" />다가오는 일정</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {upcomingProfiles.map(profile => <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} />)}
+            {upcomingProfiles.map(profile => (
+              <ProfileCard
+                key={profile.id}
+                profile={profile}
+                onUpdate={onUpdate}
+                onDelete={onDelete}
+                accessCode={accessCode}
+                onSyncOne={onSyncOne}
+                onShowSimilar={(p)=>setSimilarBase(p)}
+              />
+            ))}
           </div>
         </section>
       )}
@@ -509,7 +755,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
             <h2 className="text-xl font-bold mb-4">검색 결과</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
-                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} />
+                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={(p)=>setSimilarBase(p)} />
               )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
             </div>
           </div>
@@ -528,7 +774,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
       </section>
 
       {showMeetingProfiles && (
-        <FilterResultSection title="미팅 진행 프로필 (최신순)" profiles={meetingProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setShowMeetingProfiles(false)} accessCode={accessCode} onSyncOne={onSyncOne} />
+        <FilterResultSection title="미팅 진행 프로필 (최신순)" profiles={meetingProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setShowMeetingProfiles(false)} accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={(p)=>setSimilarBase(p)} />
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -571,7 +817,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
       </div>
 
       {(activeFilter.type === 'age' || activeFilter.type === 'priority') && (
-        <FilterResultSection title={`"${activeFilter.value}" 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} accessCode={accessCode} onSyncOne={onSyncOne} />
+        <FilterResultSection title={`"${activeFilter.value}" 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={(p)=>setSimilarBase(p)} />
       )}
 
       <section className="bg-white p-6 rounded-xl shadow-md">
@@ -605,14 +851,26 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
       </section>
 
       {activeFilter.type === 'expertise' && (
-        <FilterResultSection title={`"${activeFilter.value}" 전문영역 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} accessCode={accessCode} onSyncOne={onSyncOne} />
+        <FilterResultSection title={`"${activeFilter.value}" 전문영역 필터 결과`} profiles={filteredProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setActiveFilter({ type: null, value: null })} accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={(p)=>setSimilarBase(p)} />
+      )}
+
+      {/* 유사 네트워크 모달 */}
+      {similarBase && (
+        <SimilarModal
+          base={similarBase}
+          similar={getSimilarList(similarBase, 8)}
+          onClose={()=>setSimilarBase(null)}
+          onUpdate={onUpdate}
+          accessCode={accessCode}
+          onSyncOne={onSyncOne}
+        />
       )}
     </>
   );
 };
 
 // ===============================
-// 관리 탭 (기존 동일, 카드에 onSyncOne 전달)
+// 관리 탭 (기존 동일, 필요 시 onShowSimilar 넘길 수 있음 - 여기선 생략)
 // ===============================
 const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState, accessCode, onSyncOne }) => {
   const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord } = formState;
@@ -932,7 +1190,6 @@ export default function App() {
       const token = gapiClient?.client?.getToken?.();
       if (token?.access_token) { setIsGoogleSignedIn(true); resolve(true); return; }
       if (!tokenClient) { reject(new Error('Google API 초기화 전입니다. 잠시 후 다시 시도해주세요.')); return; }
-      // 토큰 요청 후 이어서 진행
       tokenClient.callback = (resp) => {
         if (resp && resp.access_token) {
           gapiClient.client.setToken({ access_token: resp.access_token });
@@ -972,7 +1229,6 @@ export default function App() {
         end:   { dateTime: endLocal,   timeZone: TZ },
         reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 30 }] },
       };
-      // 당일 오전 10시 알림 추가(시작보다 전이면)
       const ten = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 10, 0, 0);
       if (startDate > ten) {
         const minutesBefore = Math.round((startDate.getTime() - ten.getTime()) / 60000);
@@ -980,7 +1236,6 @@ export default function App() {
       }
     } else {
       const dateStr = formatDateOnlyInTZ(startDate, TZ);
-      // 올데이는 end가 다음날(Exclusive)
       const end = new Date(startDate); end.setDate(end.getDate() + 1);
       const endStr = formatDateOnlyInTZ(end, TZ);
       eventResource = {
@@ -994,21 +1249,18 @@ export default function App() {
     try {
       let result;
       if (profile.gcalEventId) {
-        // 수정 (patch)
         result = await gapiClient.client.calendar.events.patch({
           calendarId: 'primary',
           eventId: profile.gcalEventId,
           resource: eventResource,
         });
       } else {
-        // 생성 (insert)
         result = await gapiClient.client.calendar.events.insert({
           calendarId: 'primary',
           resource: eventResource,
         });
       }
       const ev = result.result || {};
-      // 3) 문서에 저장
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', accessCode, profile.id), {
         gcalEventId: ev.id || profile.gcalEventId || null,
         gcalHtmlLink: ev.htmlLink || profile.gcalHtmlLink || null,
