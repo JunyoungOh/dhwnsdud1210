@@ -3,7 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
 import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
-import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save, UploadCloud, BellRing, Share2, RefreshCw, CalendarPlus } from 'lucide-react';
+import { Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save, UploadCloud, BellRing, Share2, RefreshCw, CalendarPlus, Info, ChevronDown, ChevronRight, Check } from 'lucide-react';
 
 // ==============================
 // Google API / Firebase env
@@ -40,6 +40,7 @@ const TAB_PAGE = { DASHBOARD: 'dashboard', MANAGE: 'manage' };
 // ===============================
 const TZ = 'Asia/Seoul';
 
+// Intl parts를 사용해 특정 타임존 기준의 YYYY-MM-DDTHH:mm:ss 만들기
 function formatRFC3339InTZ(date, timeZone = TZ) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone, year:'numeric', month:'2-digit', day:'2-digit',
@@ -55,12 +56,14 @@ function formatDateOnlyInTZ(date, timeZone = TZ) {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-// ✅ 다양한 표기 인식
+// ✅ 다양한 표기 인식: (25.08.14) AM/PM/오전/오후 7시 30분 / 2025-08-14 19:30 / 2025-08-14 등
+// 반환: { date: Date, hadTime: boolean }
 function parseDateTimeFromRecord(recordText) {
   if (!recordText) return null;
   const text = typeof recordText === 'string' ? recordText : String(recordText || '');
   let best = null;
 
+  // 패턴 A: (YY.MM.DD) [AM|PM|오전|오후]? hh[:mm]|hh시[ mm분]?
   const reA = /\((\d{2})\.(\d{2})\.(\d{2})\)\s*(?:(AM|PM|오전|오후)?\s*(\d{1,2})(?::(\d{2}))?(?:\s*시)?(?:\s*(\d{1,2})\s*분?)?)?/gi;
   let m;
   while ((m = reA.exec(text)) !== null) {
@@ -83,6 +86,7 @@ function parseDateTimeFromRecord(recordText) {
     if (!best || d > best.date) best = { date: d, hadTime };
   }
 
+  // 패턴 B: YYYY-MM-DD[ HH:mm]
   const reB = /(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2}))?/g;
   while ((m = reB.exec(text)) !== null) {
     const year  = parseInt(m[1], 10);
@@ -96,6 +100,25 @@ function parseDateTimeFromRecord(recordText) {
   }
 
   return best ? best : null;
+}
+
+// 세대 그룹
+function getAgeGroup(age){
+  if (!age && age !== 0) return null;
+  if (age < 20) return '10대';
+  if (age < 30) return '20대';
+  if (age < 40) return '30대';
+  if (age < 50) return '40대';
+  return '50대 이상';
+}
+
+// 텍스트 키워드 추출(간단)
+function extractKeywords(str=''){
+  return (str||'')
+    .replace(/[^\p{L}\p{N}\s]/gu,' ')
+    .split(/\s+/)
+    .filter(w=>w.length>=2)
+    .map(w=>w.toLowerCase());
 }
 
 // ===============================
@@ -211,7 +234,7 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
 );
 
 // ===============================
-// 프로필 카드
+// 프로필 카드 (개별 캘린더 연동 버튼 추가)
 // ===============================
 const ProfileCard = ({ profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm, accessCode, onSyncOne }) => {
   const [isEditing, setIsEditing] = useState(false);
@@ -356,33 +379,48 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, acc
 );
 
 // ===============================
+// 간단한 유사도: 0~100
+// ===============================
+function similarityScore(a, b){
+  if (!a || !b || a.id === b.id) return 0;
+  let score = 0;
+  // 전문영역
+  if (a.expertise && b.expertise && a.expertise === b.expertise) score += 40;
+  // IT 기업 키워드
+  const hasKey = (p)=> TARGET_KEYWORDS.filter(k=> (p.career||'').includes(k));
+  const ak = hasKey(a), bk = hasKey(b);
+  const inter = ak.filter(x => bk.includes(x)).length;
+  const union = new Set([...ak, ...bk]).size || 1;
+  score += Math.round((inter/union)*30); // 0~30
+  // 세대
+  const ag = getAgeGroup(a.age), bg = getAgeGroup(b.age);
+  if (ag && bg && ag === bg) score += 15;
+  // 우선순위
+  if (a.priority && b.priority && a.priority === b.priority) score += 5;
+  // 키워드(경력/기타)
+  const kwA = new Set([...extractKeywords(a.career), ...extractKeywords(a.otherInfo)]);
+  const kwB = new Set([...extractKeywords(b.career), ...extractKeywords(b.otherInfo)]);
+  const interKW = [...kwA].filter(x=>kwB.has(x)).length;
+  const unionKW = new Set([...kwA, ...kwB]).size || 1;
+  score += Math.round((interKW/unionKW)*10); // 0~10
+  return Math.max(0, Math.min(100, score));
+}
+
+// ===============================
 // 대시보드 탭
 // ===============================
 const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) => {
   const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
   const [searchTerm, setSearchTerm] = useState('');
   const [showMeetingProfiles, setShowMeetingProfiles] = useState(false);
+  const [isRecommendOpen, setIsRecommendOpen] = useState(true);
+  const [isLongTermOpen, setIsLongTermOpen] = useState(true);
 
-  // NEW: 장기 미접촉 Open/Close
-  const [isLongTermOpen, setIsLongTermOpen] = useState(false);
-
-  const handlePieClick = (type, dataOrPayload) => {
-    const d = dataOrPayload?.payload || dataOrPayload;
-    if (!d) return;
-    if ((d.value ?? d.count) === 0) return;
-    setActiveFilter({ type, value: d.name });
-  };
-  const handleBarClick = (type, dataOrPayload) => {
-    const d = dataOrPayload?.payload || dataOrPayload;
-    if (!d) return;
-    const count = d.count ?? d.value;
-    if (count === 0) return;
-    setActiveFilter({ type, value: d.name });
-  };
-
+  // --------- 데이터 전처리
   const { todayProfiles, upcomingProfiles, meetingProfiles, longTermNoContactProfiles } = useMemo(() => {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const tomorrowStart = new Date(new Date(todayStart).setDate(todayStart.getDate()+1));
     const threeDaysLater = new Date(todayStart); threeDaysLater.setDate(threeDaysLater.getDate() + 4);
     const threeMonthsAgo = new Date(now); threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
@@ -391,7 +429,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
       if (!p.eventDate) return;
       meetings.push(p);
       const eventDate = new Date(p.eventDate);
-      if (eventDate >= todayStart && eventDate < new Date(new Date(todayStart).setDate(todayStart.getDate() + 1))) {
+      if (eventDate >= todayStart && eventDate < tomorrowStart) {
         today.push(p);
       } else if (eventDate > now && eventDate < threeDaysLater) {
         upcoming.push(p);
@@ -409,12 +447,58 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
     };
   }, [profiles]);
 
-  const handleSnooze = (profileId) => {
-    const snoozeDate = new Date(); snoozeDate.setMonth(snoozeDate.getMonth() + 3);
-    onUpdate(profileId, { snoozeUntil: snoozeDate.toISOString() });
-  };
-  const handleConfirmAlarm = (profileId) => onUpdate(profileId, { lastReviewedDate: new Date().toISOString() });
+  // 추천(다시 접촉) 로직: 오래된(lastReviewedDate <= 3개월 전) 또는 미팅 기록 있으나 최근 접촉 이력 없는 사람, snooze 미적용
+  const recommendProfiles = useMemo(() => {
+    const now = new Date();
+    const threeMonthsAgo = new Date(now); threeMonthsAgo.setMonth(threeMonthsAgo.getMonth()-3);
+    // 점수 부여: 오래될수록 + 우선순위 높을수록
+    const scored = profiles.map(p => {
+      const baseDate = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
+      const snoozeUntil = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
+      if (!baseDate) return null;
+      if (snoozeUntil && snoozeUntil > now) return null;
+      const monthsGap = Math.max(0, (now - baseDate) / (1000*60*60*24*30));
+      const pr = p.priority ? Number(p.priority) : 2; // 기본 2(중)
+      const score = monthsGap*10 + (pr===3?15:(pr===2?8:3));
+      return { ...p, _recScore: score, _gap: monthsGap };
+    }).filter(Boolean);
+    // 최근 접촉(<=3개월)이면 제외
+    const filtered = scored.filter(x => x._gap >= 3);
+    return filtered.sort((a,b)=> b._recScore - a._recScore).slice(0, 12);
+  }, [profiles]);
 
+  // 유사 프로필 (상위 매칭 Edge)
+  const similarPairs = useMemo(() => {
+    const pairs = [];
+    for (let i=0;i<profiles.length;i++){
+      for (let j=i+1;j<profiles.length;j++){
+        const a = profiles[i], b = profiles[j];
+        const s = similarityScore(a,b);
+        if (s>=50) pairs.push({ a, b, score: s });
+      }
+    }
+    return pairs.sort((x,y)=>y.score - x.score).slice(0, 10);
+  }, [profiles]);
+
+  // --------- 검색
+  const searchedProfiles = useMemo(() => {
+    const term = searchTerm.trim(); if (!term) return [];
+    const orConditions = term.split(/\s+or\s+/i);
+    return profiles.filter(p => orConditions.some(cond => {
+      const andKeywords = cond.split(/\s+and\s+/i).filter(Boolean);
+      return andKeywords.every(keyword => {
+        const map = { '이름':'name','경력':'career','나이':'age','전문영역':'expertise','기타':'otherInfo','우선순위':'priority' };
+        const f = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
+        if (f) { const field = map[f[1]]; const val = f[2].toLowerCase(); const v = p[field] ? String(p[field]).toLowerCase() : ''; return v.includes(val); }
+        const ageG = keyword.match(/^(\d{1,2})대$/);
+        if (ageG) { const d = parseInt(ageG[1],10); if (d>=10) { const min=d, max=d+9; return p.age && p.age>=min && p.age<=max; } }
+        const txt = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
+        return txt.includes(keyword.toLowerCase());
+      });
+    }));
+  }, [searchTerm, profiles]);
+
+  // --------- 차트 데이터
   const ageData = useMemo(() => {
     const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
     profiles.forEach(({ age }) => {
@@ -428,11 +512,40 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
     return Object.entries(groups).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
   }, [profiles]);
 
+  const priorityData = useMemo(() => {
+    const p = { '3 (상)': 0, '2 (중)': 0, '1 (하)': 0 };
+    profiles.forEach(x => { if (x.priority === '3') p['3 (상)']++; else if (x.priority === '2') p['2 (중)']++; else if (x.priority === '1') p['1 (하)']++; });
+    return Object.entries(p).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
+  }, [profiles]);
+
+  const keywordData = useMemo(
+    () => TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length })),
+    [profiles]
+  );
+
   const expertiseData = useMemo(() => {
     const c = {}; profiles.forEach(p => { if (p.expertise) c[p.expertise] = (c[p.expertise] || 0) + 1; });
     return Object.entries(c).map(([name, count]) => ({ name, count }));
   }, [profiles]);
 
+  // --------- 차트 클릭 핸들러 (필터 복원)
+  const handlePieClick = (type, data) => {
+    if (!data) return;
+    // recharts Pie onClick의 data는 payload 안에 name/value가 있음
+    const d = data.payload ? data.payload : data;
+    if (d.value === 0) return;
+    setActiveFilter({ type, value: d.name });
+  };
+  const handleBarClick = (type, data) => {
+    if (!data) return;
+    const payload = data.payload || data;
+    const value = payload.name;
+    const count = payload.count || payload.value;
+    if (!count) return;
+    setActiveFilter({ type, value });
+  };
+
+  // --------- 필터 결과
   const filteredProfiles = useMemo(() => {
     if (!activeFilter.type) return [];
     switch (activeFilter.type) {
@@ -447,39 +560,111 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
         ));
       }
       case 'priority': {
-        const v = activeFilter.value.split(' ')[0]; return profiles.filter(p => p.priority === v);
+        const v = activeFilter.value.split(' ')[0];
+        return profiles.filter(p => p.priority === v);
       }
-      case 'company': return profiles.filter(p => p.career?.includes(activeFilter.value));
-      case 'expertise': return profiles.filter(p => p.expertise === activeFilter.value);
+      case 'company':
+        return profiles.filter(p => p.career?.includes(activeFilter.value));
+      case 'expertise':
+        return profiles.filter(p => p.expertise === activeFilter.value);
       default: return [];
     }
   }, [profiles, activeFilter]);
 
-  // 그래프에 사용할 데이터(막대)
-  const companyBarData = useMemo(
-    () => TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length })),
-    [profiles]
-  );
+  // --------- 추천 섹션 버튼 동작
+  const handleSnooze = (profileId) => {
+    const snoozeDate = new Date(); snoozeDate.setMonth(snoozeDate.getMonth() + 3);
+    onUpdate(profileId, { snoozeUntil: snoozeDate.toISOString() });
+  };
+  const handleConfirmFollowup = (profileId) => {
+    onUpdate(profileId, { lastReviewedDate: new Date().toISOString() });
+  };
+
+  const handleConfirmAlarm = (profileId) => onUpdate(profileId, { lastReviewedDate: new Date().toISOString() });
 
   return (
     <>
-      {/* 장기 미접촉 알림: Open/Close 토글 + '없음' 처리 */}
-      <section>
-        <div className="flex items-center mb-4">
+      {/* ============ 추천 : 다시 접촉해야 할 인물 ============ */}
+      <section className="bg-white p-6 rounded-xl shadow-md">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setIsRecommendOpen(v=>!v)}
+              className="p-1 rounded hover:bg-gray-100"
+              title={isRecommendOpen ? 'Close' : 'Open'}
+            >
+              {isRecommendOpen ? <ChevronDown className="w-5 h-5"/> : <ChevronRight className="w-5 h-5" />}
+            </button>
+            <h2 className="text-xl font-bold text-gray-800">추천 : 다시 접촉해야 할 인물</h2>
+
+            {/* 로직 설명 툴팁 */}
+            <div className="relative group">
+              <Info className="w-4 h-4 text-gray-400 cursor-default" />
+              <div className="absolute left-1/2 -translate-x-1/2 mt-2 w-72 bg-black text-white text-xs rounded-lg px-3 py-2 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-20">
+                기준: 최근 접촉일(또는 마지막 미팅일)로부터 3개월 이상 경과 &amp; 스누즈 미설정.  
+                오래될수록 + 우선순위(상&gt;중&gt;하) 가중치로 점수화해 상위 추천을 표시합니다.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {isRecommendOpen && (
+          recommendProfiles.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {recommendProfiles.map(p => (
+                <div key={p.id} className="border rounded-lg p-4 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-semibold text-yellow-700">{p.name}</div>
+                      <div className="text-xs text-gray-500">{p.expertise || '전문영역 미입력'} · 우선순위 {p.priority || '-'}</div>
+                    </div>
+                    <div className="text-sm text-gray-400">점수 {Math.round(p._recScore)}</div>
+                  </div>
+                  {p.career && <p className="text-sm text-gray-700 mt-2 line-clamp-3">{p.career}</p>}
+
+                  <div className="mt-3 flex justify-end space-x-2">
+                    <button
+                      onClick={() => handleConfirmFollowup(p.id)}
+                      className="text-xs bg-gray-200 text-gray-700 font-semibold px-3 py-1 rounded-full hover:bg-gray-300 flex items-center"
+                      title="팔로업 확인"
+                    >
+                      <Check className="w-3 h-3 mr-1" /> 확인
+                    </button>
+                    <button
+                      onClick={() => handleSnooze(p.id)}
+                      className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-3 py-1 rounded-full hover:bg-indigo-200"
+                    >
+                      3개월 후 다시 알림
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">추천 대상이 없습니다.</p>
+          )
+        )}
+      </section>
+
+      {/* ============ 장기 미접촉 알림 (3개월 이상) ============ */}
+      <section className="bg-white p-6 rounded-xl shadow-md">
+        <div className="flex items-center space-x-2 mb-4">
           <button
-            onClick={() => setIsLongTermOpen(o => !o)}
-            className="mr-3 text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-50"
+            onClick={() => setIsLongTermOpen(v=>!v)}
+            className="p-1 rounded hover:bg-gray-100"
+            title={isLongTermOpen ? 'Close' : 'Open'}
           >
-            {isLongTermOpen ? 'Close' : 'Open'}
+            {isLongTermOpen ? <ChevronDown className="w-5 h-5"/> : <ChevronRight className="w-5 h-5" />}
           </button>
           <h2 className="text-xl font-bold flex items-center">
             <BellRing className="mr-2 text-orange-500" />장기 미접촉 알림 (3개월 이상)
           </h2>
         </div>
+
         {isLongTermOpen && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {longTermNoContactProfiles.length > 0 ? (
-              longTermNoContactProfiles.map(profile => (
+          longTermNoContactProfiles.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {longTermNoContactProfiles.map(profile => (
                 <ProfileCard
                   key={profile.id}
                   profile={profile}
@@ -487,19 +672,19 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
                   onDelete={onDelete}
                   isAlarmCard={true}
                   onSnooze={(id)=>onUpdate(id,{snoozeUntil:new Date(new Date().setMonth(new Date().getMonth()+3)).toISOString()})}
-                  onConfirmAlarm={(id)=>onUpdate(id,{lastReviewedDate:new Date().toISOString()})}
+                  onConfirmAlarm={handleConfirmAlarm}
                   accessCode={accessCode}
                   onSyncOne={onSyncOne}
                 />
-              ))
-            ) : (
-              <p className="text-gray-500">없음</p>
-            )}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">없음</p>
+          )
         )}
       </section>
 
-      {/* 오늘/다가오는 일정 (그대로) */}
+      {/* ============ 오늘의 일정 ============ */}
       {todayProfiles.length > 0 && (
         <section>
           <h2 className="text-xl font-bold mb-4 flex items-center"><Calendar className="mr-2 text-red-500" />오늘의 일정</h2>
@@ -509,6 +694,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
         </section>
       )}
 
+      {/* ============ 다가오는 일정 ============ */}
       {upcomingProfiles.length > 0 && (
         <section>
           <h2 className="text-xl font-bold mb-4 flex items-center"><Zap className="mr-2 text-blue-500" />다가오는 일정</h2>
@@ -518,7 +704,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
         </section>
       )}
 
-      {/* 검색 */}
+      {/* ============ 검색 ============ */}
       <section>
         <div className="relative mb-6">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -528,31 +714,15 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
           <div className="mb-8">
             <h2 className="text-xl font-bold mb-4">검색 결과</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {(() => {
-                const term = searchTerm.trim(); if (!term) return null;
-                const orConditions = term.split(/\s+or\s+/i);
-                const searched = profiles.filter(p => orConditions.some(cond => {
-                  const andKeywords = cond.split(/\s+and\s+/i).filter(Boolean);
-                  return andKeywords.every(keyword => {
-                    const map = { '이름':'name','경력':'career','나이':'age','전문영역':'expertise','기타':'otherInfo','우선순위':'priority' };
-                    const f = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
-                    if (f) { const field = map[f[1]]; const val = f[2].toLowerCase(); const v = p[field] ? String(p[field]).toLowerCase() : ''; return v.includes(val); }
-                    const ageG = keyword.match(/^(\d{1,2})대$/);
-                    if (ageG) { const d = parseInt(ageG[1],10); if (d>=10) { const min=d, max=d+9; return p.age && p.age>=min && p.age<=max; } }
-                    const txt = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
-                    return txt.includes(keyword.toLowerCase());
-                  });
-                }));
-                return searched.length > 0 ? searched.map(profile => (
-                  <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} />
-                )) : <p className="text-gray-500">검색 결과가 없습니다.</p>;
-              })()}
+              {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
+                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} />
+              )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
             </div>
           </div>
         )}
       </section>
 
-      {/* 요약 카드 */}
+      {/* ============ 통계 카드 ============ */}
       <section className="mb-8 flex space-x-4">
         <div className="bg-white p-4 rounded-xl shadow-md">
           <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
@@ -565,10 +735,10 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
       </section>
 
       {showMeetingProfiles && (
-        <FilterResultSection title="미팅 진행 프로필 (최신순)" profiles={[...meetingProfiles]} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setShowMeetingProfiles(false)} accessCode={accessCode} onSyncOne={onSyncOne} />
+        <FilterResultSection title="미팅 진행 프로필 (최신순)" profiles={meetingProfiles} onUpdate={onUpdate} onDelete={onDelete} onClear={() => setShowMeetingProfiles(false)} accessCode={accessCode} onSyncOne={onSyncOne} />
       )}
 
-      {/* 세대별 분포 (Pie) */}
+      {/* ============ 세대별 분포 (Pie 클릭 → 필터) ============ */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <section className="bg-white p-6 rounded-xl shadow-md">
           <h2 className="text-xl font-bold text-gray-800 mb-4">세대별 분포</h2>
@@ -583,19 +753,21 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
                 ))}
               </defs>
               <Pie
-                data={useMemo(()=>{const g={'10대':0,'20대':0,'30대':0,'40대':0,'50대 이상':0}; profiles.forEach(({age})=>{if(!age)return; if(age<20)g['10대']++; else if(age<30)g['20대']++; else if(age<40)g['30대']++; else if(age<50)g['40대']++; else g['50대 이상']++;}); return Object.entries(g).map(([name,value])=>({name,value})).filter(d=>d.value>0);},[profiles])}
-                cx="50%" cy="50%" outerRadius={100} dataKey="value" label
+                data={ageData}
+                cx="50%" cy="50%"
+                outerRadius={100}
+                dataKey="value"
+                label
                 onClick={(data)=>handlePieClick('age', data)}
-                className="cursor-pointer"
               >
-                {useMemo(()=>{const g={'10대':0,'20대':0,'30대':0,'40대':0,'50대 이상':0}; profiles.forEach(({age})=>{if(!age)return; if(age<20)g['10대']++; else if(age<30)g['20대']++; else if(age<40)g['30대']++; else if(age<50)g['40대']++; else g['50대 이상']++;}); return Object.entries(g).map(([_,v],i)=><Cell key={`cell-age-${i}`} fill={`url(#g-age-${i})`} stroke="#fff" />);},[profiles])}
+                {ageData.map((_,i)=><Cell key={`cell-age-${i}`} fill={`url(#g-age-${i})`} stroke="#fff" />)}
               </Pie>
               <Tooltip formatter={(v) => `${v}명`} /><Legend />
             </PieChart>
           </ResponsiveContainer>
         </section>
 
-        {/* 우선순위 분포 (Pie) */}
+        {/* ============ 우선순위 분포 (Pie 클릭 → 필터) ============ */}
         <section className="bg-white p-6 rounded-xl shadow-md">
           <h2 className="text-xl font-bold text-gray-800 mb-4">우선순위별 분포</h2>
           <ResponsiveContainer width="100%" height={300}>
@@ -606,12 +778,14 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
                 <radialGradient id="gp-2"><stop offset="0%" stopColor="#00C49F" stopOpacity={0.7} /><stop offset="100%" stopColor="#00C49F" stopOpacity={1} /></radialGradient>
               </defs>
               <Pie
-                data={useMemo(()=>{const p={'3 (상)':0,'2 (중)':0,'1 (하)':0}; profiles.forEach(x=>{if(x.priority==='3')p['3 (상)']++; else if(x.priority==='2')p['2 (중)']++; else if(x.priority==='1')p['1 (하)']++;}); return Object.entries(p).map(([name,value])=>({name,value})).filter(d=>d.value>0);},[profiles])}
-                cx="50%" cy="50%" outerRadius={100} dataKey="value" label
+                data={priorityData}
+                cx="50%" cy="50%"
+                outerRadius={100}
+                dataKey="value"
+                label
                 onClick={(data)=>handlePieClick('priority', data)}
-                className="cursor-pointer"
               >
-                {useMemo(()=>[{},{},{}].map((_,i)=><Cell key={`cell-p-${i}`} fill={`url(#gp-${i})`} stroke="#fff" />),[])}
+                {[{},{},{}].slice(0, priorityData.length).map((_,i)=><Cell key={`cell-p-${i}`} fill={`url(#gp-${i})`} stroke="#fff" />)}
               </Pie>
               <Tooltip formatter={(v) => `${v}명`} /><Legend />
             </PieChart>
@@ -619,7 +793,39 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
         </section>
       </div>
 
-      {/* Pie 클릭 필터 결과 */}
+      {/* ============ IT 기업 경력 분포 (Bar 클릭 → 필터) ============ */}
+      <section className="bg-white p-6 rounded-xl shadow-md">
+        <h2 className="text-xl font-bold text-gray-800 mb-4">IT 기업 경력 분포</h2>
+        <ResponsiveContainer width="100%" height={350}>
+          <BarChart data={keywordData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+            <defs>
+              <linearGradient id="gradient-company" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#FFBB28" stopOpacity={0.8}/><stop offset="95%" stopColor="#FF8042" stopOpacity={1}/></linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
+            <YAxis allowDecimals={false}/><Tooltip formatter={(v)=>`${v}명`} /><Legend />
+            <Bar dataKey="count" fill="url(#gradient-company)" onClick={(data)=>handleBarClick('company', data)} />
+          </BarChart>
+        </ResponsiveContainer>
+      </section>
+
+      {/* ============ 전문영역 분포 (Bar 클릭 → 필터) ============ */}
+      <section className="bg-white p-6 rounded-xl shadow-md">
+        <h2 className="text-xl font-bold text-gray-800 mb-4">전문영역 분포</h2>
+        <ResponsiveContainer width="100%" height={350}>
+          <BarChart data={expertiseData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+            <defs>
+              <linearGradient id="gradient-expertise" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00C49F" stopOpacity={0.8}/><stop offset="95%" stopColor="#82ca9d" stopOpacity={1}/></linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
+            <YAxis allowDecimals={false}/><Tooltip formatter={(v)=>`${v}명`} /><Legend />
+            <Bar dataKey="count" fill="url(#gradient-expertise)" onClick={(data)=>handleBarClick('expertise', data)} />
+          </BarChart>
+        </ResponsiveContainer>
+      </section>
+
+      {/* ============ 필터 결과 섹션들 (클릭 시 나타남) ============ */}
       {(activeFilter.type === 'age' || activeFilter.type === 'priority') && (
         <FilterResultSection
           title={`"${activeFilter.value}" 필터 결과`}
@@ -631,63 +837,6 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
           onSyncOne={onSyncOne}
         />
       )}
-
-      {/* IT 기업 경력 분포 (Bar) */}
-      <section className="bg-white p-6 rounded-xl shadow-md">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">IT 기업 경력 분포</h2>
-        <ResponsiveContainer width="100%" height={350}>
-          <BarChart data={companyBarData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
-            <defs>
-              <linearGradient id="gradient-company" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#FFBB28" stopOpacity={0.8}/><stop offset="95%" stopColor="#FF8042" stopOpacity={1}/></linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
-            <YAxis allowDecimals={false}/><Tooltip formatter={(v)=>`${v}명`} /><Legend />
-            <Bar
-              dataKey="count"
-              fill="url(#gradient-company)"
-              onClick={(data)=>handleBarClick('company', data)}
-              className="cursor-pointer"
-            />
-          </BarChart>
-        </ResponsiveContainer>
-      </section>
-
-      {/* company 필터 결과 */}
-      {activeFilter.type === 'company' && (
-        <FilterResultSection
-          title={`"${activeFilter.value}" 경력 보유 프로필`}
-          profiles={filteredProfiles}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-          onClear={() => setActiveFilter({ type: null, value: null })}
-          accessCode={accessCode}
-          onSyncOne={onSyncOne}
-        />
-      )}
-
-      {/* 전문영역 분포 (Bar) */}
-      <section className="bg-white p-6 rounded-xl shadow-md">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">전문영역 분포</h2>
-        <ResponsiveContainer width="100%" height={350}>
-          <BarChart data={useMemo(()=>{const c={}; profiles.forEach(p=>{if(p.expertise) c[p.expertise]=(c[p.expertise]||0)+1;}); return Object.entries(c).map(([name,count])=>({name,count}));},[profiles])} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
-            <defs>
-              <linearGradient id="gradient-expertise" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00C49F" stopOpacity={0.8}/><stop offset="95%" stopColor="#82ca9d" stopOpacity={1}/></linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
-            <YAxis allowDecimals={false}/><Tooltip formatter={(v)=>`${v}명`} /><Legend />
-            <Bar
-              dataKey="count"
-              fill="url(#gradient-expertise)"
-              onClick={(data)=>handleBarClick('expertise', data)}
-              className="cursor-pointer"
-            />
-          </BarChart>
-        </ResponsiveContainer>
-      </section>
-
-      {/* expertise 필터 결과 */}
       {activeFilter.type === 'expertise' && (
         <FilterResultSection
           title={`"${activeFilter.value}" 전문영역 필터 결과`}
@@ -699,6 +848,41 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne }) =
           onSyncOne={onSyncOne}
         />
       )}
+      {activeFilter.type === 'company' && (
+        <FilterResultSection
+          title={`"${activeFilter.value}" 기업 경력 필터 결과`}
+          profiles={filteredProfiles}
+          onUpdate={onUpdate}
+          onDelete={onDelete}
+          onClear={() => setActiveFilter({ type: null, value: null })}
+          accessCode={accessCode}
+          onSyncOne={onSyncOne}
+        />
+      )}
+
+      {/* ============ 유사 프로필 ============ */}
+      <section className="bg-white p-6 rounded-xl shadow-md">
+        <h2 className="text-xl font-bold text-gray-800 mb-4">유사 프로필</h2>
+        {similarPairs.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {similarPairs.map(({a,b,score}, idx)=>(
+              <div key={`${a.id}-${b.id}-${idx}`} className="border rounded-lg p-4">
+                <div className="flex justify-between items-center">
+                  <div className="font-semibold text-gray-700">{a.name} ↔ {b.name}</div>
+                  <div className="text-sm text-gray-500">{score}%</div>
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {a.expertise || '전문영역 -'} / {b.expertise || '전문영역 -'}
+                </div>
+                <div className="text-xs text-gray-400 mt-2 line-clamp-2">{a.career}</div>
+                <div className="text-xs text-gray-400 line-clamp-2">{b.career}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">유사한 프로필이 충분하지 않습니다.</p>
+        )}
+      </section>
     </>
   );
 };
@@ -879,7 +1063,7 @@ export default function App() {
   const [isGoogleSignedIn, setIsGoogleSignedIn] = useState(false);
   const [googleApiReady, setGoogleApiReady]     = useState(null);
   const [googleError, setGoogleError]           = useState('');
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false); // (헤더 일괄 버튼용이었지만 남겨둠)
 
   // 신규 입력 폼 상태
   const [newName, setNewName] = useState('');
@@ -1042,17 +1226,19 @@ export default function App() {
     try { await ensureGoogleAuth(); }
     catch (e) { alert(e.message || 'Google 인증에 실패했습니다.'); return; }
 
+    // 1) 시간 파싱
     let parsed = parseDateTimeFromRecord(profile.meetingRecord);
     if (!parsed && profile.eventDate) {
       parsed = { date: new Date(profile.eventDate), hadTime: true };
     }
     if (!parsed) { alert('미팅 날짜/시간을 인식할 수 없습니다. "미팅기록"에 날짜를 입력해주세요.'); return; }
 
+    // 2) 이벤트 시간 만들기 (hadTime 없으면 올데이)
     const startDate = parsed.date;
     let eventResource;
     if (parsed.hadTime) {
       const startLocal = formatRFC3339InTZ(startDate, TZ);
-      const endDate = new Date(startDate.getTime() + 90 * 60000);
+      const endDate = new Date(startDate.getTime() + 90 * 60000); // 1시간 30분
       const endLocal = formatRFC3339InTZ(endDate, TZ);
       eventResource = {
         summary: `(영입) ${profile.name}님 미팅`,
@@ -1139,7 +1325,7 @@ export default function App() {
           {googleApiReady === true && (
             isGoogleSignedIn ? (
               <>
-                {/* 일괄 동기화 버튼 필요 시 복구 가능 */}
+                {/* 일괄 동기화 버튼 필요시 복구 가능 */}
                 <button
                   onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
                   className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
@@ -1169,10 +1355,26 @@ export default function App() {
 
       <main className="p-6 space-y-12">
         {activeTab === TAB_PAGE.DASHBOARD && (
-          <DashboardTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} accessCode={accessCode} onSyncOne={handleSyncOneToCalendar} />
+          <DashboardTab
+            profiles={profiles}
+            onUpdate={handleUpdate}
+            onDelete={(profileId, profileName)=> setShowDeleteConfirm({ show: true, profileId, profileName })}
+            accessCode={accessCode}
+            onSyncOne={handleSyncOneToCalendar}
+          />
         )}
         {activeTab === TAB_PAGE.MANAGE && (
-          <ManageTab profiles={profiles} onUpdate={handleUpdate} onDelete={handleDeleteRequest} handleFormSubmit={handleFormSubmit} handleBulkAdd={handleBulkAdd} formState={formState} setFormState={setFormState} accessCode={accessCode} onSyncOne={handleSyncOneToCalendar} />
+          <ManageTab
+            profiles={profiles}
+            onUpdate={handleUpdate}
+            onDelete={(profileId, profileName)=> setShowDeleteConfirm({ show: true, profileId, profileName })}
+            handleFormSubmit={handleFormSubmit}
+            handleBulkAdd={handleBulkAdd}
+            formState={formState}
+            setFormState={setFormState}
+            accessCode={accessCode}
+            onSyncOne={handleSyncOneToCalendar}
+          />
         )}
       </main>
     </div>
