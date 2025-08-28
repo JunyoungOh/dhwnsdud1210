@@ -7,7 +7,7 @@ import {
 } from 'recharts';
 import {
   Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save,
-  UploadCloud, BellRing, Share2, RefreshCw, CalendarPlus, AlertCircle, Star, StarOff
+  UploadCloud, BellRing, Share2, CalendarPlus, AlertCircle
 } from 'lucide-react';
 
 // ==============================
@@ -41,9 +41,18 @@ const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아�
 const TAB_PAGE = { ALERTS: 'alerts', DASHBOARD: 'dashboard', MANAGE: 'manage' };
 
 // ===============================
-// 시간 파싱 & 포맷 유틸 (Asia/Seoul 기준)
+// 공용 유틸
 // ===============================
 const TZ = 'Asia/Seoul';
+const toStr = (v) => (typeof v === 'string' ? v : (v === null || v === undefined ? '' : String(v)));
+const toNum = (v) => {
+  if (typeof v === 'number' && !Number.isNaN(v)) return v;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : null;
+};
+const isNonEmptyStr = (v) => typeof v === 'string' && v.trim().length > 0;
+
+// Intl parts를 사용해 특정 타임존 기준의 YYYY-MM-DDTHH:mm:ss 만들기
 function formatRFC3339InTZ(date, timeZone = TZ) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone, year:'numeric', month:'2-digit', day:'2-digit',
@@ -57,11 +66,14 @@ function formatDateOnlyInTZ(date, timeZone = TZ) {
   }).formatToParts(date).reduce((acc, p) => (acc[p.type] = p.value, acc), {});
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
-// 다양한 표기 인식: (25.08.14) AM/PM/오전/오후 7시 30분 / 2025-08-14 19:30 / 2025-08-14 등
+
+// ✅ 다양한 표기 인식
 function parseDateTimeFromRecord(recordText) {
   if (!recordText) return null;
   const text = typeof recordText === 'string' ? recordText : String(recordText || '');
   let best = null;
+
+  // (YY.MM.DD) [AM|PM|오전|오후]? hh[:mm]|hh시[ mm분]?
   const reA = /\((\d{2})\.(\d{2})\.(\d{2})\)\s*(?:(AM|PM|오전|오후)?\s*(\d{1,2})(?::(\d{2}))?(?:\s*시)?(?:\s*(\d{1,2})\s*분?)?)?/gi;
   let m;
   while ((m = reA.exec(text)) !== null) {
@@ -81,6 +93,8 @@ function parseDateTimeFromRecord(recordText) {
     const d = new Date(year, month, day, hour, minute);
     if (!best || d > best.date) best = { date: d, hadTime };
   }
+
+  // YYYY-MM-DD[ HH:mm]
   const reB = /(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2}))?/g;
   while ((m = reB.exec(text)) !== null) {
     const year  = parseInt(m[1], 10);
@@ -92,22 +106,23 @@ function parseDateTimeFromRecord(recordText) {
     const d = new Date(year, month, day, hour, minute);
     if (!best || d > best.date) best = { date: d, hadTime };
   }
+
   return best ? best : null;
 }
 
 // ===============================
-// 유사도 계산(간단 버전: 토큰 Jaccard + 보정)
+// 유사도 계산(토큰 Jaccard + 보정)
 // ===============================
 function tokenizeProfile(p) {
   const base = [
-    p.name || '', p.expertise || '', p.career || '', p.otherInfo || ''
+    toStr(p.name), toStr(p.expertise), toStr(p.career), toStr(p.otherInfo),
   ].join(' ').toLowerCase();
   const words = base
     .replace(/[()\[\],./\\\-:~!@#$%^&*?'"`|]/g, ' ')
     .split(/\s+/)
     .filter(Boolean);
   const extra = [];
-  TARGET_KEYWORDS.forEach(k => { if ((p.career||'').includes(k)) extra.push(k); });
+  TARGET_KEYWORDS.forEach(k => { if (toStr(p.career).includes(k)) extra.push(k); });
   if (p.priority) extra.push(`priority:${p.priority}`);
   if (p.age) {
     const band = p.age < 20 ? '10'
@@ -128,11 +143,35 @@ function similarityScore(a, b) {
   const tb = tokenizeProfile(b);
   let score = jaccard(ta, tb) * 100; // 0~100
   if (a.priority && b.priority && a.priority === b.priority) score += 6;
-  const ak = TARGET_KEYWORDS.filter(k => (a.career||'').includes(k));
-  const bk = TARGET_KEYWORDS.filter(k => (b.career||'').includes(k));
+  const ak = TARGET_KEYWORDS.filter(k => toStr(a.career).includes(k));
+  const bk = TARGET_KEYWORDS.filter(k => toStr(b.career).includes(k));
   score += Math.min(ak.filter(k => bk.includes(k)).length * 6, 18);
   if (a.expertise && b.expertise && a.expertise === b.expertise) score += 8;
   return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+// ===============================
+// 스냅샷 정규화
+// ===============================
+function normalizeProfile(raw) {
+  if (!raw) return {};
+  const n = { ...raw };
+  n.id = raw.id || raw.id;
+  n.name = toStr(raw.name);
+  n.career = toStr(raw.career);
+  n.otherInfo = isNonEmptyStr(raw.otherInfo) ? toStr(raw.otherInfo) : '';
+  n.expertise = isNonEmptyStr(raw.expertise) ? toStr(raw.expertise) : null;
+  n.priority = isNonEmptyStr(raw.priority) ? toStr(raw.priority) : null;
+  const ageNum = toNum(raw.age);
+  n.age = ageNum !== null && ageNum >= 0 ? ageNum : null;
+  n.meetingRecord = isNonEmptyStr(raw.meetingRecord) ? toStr(raw.meetingRecord) : '';
+  n.eventDate = raw.eventDate ? toStr(raw.eventDate) : null;
+  n.lastReviewedDate = raw.lastReviewedDate ? toStr(raw.lastReviewedDate) : null;
+  n.snoozeUntil = raw.snoozeUntil ? toStr(raw.snoozeUntil) : null;
+  n.gcalEventId = isNonEmptyStr(raw.gcalEventId) ? toStr(raw.gcalEventId) : null;
+  n.gcalHtmlLink = isNonEmptyStr(raw.gcalHtmlLink) ? toStr(raw.gcalHtmlLink) : null;
+  n.starred = !!raw.starred;
+  return n;
 }
 
 // ===============================
@@ -148,7 +187,7 @@ const ProfileDetailView = ({ profileId, accessCode }) => {
       try {
         const ref = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
         const snap = await getDoc(ref);
-        if (snap.exists()) setProfile({ ...snap.data(), id: snap.id });
+        if (snap.exists()) setProfile({ ...normalizeProfile({ ...snap.data(), id: snap.id }) });
         else setError('프로필을 찾을 수 없습니다.');
       } catch (e) {
         console.error('Error fetching profile:', e);
@@ -337,7 +376,6 @@ const ProfileCard = ({
 
   const handleStarClick = async () => {
     if (profile.starred) {
-      // 제거 확인
       if (!window.confirm('모아보기에서 제외하시겠습니까?')) return;
       await onToggleStar(profile.id, false);
     } else {
@@ -478,12 +516,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onS
   const handlePieClick = (type, data) => { if (!data || (data.value ?? data.count) === 0) return; setActiveFilter({ type, value: data.name }); };
   const handleBarClick = (type, data) => { const count = data.count || data.value; if (count === 0) return; setActiveFilter({ type, value: data.name }); };
 
-  // 데이터 전처리
-  const { spotlightProfiles } = useMemo(() => {
-    return {
-      spotlightProfiles: profiles.filter(p => !!p.starred),
-    };
-  }, [profiles]);
+  const spotlightProfiles = useMemo(() => profiles.filter(p => !!p.starred), [profiles]);
 
   const ageData = useMemo(() => {
     const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
@@ -504,7 +537,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onS
     return Object.entries(p).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
   }, [profiles]);
 
-  const companyData = useMemo(() => TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length })), [profiles]);
+  const companyData = useMemo(() => TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => toStr(p.career).includes(k)).length })), [profiles]);
 
   const expertiseData = useMemo(() => {
     const c = {}; profiles.forEach(p => { if (p.expertise) c[p.expertise] = (c[p.expertise] || 0) + 1; });
@@ -544,7 +577,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onS
       case 'priority': {
         const v = activeFilter.value.split(' ')[0]; return profiles.filter(p => p.priority === v);
       }
-      case 'company': return profiles.filter(p => p.career?.includes(activeFilter.value));
+      case 'company': return profiles.filter(p => toStr(p.career).includes(activeFilter.value));
       case 'expertise': return profiles.filter(p => p.expertise === activeFilter.value);
       default: return [];
     }
@@ -753,7 +786,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onS
         {activeFilter.type === 'company' && (
           <FilterResultSection
             title={`"${activeFilter.value}" 필터 결과`}
-            profiles={profiles.filter(p => p.career?.includes(activeFilter.value))}
+            profiles={profiles.filter(p => toStr(p.career).includes(activeFilter.value))}
             onUpdate={onUpdate} onDelete={onDelete}
             onClear={() => setActiveFilter({ type: null, value: null })}
             accessCode={accessCode} onSyncOne={onSyncOne}
@@ -788,7 +821,6 @@ const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShow
         if (eventDate >= todayStart && eventDate < tomorrowStart) today.push(p);
         else if (eventDate > now && eventDate < threeDaysLater) upcoming.push(p);
       }
-      // long term 판단
       const lastContact = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
       const snoozeUntil  = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
       if (lastContact && lastContact < threeMonthsAgo && (!snoozeUntil || snoozeUntil < now)) {
@@ -796,14 +828,13 @@ const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShow
       }
     });
 
-    // 추천 점수(간단): 오래 안 본 + 우선순위 상/IT키워드 가점
     const scoreOf = (p) => {
       const now = new Date();
       const last = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
       const days = last ? Math.max(1, Math.floor((now - last) / (1000*60*60*24))) : 180;
       let score = Math.min(100, Math.round((days / 90) * 60)); // 0~60
       if (p.priority === '3') score += 20;
-      const kw = TARGET_KEYWORDS.filter(k => (p.career||'').includes(k)).length;
+      const kw = TARGET_KEYWORDS.filter(k => toStr(p.career).includes(k)).length;
       score += Math.min(kw * 5, 15);
       if (p.expertise) score += 5;
       const snoozeUntil = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
@@ -812,7 +843,7 @@ const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShow
     };
     const rec = profiles
       .map(p => ({ p, s: scoreOf(p) }))
-      .filter(x => x.s >= 0 && x.s >= 40) // 기준치
+      .filter(x => x.s >= 0 && x.s >= 40)
       .sort((a,b) => b.s - a.s)
       .slice(0, 30)
       .map(x => x.p);
@@ -1071,6 +1102,9 @@ const Pagination = ({ totalPages, currentPage, setCurrentPage }) => {
   );
 };
 
+// ===============================
+// 엑셀 업로더 (안정화 패치 적용)
+// ===============================
 const ExcelUploader = ({ onBulkAdd }) => {
   const [file, setFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -1078,28 +1112,65 @@ const ExcelUploader = ({ onBulkAdd }) => {
 
   const handleFileChange = (e) => { setFile(e.target.files[0]); setMessage(''); };
 
+  const safeGet = (row, idx) => (Array.isArray(row) && idx < row.length ? row[idx] : '');
   const handleUpload = async () => {
     if (!file) { setMessage('파일을 먼저 선택해주세요.'); return; }
+    if (!window.XLSX) { setMessage('엑셀 라이브러리를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.'); return; }
+
     setIsUploading(true); setMessage('파일을 읽는 중...');
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
         const data = new Uint8Array(e.target.result);
-        const workbook = window.XLSX.read(data, { type: 'array' });
+        const workbook = window.XLSX.read(data, { type: 'array', cellDates: false, cellText: true });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        const json = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-        if (json.length < 2) { setMessage('엑셀 파일에 데이터가 없습니다 (2행부터 읽습니다).'); setIsUploading(false); return; }
-        const newProfiles = json.slice(1).map(row => ({
-          name: row[2] || '', career: row[3] || '', age: row[5] ? Number(row[5]) : null,
-          expertise: row[7] || '', priority: row[9] ? String(row[9]) : '',
-          meetingRecord: row[11] || '', otherInfo: row[13] || '',
-          eventDate: (()=>{const p=parseDateTimeFromRecord(row[11]||''); return p? p.date.toISOString():null;})(),
-        })).filter(p => p.name && p.career);
+        const json = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' /* 빈칸도 ''로 */, raw: false /* 텍스트화 */ });
+
+        if (!Array.isArray(json) || json.length < 2) {
+          setMessage('엑셀 파일에 데이터가 없습니다 (2행부터 읽습니다).');
+          setIsUploading(false);
+          return;
+        }
+
+        // C=이름(2), D=경력(3), F=나이(5), H=전문영역(7), J=우선순위(9), L=미팅기록(11), N=기타정보(13)
+        const rows = json.slice(1);
+        const newProfiles = rows.map((row) => {
+          const name = toStr(safeGet(row, 2)).trim();
+          const career = toStr(safeGet(row, 3));
+          const age = toNum(safeGet(row, 5));
+          const expertise = toStr(safeGet(row, 7)).trim();
+          const priority = toStr(safeGet(row, 9)).trim();
+          const meetingRecord = toStr(safeGet(row, 11));
+          const otherInfo = toStr(safeGet(row, 13));
+
+          const parsed = parseDateTimeFromRecord(meetingRecord || '');
+          const eventDate = parsed ? parsed.date.toISOString() : null;
+
+          return {
+            name,
+            career,
+            age: age !== null ? age : null,
+            expertise: expertise || '',
+            priority: priority || '',
+            meetingRecord,
+            otherInfo,
+            eventDate,
+          };
+        })
+        .filter(p => isNonEmptyStr(p.name) && isNonEmptyStr(p.career));
+
+        if (newProfiles.length === 0) {
+          setMessage('가져올 유효한 행이 없습니다.');
+          setIsUploading(false);
+          return;
+        }
+
         const msg = await onBulkAdd(newProfiles);
         setMessage(msg); setFile(null);
       } catch (err) {
-        console.error('엑셀 처리 오류:', err); setMessage('엑셀 파일을 처리하는 중 오류가 발생했습니다.');
+        console.error('엑셀 처리 오류:', err);
+        setMessage('엑셀 파일을 처리하는 중 오류가 발생했습니다.');
       } finally { setIsUploading(false); }
     };
     reader.readAsArrayBuffer(file);
@@ -1138,6 +1209,9 @@ export default function App() {
 
   // Similar modal
   const [similarOpen, setSimilarOpen] = useState(false);
+  the: // NOTE: Avoid keyword - but it's code; fix typo
+  // (typo fix)
+  const [_ignore, setIgnore] = useState(null);
   const [similarBase, setSimilarBase] = useState(null);
   const [similarList, setSimilarList] = useState([]);
 
@@ -1231,12 +1305,15 @@ export default function App() {
     return collection(db, 'artifacts', appId, 'public', 'data', accessCode);
   }, [accessCode]);
 
+  // 스냅샷 구독 + 정규화
   useEffect(() => {
     if (!profilesCollectionRef) { setProfiles([]); return; }
     const q = query(profilesCollectionRef);
     const unsub = onSnapshot(q, (qs) => {
-      const data = qs.docs.map(d => ({ ...d.data(), id: d.id }));
+      const data = qs.docs.map(d => normalizeProfile({ ...d.data(), id: d.id }));
       setProfiles(data);
+    }, (err) => {
+      console.error('onSnapshot error:', err);
     });
     return () => unsub();
   }, [profilesCollectionRef]);
@@ -1262,18 +1339,24 @@ export default function App() {
     } catch (err) { console.error("프로필 저장 오류: ", err); }
   };
 
+  // ✅ 대량 업로드: 450건 단위 분할 커밋
   const handleBulkAdd = async (newProfiles) => {
     if (!profilesCollectionRef || newProfiles.length === 0) return '업로드할 프로필이 없습니다.';
     const map = new Map(profiles.map(p => [p.name, p.id]));
-    const batch = writeBatch(db);
+
     let updated=0, added=0;
-    newProfiles.forEach(p => {
-      const existingId = map.get(p.name);
-      const payload = { starred: false, ...p };
-      if (existingId) { batch.set(doc(profilesCollectionRef, existingId), payload); updated++; }
-      else { batch.set(doc(profilesCollectionRef), payload); added++; }
-    });
-    await batch.commit();
+    const CHUNK = 450;
+    for (let i=0; i<newProfiles.length; i+=CHUNK) {
+      const slice = newProfiles.slice(i, i+CHUNK);
+      const batch = writeBatch(db);
+      slice.forEach(p => {
+        const payload = { starred: false, ...p };
+        const existingId = map.get(p.name);
+        if (existingId) { batch.set(doc(profilesCollectionRef, existingId), payload); updated++; }
+        else { batch.set(doc(profilesCollectionRef), payload); added++; }
+      });
+      await batch.commit();
+    }
     return `${added}건 추가, ${updated}건 업데이트 완료.`;
   };
 
