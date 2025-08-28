@@ -875,7 +875,7 @@ const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShow
         </section>
       )}
 
-      {/* 추천 : 다시 접촉해야 할 인물 */}
+      {/* 추천 : 다시 들여다볼 프로필 */}
       <section className="bg-white rounded-xl shadow-md p-4 mb-8">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -885,7 +885,7 @@ const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShow
             >
               {recOpen ? 'Close' : 'Open'}
             </button>
-            <h2 className="text-xl font-bold text-gray-800">추천 : 다시 접촉해야 할 인물</h2>
+            <h2 className="text-xl font-bold text-gray-800">추천 : 다시 들여다볼 프로필</h2>
             <div className="relative group">
               <AlertCircle className="w-4 h-4 text-yellow-600 cursor-default" />
               <div className="absolute z-10 hidden group-hover:block bg-gray-900 text-white text-xs rounded-md px-3 py-2 w-72 -left-2 mt-2 shadow-lg">
