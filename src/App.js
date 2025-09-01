@@ -1,5 +1,5 @@
 // src/App.js
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
@@ -7,9 +7,9 @@ import {
   PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer
 } from 'recharts';
 import {
-  Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2,
-  ShieldAlert, X, Save, UploadCloud, BellRing, Share2, CalendarPlus, AlertCircle,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
+  Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save,
+  UploadCloud, BellRing, Share2, CalendarPlus, AlertCircle,
+  ChevronsLeft, ChevronsRight, ChevronLeft, ChevronRight
 } from 'lucide-react';
 
 // ==============================
@@ -59,7 +59,7 @@ function formatDateOnlyInTZ(date, timeZone = TZ) {
   }).formatToParts(date).reduce((acc, p) => (acc[p.type] = p.value, acc), {});
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
-// 다양한 표기 인식
+// 다양한 표기 인식: (25.08.14) AM/PM/오전/오후 7시 30분 / 2025-08-14 19:30 / 2025-08-14 등
 function parseDateTimeFromRecord(recordText) {
   if (!recordText) return null;
   const text = typeof recordText === 'string' ? recordText : String(recordText || '');
@@ -98,7 +98,7 @@ function parseDateTimeFromRecord(recordText) {
 }
 
 // ===============================
-// 유사도 계산
+// 유사도 계산(간단 버전: 토큰 Jaccard + 보정)
 // ===============================
 function tokenizeProfile(p) {
   const base = [
@@ -112,7 +112,10 @@ function tokenizeProfile(p) {
   TARGET_KEYWORDS.forEach(k => { if ((p.career||'').includes(k)) extra.push(k); });
   if (p.priority) extra.push(`priority:${p.priority}`);
   if (p.age) {
-    const band = p.age < 20 ? '10' : p.age < 30 ? '20' : p.age < 40 ? '30' : p.age < 50 ? '40' : '50+';
+    const band = p.age < 20 ? '10'
+      : p.age < 30 ? '20'
+      : p.age < 40 ? '30'
+      : p.age < 50 ? '40' : '50+';
     extra.push(`age:${band}`);
   }
   return new Set([...words, ...extra]);
@@ -289,7 +292,7 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
 // ===============================
 const ProfileCard = ({
   profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm,
-  accessCode, onSyncOne, onShowSimilar, onToggleStar, selected
+  accessCode, onSyncOne, onShowSimilar, onToggleStar
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
@@ -364,7 +367,7 @@ const ProfileCard = ({
   }
 
   return (
-    <div className={`bg-white p-4 rounded-lg shadow relative group ${selected ? 'ring-2 ring-yellow-400 ring-offset-2' : ''}`}>
+    <div className="bg-white p-4 rounded-lg shadow relative group">
       <div className="flex items-center justify-between">
         <div className="flex items-baseline space-x-2">
           <h3 className="font-bold text-yellow-600">{profile.name}</h3>
@@ -383,7 +386,7 @@ const ProfileCard = ({
         </div>
       )}
 
-      {/* 하단 액션 영역 */}
+      {/* 하단 액션 */}
       <div className="mt-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <button
@@ -417,7 +420,7 @@ const ProfileCard = ({
         </div>
       </div>
 
-      {/* 우측 상단 아이콘들 */}
+      {/* 우측 상단 아이콘 */}
       <div className="absolute top-2 right-2 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
         <button onClick={handleShare} className="text-gray-500 hover:text-gray-800" title="공유 링크 복사"><Share2 size={14} /></button>
         <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:text-blue-700" title="수정"><Edit size={14} /></button>
@@ -476,7 +479,6 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onS
   const handlePieClick = (type, data) => { if (!data || (data.value ?? data.count) === 0) return; setActiveFilter({ type, value: data.name }); };
   const handleBarClick = (type, data) => { const count = data.count || data.value; if (count === 0) return; setActiveFilter({ type, value: data.name }); };
 
-  // 데이터 전처리
   const { spotlightProfiles } = useMemo(() => {
     return {
       spotlightProfiles: profiles.filter(p => !!p.starred),
@@ -574,7 +576,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onS
                   onDelete={onDelete}
                   accessCode={accessCode}
                   onSyncOne={onSyncOne}
-                  onShowSimilar={(p) => onShowSimilar?.(p)}
+                  onShowSimilar={onShowSimilar}
                   onToggleStar={onToggleStar}
                 />
               )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
@@ -963,7 +965,7 @@ const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShow
 };
 
 // ===============================
-// 관리 탭 (윈도우 네비 + 숫자 선택)
+// 관리 탭 (페이지 10개/숫자 버튼 그룹/…/맨앞·맨뒤·이전·다음)
 // ===============================
 const ManageTab = ({
   profiles, onUpdate, onDelete,
@@ -980,7 +982,7 @@ const ManageTab = ({
     setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord
   } = setFormState;
 
-  // 검색
+  // ===== 검색 =====
   const [searchTerm, setSearchTerm] = useState('');
   const searchedProfiles = useMemo(() => {
     const term = searchTerm.trim(); if (!term) return [];
@@ -999,42 +1001,53 @@ const ManageTab = ({
     }));
   }, [searchTerm, profiles]);
 
-  // ===== 리스트 윈도우 UI =====
-  const WINDOW_SIZE = 10;
-  const STEP        = 5;
-  const [winStart, setWinStart] = useState(0);
-  const [selectedIdx, setSelectedIdx] = useState(null); // 0~9 (윈도우 내 선택)
-  const cardRefs = useRef([]); // 각 카드 ref
+  // ===== 페이지네이션(10개/페이지, 숫자 버튼 10개 단위 그룹) =====
+  const PAGE_SIZE   = 10;
+  const MAX_BTN     = 10; // 화면에 보이는 숫자 버튼 개수
+  const sorted      = useMemo(() => [...profiles].sort((a,b) => a.name.localeCompare(b.name)), [profiles]);
+  const totalPages  = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
 
-  const sorted = useMemo(() => [...profiles].sort((a,b) => a.name.localeCompare(b.name)), [profiles]);
-  const maxStart = Math.max(0, sorted.length - WINDOW_SIZE);
-  const hasPrev  = winStart > 0;
-  const hasNext  = winStart < maxStart;
-
-  const windowProfiles = useMemo(
-    () => sorted.slice(winStart, Math.min(winStart + WINDOW_SIZE, sorted.length)),
-    [sorted, winStart]
-  );
+  const [page, setPage] = useState(1);        // 현재 페이지(1-based)
+  const [groupStart, setGroupStart] = useState(1); // 현재 버튼 그룹 시작 페이지(1, 11, 21 ...)
 
   useEffect(() => {
-    // 윈도우가 바뀌면 선택/refs 초기화
-    setSelectedIdx(null);
-    cardRefs.current = [];
-  }, [winStart, windowProfiles.length]);
-
-  const goStart = () => setWinStart(0);
-  const goEnd   = () => setWinStart(maxStart);
-  const goPrev  = () => setWinStart(prev => Math.max(0, prev - STEP));
-  const goNext  = () => setWinStart(prev => Math.min(maxStart, prev + STEP));
-
-  const handlePick = (i) => {
-    setSelectedIdx(i);
-    const el = cardRefs.current[i];
-    if (el && el.scrollIntoView) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (page > totalPages) {
+      setPage(totalPages);
+      const newGroupStart = Math.floor((totalPages - 1) / MAX_BTN) * MAX_BTN + 1;
+      setGroupStart(Math.max(1, newGroupStart));
     }
+  }, [totalPages]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const groupEnd   = Math.min(groupStart + MAX_BTN - 1, totalPages);
+  const hasLeftMore  = groupStart > 1;
+  const hasRightMore = groupEnd < totalPages;
+
+  const currentProfiles = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return sorted.slice(start, start + PAGE_SIZE);
+  }, [sorted, page]);
+
+  const goFirst = () => { setPage(1); setGroupStart(1); };
+  const goLast  = () => {
+    setPage(totalPages);
+    setGroupStart(Math.floor((totalPages - 1) / MAX_BTN) * MAX_BTN + 1);
   };
-  // ===== 리스트 윈도우 UI 끝 =====
+  const goPrev = () => {
+    if (page <= 1) return;
+    const nextPage = page - 1;
+    setPage(nextPage);
+    if (nextPage < groupStart) setGroupStart(Math.max(1, groupStart - MAX_BTN));
+  };
+  const goNext = () => {
+    if (page >= totalPages) return;
+    const nextPage = page + 1;
+    setPage(nextPage);
+    if (nextPage > groupEnd) setGroupStart(groupStart + MAX_BTN);
+  };
+  const pickPage = (p) => setPage(p);
+
+  // 검색창 변경 시 페이지 리셋
+  useEffect(() => { setPage(1); setGroupStart(1); }, [searchTerm]);
 
   return (
     <>
@@ -1095,107 +1108,73 @@ const ManageTab = ({
       {/* 엑셀 업로더 */}
       <ExcelUploader onBulkAdd={handleBulkAdd} />
 
-      {/* 전체 프로필 목록 */}
+      {/* 전체 프로필 목록 (페이지 단위 10개) */}
       <section>
         <div className="flex items-end justify-between mb-2">
           <h2 className="text-xl font-bold text-gray-800">전체 프로필 목록</h2>
           <div className="text-xs text-gray-500">
             {sorted.length > 0 && (
-              <> {winStart + 1}–{Math.min(winStart + WINDOW_SIZE, sorted.length)} / {sorted.length} </>
+              <> {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)} / {sorted.length} </>
             )}
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {windowProfiles.map((profile, idx) => (
-            <div key={profile.id} ref={el => (cardRefs.current[idx] = el)}>
-              <ProfileCard
-                profile={profile}
-                onUpdate={onUpdate}
-                onDelete={onDelete}
-                accessCode={accessCode}
-                onSyncOne={onSyncOne}
-                onShowSimilar={onShowSimilar}
-                onToggleStar={onToggleStar}
-                selected={selectedIdx === idx}
-              />
-            </div>
+          {currentProfiles.map(profile => (
+            <ProfileCard
+              key={profile.id}
+              profile={profile}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
+              accessCode={accessCode}
+              onSyncOne={onSyncOne}
+              onShowSimilar={onShowSimilar}
+              onToggleStar={onToggleStar}
+            />
           ))}
         </div>
 
-        {/* 윈도우 내 숫자 선택 (1~10) */}
-        {windowProfiles.length > 0 && (
-          <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
-            {windowProfiles.map((_, i) => (
-              <button
-                key={i}
-                onClick={() => handlePick(i)}
-                className={`w-8 h-8 rounded-full border text-sm font-semibold ${
-                  selectedIdx === i
-                    ? 'bg-yellow-400 text-white border-yellow-400'
-                    : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-300'
-                }`}
-                title={`현재 창의 ${i+1}번째 카드`}
-              >
-                {i + 1}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* 페이지 네비게이션 */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-2 mt-5">
+            {/* 맨앞/이전 */}
+            <button onClick={goFirst} disabled={page===1}
+              className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-md border ${page===1?'bg-gray-100 text-gray-300':'bg-white hover:bg-gray-50 text-gray-700'}`} title="맨 앞으로">
+              <ChevronsLeft size={16}/> 맨앞
+            </button>
+            <button onClick={goPrev} disabled={page===1}
+              className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-md border ${page===1?'bg-gray-100 text-gray-300':'bg-white hover:bg-gray-50 text-gray-700'}`} title="이전">
+              <ChevronLeft size={16}/> 이전
+            </button>
 
-        {/* 네비게이션 바: ⏮ ◀ … [범위] … ▶ ⏭ */}
-        {sorted.length > WINDOW_SIZE && (
-          <div className="flex items-center justify-between gap-3 mt-4">
-            {/* 왼쪽 컨트롤 */}
-            <div className="flex items-center gap-2">
-              {hasPrev && (
-                <>
-                  <button
-                    onClick={goStart}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border bg-white hover:bg-gray-50 text-gray-700"
-                    title="맨 앞으로"
-                  >
-                    <ChevronsLeft size={16} /> 맨앞
-                  </button>
-                  <button
-                    onClick={goPrev}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border bg-white hover:bg-gray-50 text-gray-700"
-                    title="이전 5명"
-                  >
-                    <ChevronLeft size={16} /> 이전
-                  </button>
-                  <span className="text-2xl leading-none text-gray-400 select-none">…</span>
-                </>
-              )}
+            {/* 왼쪽 … */}
+            {hasLeftMore && <span className="text-2xl leading-none text-gray-400 select-none">…</span>}
+
+            {/* 현재 그룹의 숫자 버튼(최대 10개) */}
+            <div className="flex items-center gap-1">
+              {Array.from({ length: groupEnd - groupStart + 1 }, (_,i) => groupStart + i).map(n => (
+                <button
+                  key={n}
+                  onClick={() => pickPage(n)}
+                  className={`min-w-[2rem] h-8 rounded-md border text-sm font-semibold ${page===n ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-300'}`}
+                >
+                  {n}
+                </button>
+              ))}
             </div>
 
-            {/* 가운데 범위 */}
-            <div className="text-xs text-gray-500">
-              {winStart + 1}–{Math.min(winStart + WINDOW_SIZE, sorted.length)}
-            </div>
+            {/* 오른쪽 … */}
+            {hasRightMore && <span className="text-2xl leading-none text-gray-400 select-none">…</span>}
 
-            {/* 오른쪽 컨트롤 */}
-            <div className="flex items-center gap-2">
-              {hasNext && <span className="text-2xl leading-none text-gray-400 select-none">…</span>}
-              {hasNext && (
-                <>
-                  <button
-                    onClick={goNext}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border bg-white hover:bg-gray-50 text-gray-700"
-                    title="다음 5명"
-                  >
-                    다음 <ChevronRight size={16} />
-                  </button>
-                  <button
-                    onClick={goEnd}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border bg-white hover:bg-gray-50 text-gray-700"
-                    title="맨 뒤로"
-                  >
-                    맨뒤 <ChevronsRight size={16} />
-                  </button>
-                </>
-              )}
-            </div>
+            {/* 다음/맨뒤 */}
+            <button onClick={goNext} disabled={page===totalPages}
+              className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-md border ${page===totalPages?'bg-gray-100 text-gray-300':'bg-white hover:bg-gray-50 text-gray-700'}`} title="다음">
+              다음 <ChevronRight size={16}/>
+            </button>
+            <button onClick={goLast} disabled={page===totalPages}
+              className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-md border ${page===totalPages?'bg-gray-100 text-gray-300':'bg-white hover:bg-gray-50 text-gray-700'}`} title="맨 뒤로">
+              맨뒤 <ChevronsRight size={16}/>
+            </button>
           </div>
         )}
       </section>
@@ -1279,7 +1258,6 @@ export default function App() {
   const [isGoogleSignedIn, setIsGoogleSignedIn] = useState(false);
   const [googleApiReady, setGoogleApiReady]     = useState(null);
   const [googleError, setGoogleError]           = useState('');
-  const [isSyncing, setIsSyncing] = useState(false);
 
   // 신규 입력 폼 상태
   const [newName, setNewName] = useState('');
@@ -1420,7 +1398,7 @@ export default function App() {
     setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
   };
 
-  // 개별 캘린더 동기화 (visibility: 'private' 적용)
+  // 개별 캘린더 동기화 (비공개 생성)
   const ensureGoogleAuth = () => {
     return new Promise((resolve, reject) => {
       const token = gapiClient?.client?.getToken?.();
@@ -1460,8 +1438,11 @@ export default function App() {
         description: `${profile.name}님 프로필 보기:\n${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`,
         start: { dateTime: startLocal, timeZone: TZ },
         end:   { dateTime: endLocal,   timeZone: TZ },
-        reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 30 }] },
         visibility: 'private',
+        reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 30 }] },
+        guestsCanSeeOtherGuests: false,
+        guestsCanInviteOthers: false,
+        attendees: [] // 비공개 유지: 참석자 없음
       };
       const ten = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 10, 0, 0);
       if (startDate > ten) {
@@ -1478,6 +1459,7 @@ export default function App() {
         start: { date: dateStr },
         end:   { date: endStr  },
         visibility: 'private',
+        attendees: []
       };
     }
 
