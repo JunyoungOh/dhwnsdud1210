@@ -2,21 +2,18 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
 import {
-  getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query,
-  setLogLevel, updateDoc, writeBatch, getDoc
-} from 'firebase/firestore';
-import {
-  PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis,
-  CartesianGrid, ResponsiveContainer
+  PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer
 } from 'recharts';
 import {
   Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2,
-  ShieldAlert, X, Save, UploadCloud, BellRing, Share2, CalendarPlus, AlertCircle
+  ShieldAlert, X, Save, UploadCloud, BellRing, Share2, CalendarPlus, AlertCircle,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
 } from 'lucide-react';
 
 // ==============================
-// ENV / Firebase
+// Google API / Firebase env
 // ==============================
 const GOOGLE_API_KEY   = process.env.REACT_APP_GOOGLE_API_KEY;
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
@@ -34,6 +31,7 @@ const firebaseConfig = {
 };
 
 const appId = 'profile-db-app-junyoungoh';
+
 const app  = initializeApp(firebaseConfig);
 const db   = getFirestore(app);
 const auth = getAuth(app);
@@ -44,11 +42,10 @@ const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아�
 
 const TAB_PAGE = { ALERTS: 'alerts', DASHBOARD: 'dashboard', MANAGE: 'manage' };
 
-// ==============================
-// 시간/파싱 유틸 (KST)
-// ==============================
+// ===============================
+// 시간 파싱 & 포맷 유틸 (Asia/Seoul 기준)
+// ===============================
 const TZ = 'Asia/Seoul';
-
 function formatRFC3339InTZ(date, timeZone = TZ) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone, year:'numeric', month:'2-digit', day:'2-digit',
@@ -62,14 +59,11 @@ function formatDateOnlyInTZ(date, timeZone = TZ) {
   }).formatToParts(date).reduce((acc, p) => (acc[p.type] = p.value, acc), {});
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
-
-// (25.08.14) PM 7:30 / 2025-08-14 19:30 / 2025-08-14 / (25.08.14) 오후 7시 등
+// 다양한 표기 인식: (25.08.14) AM/PM/오전/오후 7시 30분 / 2025-08-14 19:30 / 2025-08-14 등
 function parseDateTimeFromRecord(recordText) {
   if (!recordText) return null;
   const text = typeof recordText === 'string' ? recordText : String(recordText || '');
   let best = null;
-
-  // A: (YY.MM.DD) [AM|PM|오전|오후]? hh[:mm] / hh시 [mm분]
   const reA = /\((\d{2})\.(\d{2})\.(\d{2})\)\s*(?:(AM|PM|오전|오후)?\s*(\d{1,2})(?::(\d{2}))?(?:\s*시)?(?:\s*(\d{1,2})\s*분?)?)?/gi;
   let m;
   while ((m = reA.exec(text)) !== null) {
@@ -89,8 +83,6 @@ function parseDateTimeFromRecord(recordText) {
     const d = new Date(year, month, day, hour, minute);
     if (!best || d > best.date) best = { date: d, hadTime };
   }
-
-  // B: YYYY-MM-DD [HH:mm]
   const reB = /(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2}))?/g;
   while ((m = reB.exec(text)) !== null) {
     const year  = parseInt(m[1], 10);
@@ -102,22 +94,22 @@ function parseDateTimeFromRecord(recordText) {
     const d = new Date(year, month, day, hour, minute);
     if (!best || d > best.date) best = { date: d, hadTime };
   }
-
   return best ? best : null;
 }
 
-// ==============================
-// 간단 유사도 로직 (Jaccard + 가중)
-// ==============================
+// ===============================
+// 유사도 계산(간단 버전: 토큰 Jaccard + 보정)
+// ===============================
 function tokenizeProfile(p) {
-  const base = [p.name || '', p.expertise || '', p.career || '', p.otherInfo || '']
-    .join(' ')
-    .toLowerCase();
+  const base = [
+    p.name || '', p.expertise || '', p.career || '', p.otherInfo || ''
+  ].join(' ').toLowerCase();
   const words = base
     .replace(/[()\[\],./\\\-:~!@#$%^&*?'"`|]/g, ' ')
-    .split(/\s+/).filter(Boolean);
+    .split(/\s+/)
+    .filter(Boolean);
   const extra = [];
-  TARGET_KEYWORDS.forEach(k => { if ((p.career || '').includes(k)) extra.push(k); });
+  TARGET_KEYWORDS.forEach(k => { if ((p.career||'').includes(k)) extra.push(k); });
   if (p.priority) extra.push(`priority:${p.priority}`);
   if (p.age) {
     const band = p.age < 20 ? '10' : p.age < 30 ? '20' : p.age < 40 ? '30' : p.age < 50 ? '40' : '50+';
@@ -131,8 +123,9 @@ function jaccard(aSet, bSet) {
   return uni.size === 0 ? 0 : inter.size / uni.size;
 }
 function similarityScore(a, b) {
-  const ta = tokenizeProfile(a), tb = tokenizeProfile(b);
-  let score = jaccard(ta, tb) * 100;          // 0~100
+  const ta = tokenizeProfile(a);
+  const tb = tokenizeProfile(b);
+  let score = jaccard(ta, tb) * 100; // 0~100
   if (a.priority && b.priority && a.priority === b.priority) score += 6;
   const ak = TARGET_KEYWORDS.filter(k => (a.career||'').includes(k));
   const bk = TARGET_KEYWORDS.filter(k => (b.career||'').includes(k));
@@ -141,9 +134,9 @@ function similarityScore(a, b) {
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
-// ==============================
+// ===============================
 // 공유 보기
-// ==============================
+// ===============================
 const ProfileDetailView = ({ profileId, accessCode }) => {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -202,9 +195,9 @@ const ProfileDetailView = ({ profileId, accessCode }) => {
   );
 };
 
-// ==============================
+// ===============================
 // 로그인 화면
-// ==============================
+// ===============================
 const LoginScreen = ({ onLogin, authStatus }) => {
   const [codeInput, setCodeInput] = useState('');
   const handleSubmit = (e) => { e.preventDefault(); if (codeInput.trim()) onLogin(codeInput.trim()); };
@@ -234,21 +227,21 @@ const LoginScreen = ({ onLogin, authStatus }) => {
   );
 };
 
-// ==============================
-// 유사 프로필 모달
-// ==============================
+// ===============================
+// 모달 (유사 프로필)
+// ===============================
 const SimilarModal = ({ open, onClose, baseProfile, items }) => {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black bg-opacity-40" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl max-height-[80vh] p-6 overflow-hidden">
+      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] p-6 overflow-hidden">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-lg font-bold text-gray-800">유사 프로필 — <span className="text-yellow-600">{baseProfile?.name}</span></h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-800"><X size={20} /></button>
         </div>
-        <div className="text-sm text-gray-500 mb-3">경력/전문영역/키워드/우선순위 등 텍스트 기반으로 유사도를 계산합니다.</div>
-        <div className="overflow-y-auto pr-3" style={{ maxHeight: '65vh' }}>
+        <div className="text-sm text-gray-500 mb-3">유사도는 경력/전문영역/키워드/우선순위 등 텍스트 기반으로 계산돼요.</div>
+        <div className="overflow-y-auto pr-3" style={{ maxHeight: '64vh' }}>
           {items.length === 0 ? (
             <div className="text-center text-gray-500 py-8">표시할 유사 프로필이 없습니다.</div>
           ) : (
@@ -272,9 +265,9 @@ const SimilarModal = ({ open, onClose, baseProfile, items }) => {
   );
 };
 
-// ==============================
-// 확인 모달 (삭제/확인 등)
-// ==============================
+// ===============================
+// 확인 모달 (삭제 등)
+// ===============================
 const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
     <div className="bg-white rounded-lg p-8 shadow-xl max-w-sm w-full mx-4">
@@ -291,9 +284,9 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   </div>
 );
 
-// ==============================
+// ===============================
 // 프로필 카드
-// ==============================
+// ===============================
 const ProfileCard = ({
   profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm,
   accessCode, onSyncOne, onShowSimilar, onToggleStar
@@ -377,11 +370,7 @@ const ProfileCard = ({
           <h3 className="font-bold text-yellow-600">{profile.name}</h3>
           <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
         </div>
-        {profile.priority && (
-          <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${priorityColors[profile.priority] || 'bg-gray-100 text-gray-800'}`}>
-            {profile.priority}
-          </span>
-        )}
+        {profile.priority && <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${priorityColors[profile.priority] || 'bg-gray-100 text-gray-800'}`}>{profile.priority}</span>}
       </div>
 
       {profile.expertise && <p className="text-sm font-semibold text-gray-600 mt-1">{profile.expertise}</p>}
@@ -394,12 +383,13 @@ const ProfileCard = ({
         </div>
       )}
 
-      {/* 하단 액션 */}
+      {/* 하단 액션 영역 */}
       <div className="mt-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <button
             onClick={handleStarClick}
             className={`text-xs font-semibold px-3 py-1 rounded-full ${profile.starred ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+            title={profile.starred ? '주목중' : '모아보기'}
           >
             {profile.starred ? '주목중' : '모아보기'}
           </button>
@@ -412,6 +402,7 @@ const ProfileCard = ({
           </button>
         </div>
 
+        {/* 캘린더 연동 */}
         <div className="flex items-center gap-2">
           {profile.gcalEventId ? (
             <a href={profile.gcalHtmlLink || '#'} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
@@ -426,7 +417,7 @@ const ProfileCard = ({
         </div>
       </div>
 
-      {/* 우측 상단 아이콘 */}
+      {/* 우측 상단 아이콘들 */}
       <div className="absolute top-2 right-2 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
         <button onClick={handleShare} className="text-gray-500 hover:text-gray-800" title="공유 링크 복사"><Share2 size={14} /></button>
         <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:text-blue-700" title="수정"><Edit size={14} /></button>
@@ -443,9 +434,9 @@ const ProfileCard = ({
   );
 };
 
-// ==============================
-// 필터 결과 섹션 (그래프 아래 표시)
-// ==============================
+// ===============================
+// 필터 결과 섹션 (클릭된 그래프 아래에 표시)
+// ===============================
 const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => (
   <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in mt-4">
     <div className="flex justify-between items-center mb-4">
@@ -474,9 +465,9 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, acc
   </section>
 );
 
-// ==============================
+// ===============================
 // 대시보드 탭
-// ==============================
+// ===============================
 const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
   const [searchTerm, setSearchTerm] = useState('');
@@ -485,7 +476,12 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onS
   const handlePieClick = (type, data) => { if (!data || (data.value ?? data.count) === 0) return; setActiveFilter({ type, value: data.name }); };
   const handleBarClick = (type, data) => { const count = data.count || data.value; if (count === 0) return; setActiveFilter({ type, value: data.name }); };
 
-  const spotlightProfiles = useMemo(() => profiles.filter(p => !!p.starred), [profiles]);
+  // 데이터 전처리
+  const { spotlightProfiles } = useMemo(() => {
+    return {
+      spotlightProfiles: profiles.filter(p => !!p.starred),
+    };
+  }, [profiles]);
 
   const ageData = useMemo(() => {
     const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
@@ -578,7 +574,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onS
                   onDelete={onDelete}
                   accessCode={accessCode}
                   onSyncOne={onSyncOne}
-                  onShowSimilar={onShowSimilar}
+                  onShowSimilar={(p) => onShowSimilar?.(p)}
                   onToggleStar={onToggleStar}
                 />
               )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
@@ -587,7 +583,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onS
         )}
       </section>
 
-      {/* 커스텀 모아보기 */}
+      {/* 커스텀, 주목하는 프로필 모아보기 */}
       <section className="bg-white rounded-xl shadow-md p-4 mb-8">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -615,7 +611,7 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onS
                     onDelete={onDelete}
                     accessCode={accessCode}
                     onSyncOne={onSyncOne}
-                    onShowSimilar={onShowSimilar}
+                    onShowSimilar={(x)=>onShowSimilar?.(x)}
                     onToggleStar={onToggleStar}
                   />
                 ))}
@@ -635,7 +631,10 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onS
               <radialGradient id="gp-1"><stop offset="0%" stopColor="#FFBB28" stopOpacity={0.7} /><stop offset="100%" stopColor="#FFBB28" stopOpacity={1} /></radialGradient>
               <radialGradient id="gp-2"><stop offset="0%" stopColor="#00C49F" stopOpacity={0.7} /><stop offset="100%" stopColor="#00C49F" stopOpacity={1} /></radialGradient>
             </defs>
-            <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label>
+            <Pie
+              data={priorityData}
+              cx="50%" cy="50%" outerRadius={100} dataKey="value" label
+            >
               {priorityData.map((entry, i) => (
                 <Cell
                   key={`cell-pr-${i}`}
@@ -764,9 +763,9 @@ const DashboardTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onS
   );
 };
 
-// ==============================
+// ===============================
 // 알림 탭
-// ==============================
+// ===============================
 const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const [recOpen, setRecOpen] = useState(false);
   const [longOpen, setLongOpen] = useState(false);
@@ -789,9 +788,12 @@ const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShow
       }
       const lastContact = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
       const snoozeUntil  = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
-      if (lastContact && lastContact < threeMonthsAgo && (!snoozeUntil || snoozeUntil < now)) longTerm.push(p);
+      if (lastContact && lastContact < threeMonthsAgo && (!snoozeUntil || snoozeUntil < now)) {
+        longTerm.push(p);
+      }
     });
 
+    // 추천 점수(간단): 오래 안 본 + 우선순위 상/IT키워드 가점
     const scoreOf = (p) => {
       const now = new Date();
       const last = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
@@ -802,7 +804,7 @@ const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShow
       score += Math.min(kw * 5, 15);
       if (p.expertise) score += 5;
       const snoozeUntil = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
-      if (snoozeUntil && snoozeUntil > now) score = -1;
+      if (snoozeUntil && snoozeUntil > now) score = -1; // 제외
       return score;
     };
     const rec = profiles
@@ -889,7 +891,7 @@ const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShow
               </div>
             </div>
           </div>
-          <div className="text-xs text-gray-500">카드 하단에서 ‘확인’/‘스누즈’ 가능</div>
+          <div className="text-xs text-gray-500">클릭 시 ‘확인’/‘스누즈’ 가능</div>
         </div>
         {recOpen && (
           <div className="mt-4">
@@ -961,16 +963,26 @@ const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShow
   );
 };
 
-// ==============================
-// 관리 탭
-// ==============================
-const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
-  const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord } = formState;
-  const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord } = setFormState;
-  const [searchTerm, setSearchTerm] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
-  const PROFILES_PER_PAGE = 9;
+// ===============================
+// 관리 탭 (윈도우 네비게이션 적용)
+// ===============================
+const ManageTab = ({
+  profiles, onUpdate, onDelete,
+  handleFormSubmit, handleBulkAdd,
+  formState, setFormState,
+  accessCode, onSyncOne, onShowSimilar, onToggleStar
+}) => {
+  const {
+    newName, newCareer, newAge, newOtherInfo,
+    newEventDate, newExpertise, newPriority, newMeetingRecord
+  } = formState;
+  const {
+    setNewName, setNewCareer, setNewAge, setNewOtherInfo,
+    setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord
+  } = setFormState;
 
+  // 검색 (기존 유지)
+  const [searchTerm, setSearchTerm] = useState('');
   const searchedProfiles = useMemo(() => {
     const term = searchTerm.trim(); if (!term) return [];
     const orConditions = term.split(/\s+or\s+/i);
@@ -988,35 +1000,67 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
     }));
   }, [searchTerm, profiles]);
 
-  const { currentProfiles, totalPages } = useMemo(() => {
-    const sorted = [...profiles].sort((a,b) => a.name.localeCompare(b.name));
-    const end = currentPage * PROFILES_PER_PAGE, start = end - PROFILES_PER_PAGE;
-    return { currentProfiles: sorted.slice(start,end), totalPages: Math.ceil(sorted.length / PROFILES_PER_PAGE) };
-  }, [currentPage, profiles]);
+  // ===== 리스트 윈도우 UI (한 화면 10명, 5명씩 이동) =====
+  const WINDOW_SIZE = 10;
+  const STEP        = 5;
+  const [winStart, setWinStart] = useState(0);
 
-  useEffect(() => { setCurrentPage(1); }, [searchTerm]);
+  const sorted = useMemo(() => [...profiles].sort((a,b) => a.name.localeCompare(b.name)), [profiles]);
+  const maxStart = Math.max(0, sorted.length - WINDOW_SIZE);
+  const hasPrev  = winStart > 0;
+  const hasNext  = winStart < maxStart;
+
+  const windowProfiles = useMemo(
+    () => sorted.slice(winStart, Math.min(winStart + WINDOW_SIZE, sorted.length)),
+    [sorted, winStart]
+  );
+
+  const goStart = () => setWinStart(0);
+  const goEnd   = () => setWinStart(maxStart);
+  const goPrev  = () => setWinStart(prev => Math.max(0, prev - STEP));
+  const goNext  = () => setWinStart(prev => Math.min(maxStart, prev + STEP));
+  // ===== 리스트 윈도우 UI 끝 =====
 
   return (
     <>
+      {/* 상단 검색 */}
       <section>
         <div className="relative mb-6">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input type="text" placeholder="검색... (예: 경력:네이버 AND 20대)" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
+          <input
+            type="text"
+            placeholder="검색... (예: 경력:네이버 AND 20대)"
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="w-full p-4 pl-12 border rounded-xl shadow-sm"
+          />
         </div>
         {searchTerm.trim() && (
           <div>
             <h2 className="text-xl font-bold mb-4">검색 결과</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
-                <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar}/>
+                <ProfileCard
+                  key={profile.id}
+                  profile={profile}
+                  onUpdate={onUpdate}
+                  onDelete={onDelete}
+                  accessCode={accessCode}
+                  onSyncOne={onSyncOne}
+                  onShowSimilar={onShowSimilar}
+                  onToggleStar={onToggleStar}
+                />
               )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
             </div>
           </div>
         )}
       </section>
 
+      {/* 새 프로필 추가 */}
       <section className="bg-white p-6 rounded-xl shadow-md">
-        <h2 className="text-xl font-bold mb-4 flex items-center"><UserPlus className="mr-2 text-yellow-500"/>새 프로필 추가</h2>
+        <h2 className="text-xl font-bold mb-4 flex items-center">
+          <UserPlus className="mr-2 text-yellow-500"/>새 프로필 추가
+        </h2>
         <form onSubmit={handleFormSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <input type="text" placeholder="이름" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-2 border rounded" />
@@ -1033,42 +1077,95 @@ const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
         </form>
       </section>
 
+      {/* 엑셀 업로더 */}
       <ExcelUploader onBulkAdd={handleBulkAdd} />
 
+      {/* 전체 프로필 목록 */}
       <section>
-        <h2 className="text-xl font-bold text-gray-800 mb-4">전체 프로필 목록</h2>
+        <div className="flex items-end justify-between mb-2">
+          <h2 className="text-xl font-bold text-gray-800">전체 프로필 목록</h2>
+          <div className="text-xs text-gray-500">
+            {sorted.length > 0 && (
+              <> {winStart + 1}–{Math.min(winStart + WINDOW_SIZE, sorted.length)} / {sorted.length} </>
+            )}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {currentProfiles.map(profile => (
-            <ProfileCard key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar}/>
+          {windowProfiles.map(profile => (
+            <ProfileCard
+              key={profile.id}
+              profile={profile}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
+              accessCode={accessCode}
+              onSyncOne={onSyncOne}
+              onShowSimilar={onShowSimilar}
+              onToggleStar={onToggleStar}
+            />
           ))}
         </div>
-        {totalPages > 1 && (
-          <Pagination totalPages={totalPages} currentPage={currentPage} setCurrentPage={setCurrentPage} />
+
+        {/* 네비게이션 바: ⏮ ◀ …  범위  … ▶ ⏭ */}
+        {sorted.length > WINDOW_SIZE && (
+          <div className="flex items-center justify-between gap-3 mt-4">
+            {/* 왼쪽 컨트롤 */}
+            <div className="flex items-center gap-2">
+              {hasPrev && (
+                <>
+                  <button
+                    onClick={goStart}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border bg-white hover:bg-gray-50 text-gray-700"
+                    title="맨 앞으로"
+                  >
+                    <ChevronsLeft size={16} /> 맨앞
+                  </button>
+                  <button
+                    onClick={goPrev}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border bg-white hover:bg-gray-50 text-gray-700"
+                    title="이전 5명"
+                  >
+                    <ChevronLeft size={16} /> 이전
+                  </button>
+                  <span className="text-2xl leading-none text-gray-400 select-none">…</span>
+                </>
+              )}
+            </div>
+
+            {/* 가운데 범위 */}
+            <div className="text-xs text-gray-500">
+              {winStart + 1}–{Math.min(winStart + WINDOW_SIZE, sorted.length)}
+            </div>
+
+            {/* 오른쪽 컨트롤 */}
+            <div className="flex items-center gap-2">
+              {hasNext && <span className="text-2xl leading-none text-gray-400 select-none">…</span>}
+              {hasNext && (
+                <>
+                  <button
+                    onClick={goNext}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border bg-white hover:bg-gray-50 text-gray-700"
+                    title="다음 5명"
+                  >
+                    다음 <ChevronRight size={16} />
+                  </button>
+                  <button
+                    onClick={goEnd}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border bg-white hover:bg-gray-50 text-gray-700"
+                    title="맨 뒤로"
+                  >
+                    맨뒤 <ChevronsRight size={16} />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
         )}
       </section>
     </>
   );
 };
 
-const Pagination = ({ totalPages, currentPage, setCurrentPage }) => {
-  const pages = Array.from({length: totalPages}, (_,i)=>i+1);
-  if (totalPages <= 1) return null;
-  return (
-    <nav className="mt-8 flex justify-center">
-      <ul className="inline-flex items-center -space-x-px">
-        {pages.map(n => (
-          <li key={n}>
-            <button onClick={() => setCurrentPage(n)} className={`py-2 px-4 leading-tight border border-gray-300 ${currentPage===n?'bg-yellow-400 text-white border-yellow-400':'bg-white text-gray-600 hover:bg-gray-100'}`}>{n}</button>
-          </li>
-        ))}
-      </ul>
-    </nav>
-  );
-};
-
-// ==============================
-// Excel 업로더 (안정성 보강)
-// ==============================
 const ExcelUploader = ({ onBulkAdd }) => {
   const [file, setFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -1078,52 +1175,28 @@ const ExcelUploader = ({ onBulkAdd }) => {
 
   const handleUpload = async () => {
     if (!file) { setMessage('파일을 먼저 선택해주세요.'); return; }
-    const valid = /\.(xlsx|xls)$/i.test(file.name);
-    if (!valid) { setMessage('엑셀(.xlsx/.xls) 파일만 업로드 가능해요.'); return; }
-
     setIsUploading(true); setMessage('파일을 읽는 중...');
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
         const data = new Uint8Array(e.target.result);
-        if (!window.XLSX) { setMessage('엑셀 라이브러리가 로드되지 않았습니다. 잠시 후 다시 시도해주세요.'); setIsUploading(false); return; }
         const workbook = window.XLSX.read(data, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
-        if (!sheetName) { setMessage('시트를 찾을 수 없습니다.'); setIsUploading(false); return; }
         const worksheet = workbook.Sheets[sheetName];
         const json = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-        if (!Array.isArray(json) || json.length < 2) { setMessage('엑셀에 읽을 데이터가 없습니다 (2행부터).'); setIsUploading(false); return; }
-
-        // C=이름, D=경력, F=나이, H=전문영역, J=우선순위, L=미팅기록, N=기타정보
-        const rows = json.slice(1);
-        const mapped = rows.map(row => ({
-          name: row[2] || '',
-          career: row[3] || '',
-          age: row[5] ? Number(row[5]) : null,
-          expertise: row[7] || '',
-          priority: row[9] ? String(row[9]) : '',
-          meetingRecord: row[11] || '',
-          otherInfo: row[13] || '',
+        if (json.length < 2) { setMessage('엑셀 파일에 데이터가 없습니다 (2행부터 읽습니다).'); setIsUploading(false); return; }
+        const newProfiles = json.slice(1).map(row => ({
+          name: row[2] || '', career: row[3] || '', age: row[5] ? Number(row[5]) : null,
+          expertise: row[7] || '', priority: row[9] ? String(row[9]) : '',
+          meetingRecord: row[11] || '', otherInfo: row[13] || '',
           eventDate: (()=>{const p=parseDateTimeFromRecord(row[11]||''); return p? p.date.toISOString():null;})(),
-          starred: false
         })).filter(p => p.name && p.career);
-
-        if (mapped.length === 0) { setMessage('유효한 행이 없습니다. (이름, 경력은 필수)'); setIsUploading(false); return; }
-
-        // 대량 처리 안내 메시지
-        if (mapped.length > 150) {
-          setMessage(`총 ${mapped.length}건 처리 중... (잠시만요)`);
-        }
-
-        const msg = await onBulkAdd(mapped);
-        setMessage(msg);
-        setFile(null);
+        const msg = await onBulkAdd(newProfiles);
+        setMessage(msg); setFile(null);
       } catch (err) {
-        console.error('엑셀 처리 오류:', err);
-        setMessage('엑셀 파일 처리 중 오류가 발생했습니다.');
+        console.error('엑셀 처리 오류:', err); setMessage('엑셀 파일을 처리하는 중 오류가 발생했습니다.');
       } finally { setIsUploading(false); }
     };
-    reader.onerror = () => { setIsUploading(false); setMessage('파일을 읽는 데 실패했습니다.'); };
     reader.readAsArrayBuffer(file);
   };
 
@@ -1131,12 +1204,12 @@ const ExcelUploader = ({ onBulkAdd }) => {
     <section className="bg-white p-6 rounded-xl shadow-md">
       <h2 className="text-xl font-bold mb-4 flex items-center"><UploadCloud className="mr-2 text-yellow-500"/>엑셀로 일괄 등록</h2>
       <div className="space-y-4">
-        <p className="text-sm text-gray-600">정해진 양식의 엑셀을 업로드하여 여러 프로필을 한 번에 추가할 수 있습니다.</p>
+        <p className="text-sm text-gray-600">정해진 양식의 엑셀 파일을 업로드하여 여러 프로필을 한 번에 추가할 수 있습니다.</p>
         <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md border">
-          <p className="font-semibold">엑셀 양식 안내</p>
+          <p className="font-semibold">엑셀 양식 안내:</p>
           <p>2행부터 각 행을 한 프로필로 읽습니다.</p>
-          <p>C=이름, D=경력, F=나이, H=전문영역, J=우선순위, L=미팅기록, N=기타정보</p>
-          <p className="font-bold mt-1">※ 기존 이름과 겹치면 덮어쓰기됩니다.</p>
+          <p>각 열의 C=이름, D=경력, F=나이, H=전문영역, J=우선순위, L=미팅기록, N=기타정보 로 입력됩니다.</p>
+          <p className="font-bold mt-1">※ 기존 프로필과 이름이 겹칠 경우, 덮어쓰기됩니다.</p>
         </div>
         <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100"/>
         <button onClick={handleUpload} disabled={!file || isUploading} className="w-full flex justify-center items-center py-2 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
@@ -1148,9 +1221,9 @@ const ExcelUploader = ({ onBulkAdd }) => {
   );
 };
 
-// ==============================
+// ===============================
 // App
-// ==============================
+// ===============================
 export default function App() {
   const [accessCode, setAccessCode] = useState(typeof window !== 'undefined' ? (localStorage.getItem('profileDbAccessCode') || null) : null);
   const [profiles, setProfiles]     = useState([]);
@@ -1163,12 +1236,13 @@ export default function App() {
   const [similarBase, setSimilarBase] = useState(null);
   const [similarList, setSimilarList] = useState([]);
 
-  // Google API
+  // Google API 상태
   const [gapiClient, setGapiClient]   = useState(null);
   const [tokenClient, setTokenClient] = useState(null);
   const [isGoogleSignedIn, setIsGoogleSignedIn] = useState(false);
   const [googleApiReady, setGoogleApiReady]     = useState(null);
   const [googleError, setGoogleError]           = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // 신규 입력 폼 상태
   const [newName, setNewName] = useState('');
@@ -1283,23 +1357,18 @@ export default function App() {
     } catch (err) { console.error("프로필 저장 오류: ", err); }
   };
 
-  // 대량 추가 (덮어쓰기 + 배치)
   const handleBulkAdd = async (newProfiles) => {
     if (!profilesCollectionRef || newProfiles.length === 0) return '업로드할 프로필이 없습니다.';
     const map = new Map(profiles.map(p => [p.name, p.id]));
+    const batch = writeBatch(db);
     let updated=0, added=0;
-    const CHUNK = 450; // 500 제한 대비
-    for (let i = 0; i < newProfiles.length; i += CHUNK) {
-      const chunk = newProfiles.slice(i, i + CHUNK);
-      const batch = writeBatch(db);
-      chunk.forEach(p => {
-        const existingId = map.get(p.name);
-        const payload = { starred: false, ...p };
-        if (existingId) { batch.set(doc(profilesCollectionRef, existingId), payload); updated++; }
-        else { batch.set(doc(profilesCollectionRef), payload); added++; }
-      });
-      await batch.commit();
-    }
+    newProfiles.forEach(p => {
+      const existingId = map.get(p.name);
+      const payload = { starred: false, ...p };
+      if (existingId) { batch.set(doc(profilesCollectionRef, existingId), payload); updated++; }
+      else { batch.set(doc(profilesCollectionRef), payload); added++; }
+    });
+    await batch.commit();
     return `${added}건 추가, ${updated}건 업데이트 완료.`;
   };
 
@@ -1314,7 +1383,7 @@ export default function App() {
     setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
   };
 
-  // Google Calendar 동기화
+  // 개별 캘린더 동기화
   const ensureGoogleAuth = () => {
     return new Promise((resolve, reject) => {
       const token = gapiClient?.client?.getToken?.();
@@ -1338,7 +1407,9 @@ export default function App() {
     catch (e) { alert(e.message || 'Google 인증에 실패했습니다.'); return; }
 
     let parsed = parseDateTimeFromRecord(profile.meetingRecord);
-    if (!parsed && profile.eventDate) parsed = { date: new Date(profile.eventDate), hadTime: true };
+    if (!parsed && profile.eventDate) {
+      parsed = { date: new Date(profile.eventDate), hadTime: true };
+    }
     if (!parsed) { alert('미팅 날짜/시간을 인식할 수 없습니다. "미팅기록"에 날짜를 입력해주세요.'); return; }
 
     const startDate = parsed.date;
@@ -1404,7 +1475,7 @@ export default function App() {
     setSimilarOpen(true);
   };
 
-  // 상단 카운트
+  // 상단 카운트 박스 값
   const totalCount = profiles.length;
   const meetingCount = useMemo(() => profiles.filter(p => !!p.eventDate).length, [profiles]);
 
@@ -1429,7 +1500,7 @@ export default function App() {
         />
       )}
 
-      {/* 헤더 */}
+      {/* 헤더: 제목/엑세스코드 + 카운트 박스 + 구글 로그인 상태 */}
       <header className="flex flex-col gap-3 p-4 sm:p-6 border-b bg-white">
         <div className="flex flex-wrap justify-between items-center gap-4">
           <div className="flex items-center space-x-3">
@@ -1444,12 +1515,14 @@ export default function App() {
             )}
             {googleApiReady === true && (
               isGoogleSignedIn ? (
-                <button
-                  onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
-                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
-                >
-                  Google 로그아웃
-                </button>
+                <>
+                  <button
+                    onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
+                    className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
+                  >
+                    Google 로그아웃
+                  </button>
+                </>
               ) : (
                 <button
                   onClick={() => tokenClient?.requestAccessToken({ prompt: 'consent' })}
@@ -1465,7 +1538,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* 상단 카운트 박스 */}
+        {/* 상단 카운트 박스 (제목 옆) */}
         <div className="flex items-center gap-4">
           <div className="bg-white p-4 rounded-xl shadow-sm border">
             <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
@@ -1478,14 +1551,13 @@ export default function App() {
         </div>
       </header>
 
-      {/* 탭 */}
+      {/* 상단 탭: 알림 / 대시보드 / 프로필 관리 */}
       <div className="flex justify-center space-x-2 border-b bg-white px-6 py-2 sticky top-0 z-10">
         <button onClick={() => setActiveTab(TAB_PAGE.ALERTS)} className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.ALERTS ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg-yellow-100'}`}>알림</button>
         <button onClick={() => setActiveTab(TAB_PAGE.DASHBOARD)} className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.DASHBOARD ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg-yellow-100'}`}>대시보드</button>
         <button onClick={() => setActiveTab(TAB_PAGE.MANAGE)} className={`px-4 py-2 rounded-md font-semibold transition-colors ${activeTab === TAB_PAGE.MANAGE ? 'bg-yellow-400 text-white' : 'text-gray-600 hover:bg-yellow-100'}`}>프로필 관리</button>
       </div>
 
-      {/* 본문 */}
       <main className="p-6 space-y-12">
         {activeTab === TAB_PAGE.ALERTS && (
           <AlertsTab
