@@ -133,7 +133,7 @@ function tokenizeProfile(p) {
   return new Set([...words, ...extra]);
 }
 function jaccard(aSet, bSet) {
-  const inter = new Set([...aSet].filter(x => bSet.has(x));
+  const inter = new Set([...aSet].filter(x => bSet.has(x)));
   const uni   = new Set([...aSet, ...bSet]);
   return uni.size === 0 ? 0 : inter.size / uni.size;
 }
