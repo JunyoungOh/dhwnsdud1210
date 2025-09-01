@@ -1,5 +1,5 @@
 // src/App.js
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
@@ -59,7 +59,7 @@ function formatDateOnlyInTZ(date, timeZone = TZ) {
   }).formatToParts(date).reduce((acc, p) => (acc[p.type] = p.value, acc), {});
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
-// 다양한 표기 인식: (25.08.14) AM/PM/오전/오후 7시 30분 / 2025-08-14 19:30 / 2025-08-14 등
+// 다양한 표기 인식
 function parseDateTimeFromRecord(recordText) {
   if (!recordText) return null;
   const text = typeof recordText === 'string' ? recordText : String(recordText || '');
@@ -98,7 +98,7 @@ function parseDateTimeFromRecord(recordText) {
 }
 
 // ===============================
-// 유사도 계산(간단 버전: 토큰 Jaccard + 보정)
+// 유사도 계산
 // ===============================
 function tokenizeProfile(p) {
   const base = [
@@ -289,7 +289,7 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
 // ===============================
 const ProfileCard = ({
   profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm,
-  accessCode, onSyncOne, onShowSimilar, onToggleStar
+  accessCode, onSyncOne, onShowSimilar, onToggleStar, selected
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
@@ -364,7 +364,7 @@ const ProfileCard = ({
   }
 
   return (
-    <div className="bg-white p-4 rounded-lg shadow relative group">
+    <div className={`bg-white p-4 rounded-lg shadow relative group ${selected ? 'ring-2 ring-yellow-400 ring-offset-2' : ''}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-baseline space-x-2">
           <h3 className="font-bold text-yellow-600">{profile.name}</h3>
@@ -793,7 +793,6 @@ const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShow
       }
     });
 
-    // 추천 점수(간단): 오래 안 본 + 우선순위 상/IT키워드 가점
     const scoreOf = (p) => {
       const now = new Date();
       const last = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
@@ -964,7 +963,7 @@ const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShow
 };
 
 // ===============================
-// 관리 탭 (윈도우 네비게이션 적용)
+// 관리 탭 (윈도우 네비 + 숫자 선택)
 // ===============================
 const ManageTab = ({
   profiles, onUpdate, onDelete,
@@ -981,7 +980,7 @@ const ManageTab = ({
     setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord
   } = setFormState;
 
-  // 검색 (기존 유지)
+  // 검색
   const [searchTerm, setSearchTerm] = useState('');
   const searchedProfiles = useMemo(() => {
     const term = searchTerm.trim(); if (!term) return [];
@@ -1000,10 +999,12 @@ const ManageTab = ({
     }));
   }, [searchTerm, profiles]);
 
-  // ===== 리스트 윈도우 UI (한 화면 10명, 5명씩 이동) =====
+  // ===== 리스트 윈도우 UI =====
   const WINDOW_SIZE = 10;
   const STEP        = 5;
   const [winStart, setWinStart] = useState(0);
+  const [selectedIdx, setSelectedIdx] = useState(null); // 0~9 (윈도우 내 선택)
+  const cardRefs = useRef([]); // 각 카드 ref
 
   const sorted = useMemo(() => [...profiles].sort((a,b) => a.name.localeCompare(b.name)), [profiles]);
   const maxStart = Math.max(0, sorted.length - WINDOW_SIZE);
@@ -1015,10 +1016,24 @@ const ManageTab = ({
     [sorted, winStart]
   );
 
+  useEffect(() => {
+    // 윈도우가 바뀌면 선택/refs 초기화
+    setSelectedIdx(null);
+    cardRefs.current = [];
+  }, [winStart, windowProfiles.length]);
+
   const goStart = () => setWinStart(0);
   const goEnd   = () => setWinStart(maxStart);
   const goPrev  = () => setWinStart(prev => Math.max(0, prev - STEP));
   const goNext  = () => setWinStart(prev => Math.min(maxStart, prev + STEP));
+
+  const handlePick = (i) => {
+    setSelectedIdx(i);
+    const el = cardRefs.current[i];
+    if (el && el.scrollIntoView) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
   // ===== 리스트 윈도우 UI 끝 =====
 
   return (
@@ -1092,21 +1107,43 @@ const ManageTab = ({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {windowProfiles.map(profile => (
-            <ProfileCard
-              key={profile.id}
-              profile={profile}
-              onUpdate={onUpdate}
-              onDelete={onDelete}
-              accessCode={accessCode}
-              onSyncOne={onSyncOne}
-              onShowSimilar={onShowSimilar}
-              onToggleStar={onToggleStar}
-            />
+          {windowProfiles.map((profile, idx) => (
+            <div key={profile.id} ref={el => (cardRefs.current[idx] = el)}>
+              <ProfileCard
+                profile={profile}
+                onUpdate={onUpdate}
+                onDelete={onDelete}
+                accessCode={accessCode}
+                onSyncOne={onSyncOne}
+                onShowSimilar={onShowSimilar}
+                onToggleStar={onToggleStar}
+                selected={selectedIdx === idx}
+              />
+            </div>
           ))}
         </div>
 
-        {/* 네비게이션 바: ⏮ ◀ …  범위  … ▶ ⏭ */}
+        {/* 윈도우 내 숫자 선택 (1~10) */}
+        {windowProfiles.length > 0 && (
+          <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
+            {windowProfiles.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => handlePick(i)}
+                className={`w-8 h-8 rounded-full border text-sm font-semibold ${
+                  selectedIdx === i
+                    ? 'bg-yellow-400 text-white border-yellow-400'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-300'
+                }`}
+                title={`현재 창의 ${i+1}번째 카드`}
+              >
+                {i + 1}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* 네비게이션 바: ⏮ ◀ … [범위] … ▶ ⏭ */}
         {sorted.length > WINDOW_SIZE && (
           <div className="flex items-center justify-between gap-3 mt-4">
             {/* 왼쪽 컨트롤 */}
@@ -1383,7 +1420,7 @@ export default function App() {
     setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
   };
 
-  // 개별 캘린더 동기화
+  // 개별 캘린더 동기화 (visibility: 'private' 적용)
   const ensureGoogleAuth = () => {
     return new Promise((resolve, reject) => {
       const token = gapiClient?.client?.getToken?.();
@@ -1424,6 +1461,7 @@ export default function App() {
         start: { dateTime: startLocal, timeZone: TZ },
         end:   { dateTime: endLocal,   timeZone: TZ },
         reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 30 }] },
+        visibility: 'private',
       };
       const ten = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 10, 0, 0);
       if (startDate > ten) {
@@ -1439,6 +1477,7 @@ export default function App() {
         description: `${profile.name}님 프로필 보기:\n${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`,
         start: { date: dateStr },
         end:   { date: endStr  },
+        visibility: 'private',
       };
     }
 
