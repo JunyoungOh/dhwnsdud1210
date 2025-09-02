@@ -1,17 +1,20 @@
-import React, { useMemo, useState, useEffect } from 'react';
+// src/App.js
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import {
-  getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel,
-  updateDoc, writeBatch, getDoc, setDoc
+  getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query, setLogLevel, updateDoc, writeBatch, getDoc, setDoc
 } from 'firebase/firestore';
+
 import {
   PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer
 } from 'recharts';
+
 import {
-  Users, LogOut, Search as SearchIcon, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save,
-  UploadCloud, BellRing, Share2, RefreshCw, CalendarPlus, AlertCircle, Star, StarOff, Menu, ChevronDown,
-  FolderPlus, FolderMinus, Folder, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Sparkles, BarChart2
+  Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save,
+  UploadCloud, BellRing, Share2, RefreshCw, CalendarPlus, AlertCircle, Star, StarOff,
+  Menu, FolderPlus, FolderX, Folder, ChevronDown, ChevronRight, Layers, LineChart, Clock, Star as StarIcon,
+  Grid, Settings2, Bell, Home, ChevronLeft, ChevronsLeft, ChevronRight as ChRight, ChevronsRight
 } from 'lucide-react';
 
 // ==============================
@@ -42,18 +45,22 @@ setLogLevel('debug');
 const COLORS = ['#FFBB28', '#FF8042', '#00C49F', '#8884D8', '#FF4444', '#82ca9d'];
 const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아한형제들', '당근', '토스'];
 
-const NAV = {
+// 세로 사이드바 탭
+const MAIN_TAB = {
   ALERTS: 'alerts',
   SEARCH: 'search',
   SPOTLIGHT: 'spotlight',
-  FUN_RECO: 'fun_reco',
-  FUN_LONG: 'fun_long',
-  FUN_GRAPHS: 'fun_graphs',
+  FUNCTIONS: 'functions',
   MANAGE: 'manage'
+};
+const FUNC_SUB = {
+  RECOMMEND: 'recommend',
+  LONGTERM: 'longterm',
+  GRAPHS: 'graphs'
 };
 
 // ===============================
-// 시간 & 유틸
+// 시간 파싱 & 포맷 유틸 (Asia/Seoul 기준)
 // ===============================
 const TZ = 'Asia/Seoul';
 function formatRFC3339InTZ(date, timeZone = TZ) {
@@ -69,7 +76,7 @@ function formatDateOnlyInTZ(date, timeZone = TZ) {
   }).formatToParts(date).reduce((acc, p) => (acc[p.type] = p.value, acc), {});
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
-// 다양한 표기 인식
+// 다양한 표기 인식: (25.08.14) AM/PM/오전/오후 7시 30분 / 2025-08-14 19:30 / 2025-08-14 등
 function parseDateTimeFromRecord(recordText) {
   if (!recordText) return null;
   const text = typeof recordText === 'string' ? recordText : String(recordText || '');
@@ -107,11 +114,11 @@ function parseDateTimeFromRecord(recordText) {
   return best ? best : null;
 }
 
-// 유사도 계산(텍스트 토큰 + 가중치)
+// ===============================
+// 유사도 계산(토큰 Jaccard + 보정)
+// ===============================
 function tokenizeProfile(p) {
-  const base = [
-    p.name || '', p.expertise || '', p.career || '', p.otherInfo || ''
-  ].join(' ').toLowerCase();
+  const base = [p.name || '', p.expertise || '', p.career || '', p.otherInfo || ''].join(' ').toLowerCase();
   const words = base
     .replace(/[()\[\],./\\\-:~!@#$%^&*?'"`|]/g, ' ')
     .split(/\s+/)
@@ -120,10 +127,7 @@ function tokenizeProfile(p) {
   TARGET_KEYWORDS.forEach(k => { if ((p.career||'').includes(k)) extra.push(k); });
   if (p.priority) extra.push(`priority:${p.priority}`);
   if (p.age) {
-    const band = p.age < 20 ? '10'
-      : p.age < 30 ? '20'
-      : p.age < 40 ? '30'
-      : p.age < 50 ? '40' : '50+';
+    const band = p.age < 20 ? '10' : p.age < 30 ? '20' : p.age < 40 ? '30' : p.age < 50 ? '40' : '50+';
     extra.push(`age:${band}`);
   }
   return new Set([...words, ...extra]);
@@ -136,7 +140,7 @@ function jaccard(aSet, bSet) {
 function similarityScore(a, b) {
   const ta = tokenizeProfile(a);
   const tb = tokenizeProfile(b);
-  let score = jaccard(ta, tb) * 100;
+  let score = jaccard(ta, tb) * 100; // 0~100
   if (a.priority && b.priority && a.priority === b.priority) score += 6;
   const ak = TARGET_KEYWORDS.filter(k => (a.career||'').includes(k));
   const bk = TARGET_KEYWORDS.filter(k => (b.career||'').includes(k));
@@ -146,958 +150,7 @@ function similarityScore(a, b) {
 }
 
 // ===============================
-// 로그인 화면
-// ===============================
-const LoginScreen = ({ onLogin, authStatus }) => {
-  const [codeInput, setCodeInput] = useState('');
-  const handleSubmit = (e) => { e.preventDefault(); if (codeInput.trim()) onLogin(codeInput.trim()); };
-
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
-      <div className="w-full max-w-md bg-white p-8 rounded-xl shadow-lg">
-        <div className="text-center">
-          <Users className="mx-auto text-yellow-400 w-12 h-12" />
-          <h2 className="mt-4 text-2xl font-bold text-gray-800">프로필 대시보드 접속</h2>
-          <p className="mt-2 text-sm text-gray-500">데이터를 불러올 접속 코드를 입력하세요.</p>
-        </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="relative">
-            <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-            <input type="text" placeholder="Access Code" className="w-full pl-10 pr-3 py-3 border rounded-lg" value={codeInput} onChange={(e) => setCodeInput(e.target.value)} />
-          </div>
-          <div>
-            <button type="submit" disabled={authStatus !== 'authenticated'} className="w-full flex justify-center py-3 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
-              {authStatus === 'authenticating' && <Loader2 className="animate-spin mr-2" />}
-              {authStatus === 'authenticated' ? '데이터 불러오기' : '인증 중...'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-// ===============================
-// 공통 모달들
-// ===============================
-const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
-  <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
-    <div className="bg-white rounded-lg p-8 shadow-xl max-w-sm w-full mx-4">
-      <div className="text-center">
-        <ShieldAlert className="mx-auto h-12 w-12 text-red-500" />
-        <h3 className="mt-4 text-lg font-medium text-gray-900">확인</h3>
-        <div className="mt-2 text-sm text-gray-500"><p>{message}</p></div>
-      </div>
-      <div className="mt-6 flex justify-center gap-4">
-        <button onClick={onCancel} className="px-6 py-2 rounded-md text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300">취소</button>
-        <button onClick={onConfirm} className="px-6 py-2 rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700">확인</button>
-      </div>
-    </div>
-  </div>
-);
-
-const FolderSelectModal = ({ open, folders, defaultChecked, onClose, onSave }) => {
-  const [selected, setSelected] = useState(defaultChecked || ['전체']);
-  useEffect(()=>{ setSelected(defaultChecked || ['전체']); }, [defaultChecked, open]);
-
-  if (!open) return null;
-  const toggle = (name) => {
-    setSelected(prev => prev.includes(name) ? prev.filter(x => x !== name) : [...prev, name]);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black bg-opacity-40" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-bold text-gray-800 flex items-center"><Folder className="w-4 h-4 mr-2" />폴더 선택</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-800"><X size={20} /></button>
-        </div>
-        <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
-          {folders.map(name => (
-            <label key={name} className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={selected.includes(name)} onChange={()=>toggle(name)} />
-              <span>{name}</span>
-            </label>
-          ))}
-        </div>
-        <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded-md">취소</button>
-          <button onClick={()=>onSave(selected)} className="px-4 py-2 text-sm bg-yellow-500 text-white rounded-md">저장</button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const SimilarModal = ({ open, onClose, baseProfile, items, onShowProfileActions }) => {
-  const [detail, setDetail] = useState(null);
-  useEffect(()=>{ if (!open) setDetail(null); }, [open]);
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black bg-opacity-40" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] p-6 overflow-hidden">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-bold text-gray-800">유사 프로필 — <span className="text-yellow-600">{baseProfile?.name}</span></h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-800"><X size={20} /></button>
-        </div>
-        {!detail ? (
-          <div className="overflow-y-auto pr-3" style={{ maxHeight: '70vh' }}>
-            {items.length === 0 ? (
-              <div className="text-center text-gray-500 py-8">표시할 유사 프로필이 없습니다.</div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {items.map(({ profile, score }) => (
-                  <button
-                    key={profile.id}
-                    onClick={()=>setDetail(profile)}
-                    className="text-left border rounded-lg p-3 bg-white shadow-sm hover:shadow transition"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="font-semibold text-yellow-700">{profile.name}</div>
-                      <div className="text-xs font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">{score}%</div>
-                    </div>
-                    {profile.expertise && <div className="text-xs text-gray-600 mt-1">{profile.expertise}</div>}
-                    <div className="text-xs text-gray-700 mt-2 whitespace-pre-wrap line-clamp-5">{profile.career}</div>
-                    {profile.otherInfo && <div className="text-[11px] text-gray-500 mt-2 whitespace-pre-wrap line-clamp-4">{profile.otherInfo}</div>}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="overflow-y-auto pr-3" style={{ maxHeight: '70vh' }}>
-            <div className="mb-3">
-              <button onClick={()=>setDetail(null)} className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1">
-                <ChevronLeft className="w-4 h-4" /> 뒤로
-              </button>
-            </div>
-            <div className="border rounded-lg p-4 bg-white shadow">
-              <div className="flex items-center justify-between">
-                <div className="flex items-baseline gap-2">
-                  <h4 className="text-xl font-bold text-yellow-700">{detail.name}</h4>
-                  {detail.age && <span className="text-gray-500">{detail.age}세</span>}
-                </div>
-                {detail.priority && <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">{detail.priority}</span>}
-              </div>
-              {detail.expertise && <div className="text-sm font-semibold text-gray-600 mt-1">{detail.expertise}</div>}
-              <div className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{detail.career}</div>
-              {detail.otherInfo && <div className="text-xs text-gray-500 mt-2 whitespace-pre-wrap">{detail.otherInfo}</div>}
-              {detail.meetingRecord && (
-                <div className="mt-2 pt-2 border-t">
-                  <p className="text-xs font-semibold text-gray-500">미팅기록</p>
-                  <p className="text-xs text-gray-600 whitespace-pre-wrap">{detail.meetingRecord}</p>
-                </div>
-              )}
-              <div className="mt-4">
-                {onShowProfileActions && onShowProfileActions(detail)}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// ===============================
-// 프로필 와이드 행 (PC 가로, 모바일 세로)
-// ===============================
-const ProfileRow = ({
-  profile, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar, onShare, onEditStart,
-  isAlarmRow, onSnooze, onConfirmAlarm, onOpenFolderPick
-}) => {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editedProfile, setEditedProfile] = useState(profile);
-  const [syncing, setSyncing] = useState(false);
-
-  useEffect(() => { setEditedProfile(profile); }, [profile]);
-
-  const priorityColors = {
-    '3': 'bg-red-100 text-red-800',
-    '2': 'bg-yellow-100 text-yellow-800',
-    '1': 'bg-green-100 text-green-800',
-  };
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setEditedProfile(prev => ({ ...prev, [name]: name === 'age' ? (value ? Number(value) : '') : value }));
-  };
-
-  const handleSave = async () => {
-    const parsed = parseDateTimeFromRecord(editedProfile.meetingRecord);
-    const eventDate = parsed ? new Date(parsed.date).toISOString() : null;
-    try {
-      await onUpdate(profile.id, { ...editedProfile, eventDate });
-      setIsEditing(false);
-    } catch (e) {
-      console.error('프로필 저장 실패:', e);
-      alert('프로필 저장 중 오류가 발생했습니다.');
-    }
-  };
-
-  const handleShare = () => {
-    const shareUrl = `${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`;
-    navigator.clipboard.writeText(shareUrl).then(
-      () => alert('공유 링크가 클립보드에 복사되었습니다.'),
-      () => alert('링크 복사에 실패했습니다.')
-    );
-  };
-
-  const handleSyncClick = async () => {
-    if (!onSyncOne) return;
-    setSyncing(true);
-    try { await onSyncOne(profile); } finally { setSyncing(false); }
-  };
-
-  const handleStarClick = async () => {
-    if (profile.starred) {
-      if (!window.confirm('모아보기(주목)에서 제외하시겠습니까?')) return;
-      await onToggleStar(profile.id, false, []);
-    } else {
-      onOpenFolderPick?.(profile);
-    }
-  };
-
-  // 와이드 편집 폼
-  if (isEditing) {
-    return (
-      <div className="w-full bg-white rounded-xl shadow p-4 border flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-baseline gap-2">
-            <input name="name" value={editedProfile.name} onChange={handleInputChange} placeholder="이름" className="p-2 border rounded text-sm font-semibold w-48" />
-            <input name="age" type="number" value={editedProfile.age || ''} onChange={handleInputChange} placeholder="나이" className="p-2 border rounded text-sm w-24" />
-            <input name="priority" value={editedProfile.priority || ''} onChange={handleInputChange} placeholder="우선순위" className="p-2 border rounded text-sm w-28" />
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setIsEditing(false)} className="p-2 text-gray-500 hover:text-gray-800"><X size={18} /></button>
-            <button onClick={handleSave} className="p-2 text-green-600 hover:text-green-800"><Save size={18} /></button>
-          </div>
-        </div>
-        <input name="expertise" value={editedProfile.expertise || ''} onChange={handleInputChange} placeholder="전문영역" className="p-2 border rounded text-sm" />
-        <textarea name="career" value={editedProfile.career} onChange={handleInputChange} placeholder="경력" className="p-2 border rounded text-sm h-24" />
-        <textarea name="otherInfo" value={editedProfile.otherInfo || ''} onChange={handleInputChange} placeholder="기타 정보" className="p-2 border rounded text-sm h-20" />
-        <textarea name="meetingRecord" value={editedProfile.meetingRecord || ''} onChange={handleInputChange} placeholder="미팅기록 (예: (25.08.14) 오후 7:00)" className="p-2 border rounded text-sm h-20" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="w-full bg-white rounded-xl shadow p-4 border flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-      {/* 왼쪽 정보 */}
-      <div className="flex-1">
-        <div className="flex items-center justify-between">
-          <div className="flex items-baseline gap-2">
-            <h3 className="font-bold text-yellow-600 text-lg">{profile.name}</h3>
-            {profile.age && <span className="text-sm text-gray-500">{profile.age}세</span>}
-          </div>
-          {profile.priority && (
-            <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${priorityColors[profile.priority] || 'bg-gray-100 text-gray-800'}`}>
-              {profile.priority}
-            </span>
-          )}
-        </div>
-        {profile.expertise && <p className="text-sm font-semibold text-gray-700 mt-1">{profile.expertise}</p>}
-        <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
-        {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
-        {profile.meetingRecord && (
-          <div className="mt-2 pt-2 border-t">
-            <p className="text-xs font-semibold text-gray-500">미팅기록</p>
-            <p className="text-xs text-gray-600 whitespace-pre-wrap">{profile.meetingRecord}</p>
-          </div>
-        )}
-
-        {isAlarmRow && (
-          <div className="mt-3 flex items-center gap-2">
-            <button onClick={() => onConfirmAlarm(profile.id)} className="text-xs bg-gray-200 text-gray-700 font-semibold px-3 py-1 rounded-full hover:bg-gray-300">확인</button>
-            <button onClick={() => onSnooze(profile.id)} className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-3 py-1 rounded-full hover:bg-indigo-200">3개월 후 다시 알림</button>
-          </div>
-        )}
-      </div>
-
-      {/* 오른쪽 액션 */}
-      <div className="flex flex-wrap md:flex-col items-center gap-2 md:min-w-[220px]">
-        <button
-          onClick={handleStarClick}
-          className={`text-xs font-semibold px-3 py-1 rounded-full ${profile.starred ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
-          title={profile.starred ? '주목중' : '모아보기'}
-        >
-          {profile.starred ? '주목중' : '모아보기'}
-        </button>
-
-        <button onClick={() => onShowSimilar?.(profile)} className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-3 py-1 rounded-full hover:bg-indigo-200">
-          유사 프로필
-        </button>
-
-        {profile.gcalEventId ? (
-          <a href={profile.gcalHtmlLink || '#'} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
-            캘린더 보기
-          </a>
-        ) : (
-          <span className="text-xs text-gray-400">캘린더 미연동</span>
-        )}
-
-        <button onClick={handleSyncClick} disabled={syncing} className="text-xs bg-blue-500 text-white font-semibold px-3 py-1 rounded-full hover:bg-blue-600 disabled:bg-blue-300 flex items-center">
-          {syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <CalendarPlus className="w-3 h-3 mr-1" />}
-          {profile.gcalEventId ? '캘린더 수정' : '캘린더 등록'}
-        </button>
-
-        <div className="flex items-center gap-2 mt-1">
-          <button onClick={() => setIsEditing(true)} className="text-gray-600 hover:text-gray-900" title="수정"><Edit size={16} /></button>
-          <button onClick={() => onDelete(profile.id, profile.name)} className="text-red-500 hover:text-red-700" title="삭제"><Trash2 size={16} /></button>
-          <button onClick={handleShare} className="text-gray-600 hover:text-gray-900" title="공유 링크 복사"><Share2 size={16} /></button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ===============================
-// 필터 결과 섹션(그래프 아래에 즉시)
-// ===============================
-const FilterResultSection = ({ title, profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar, onOpenFolderPick }) => (
-  <section className="bg-white p-4 rounded-xl shadow mt-4">
-    <div className="flex justify-between items-center mb-3">
-      <h3 className="text-lg font-bold text-gray-800">{title}</h3>
-    </div>
-    <div className="space-y-4">
-      {profiles.length > 0 ? (
-        profiles.map(p => (
-          <ProfileRow
-            key={p.id}
-            profile={p}
-            onUpdate={onUpdate}
-            onDelete={onDelete}
-            accessCode={accessCode}
-            onSyncOne={onSyncOne}
-            onShowSimilar={onShowSimilar}
-            onToggleStar={onToggleStar}
-            onOpenFolderPick={onOpenFolderPick}
-          />
-        ))
-      ) : (
-        <p className="text-gray-500 text-center">해당 조건의 프로필이 없습니다.</p>
-      )}
-    </div>
-  </section>
-);
-
-// ===============================
-// 사이드 네비 (세로 탭, 모바일 토글)
-// ===============================
-const SideNav = ({ open, setOpen, active, setActive, funOpen, setFunOpen }) => {
-  const NavBtn = ({ id, icon:Icon, label }) => (
-    <button
-      onClick={() => setActive(id)}
-      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${active===id?'bg-yellow-500 text-white':'text-gray-700 hover:bg-gray-100'}`}
-    >
-      <Icon className="w-4 h-4" />
-      <span>{label}</span>
-    </button>
-  );
-
-  return (
-    <>
-      {/* 모바일 헤더 */}
-      <div className="md:hidden sticky top-0 z-20 bg-white border-b">
-        <div className="flex items-center justify-between p-3">
-          <button onClick={()=>setOpen(o=>!o)} className="p-2 text-gray-700"><Menu /></button>
-          <div className="font-bold">메뉴</div>
-          <div className="w-8" />
-        </div>
-      </div>
-
-      <aside className={`${open? 'block' : 'hidden'} md:block md:w-64 shrink-0 p-3 border-r bg-white md:sticky md:top-0 md:h-[100vh] overflow-y-auto`}>
-        <div className="space-y-2">
-          <NavBtn id={NAV.ALERTS}   icon={Calendar}    label="알림" />
-          <NavBtn id={NAV.SEARCH}   icon={SearchIcon}  label="검색" />
-          <NavBtn id={NAV.SPOTLIGHT} icon={Star}       label="주목 중인 프로필들" />
-
-        {/* Functions */}
-          <div>
-            <button
-              onClick={()=>setFunOpen(v=>!v)}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm ${[NAV.FUN_RECO,NAV.FUN_LONG,NAV.FUN_GRAPHS].includes(active)?'bg-yellow-50':'hover:bg-gray-100'}`}
-            >
-              <span className="flex items-center gap-2 text-gray-700"><Sparkles className="w-4 h-4" /> Functions</span>
-              <ChevronDown className={`w-4 h-4 transition ${funOpen ? 'rotate-180' : ''}`} />
-            </button>
-            {funOpen && (
-              <div className="mt-1 ml-6 space-y-1">
-                <NavBtn id={NAV.FUN_RECO}   icon={AlertCircle} label="추천" />
-                <NavBtn id={NAV.FUN_LONG}   icon={BellRing}    label="장기관리" />
-                <NavBtn id={NAV.FUN_GRAPHS} icon={BarChart2}   label="그래프&필터" />
-              </div>
-            )}
-          </div>
-
-          <NavBtn id={NAV.MANAGE}  icon={UserPlus}   label="프로필 관리" />
-        </div>
-      </aside>
-    </>
-  );
-};
-
-// ===============================
-// 탭들: Alerts / Search / Spotlight / Functions (Reco, Long, Graphs) / Manage
-// ===============================
-const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar, onOpenFolderPick }) => {
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const tomorrowStart = new Date(todayStart); tomorrowStart.setDate(tomorrowStart.getDate() + 1);
-  const threeDaysLater = new Date(todayStart); threeDaysLater.setDate(threeDaysLater.getDate() + 4);
-
-  const todayProfiles = useMemo(() => profiles.filter(p => p.eventDate && new Date(p.eventDate) >= todayStart && new Date(p.eventDate) < tomorrowStart)
-    .sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate)), [profiles]);
-  const upcomingProfiles = useMemo(() => profiles.filter(p => p.eventDate && new Date(p.eventDate) > now && new Date(p.eventDate) < threeDaysLater)
-    .sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate)), [profiles]);
-
-  return (
-    <div className="space-y-8">
-      {/* 오늘의 일정 */}
-      <section className="space-y-3">
-        <h2 className="text-xl font-bold flex items-center"><Calendar className="mr-2 text-red-500" />오늘의 일정</h2>
-        <div className="space-y-4">
-          {todayProfiles.length ? todayProfiles.map(p => (
-            <ProfileRow key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} onOpenFolderPick={onOpenFolderPick}/>
-          )) : <div className="text-gray-500 text-sm">없음</div>}
-        </div>
-      </section>
-
-      {/* 다가오는 일정 */}
-      <section className="space-y-3">
-        <h2 className="text-xl font-bold flex items-center"><Zap className="mr-2 text-blue-500" />다가오는 일정</h2>
-        <div className="space-y-4">
-          {upcomingProfiles.length ? upcomingProfiles.map(p => (
-            <ProfileRow key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} onOpenFolderPick={onOpenFolderPick}/>
-          )) : <div className="text-gray-500 text-sm">없음</div>}
-        </div>
-      </section>
-    </div>
-  );
-};
-
-const SearchTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar, onOpenFolderPick }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const searchedProfiles = useMemo(() => {
-    const term = searchTerm.trim(); if (!term) return [];
-    const orConditions = term.split(/\s+or\s+/i);
-    return profiles.filter(p => orConditions.some(cond => {
-      const andKeywords = cond.split(/\s+and\s+/i).filter(Boolean);
-      return andKeywords.every(keyword => {
-        const map = { '이름':'name','경력':'career','나이':'age','전문영역':'expertise','기타':'otherInfo','우선순위':'priority' };
-        const f = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
-        if (f) { const field = map[f[1]]; const val = f[2].toLowerCase(); const v = p[field] ? String(p[field]).toLowerCase() : ''; return v.includes(val); }
-        const ageG = keyword.match(/^(\d{1,2})대$/);
-        if (ageG) { const d = parseInt(ageG[1],10); if (d>=10) { const min=d, max=d+9; return p.age && p.age>=min && p.age<=max; } }
-        const txt = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
-        return txt.includes(keyword.toLowerCase());
-      });
-    }));
-  }, [searchTerm, profiles]);
-
-  return (
-    <div className="space-y-6">
-      <div className="relative">
-        <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input
-          type="text"
-          placeholder="검색... (예: 경력:네이버 AND 20대)"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full p-4 pl-12 border rounded-xl shadow-sm"
-        />
-      </div>
-
-      {searchTerm.trim() && (
-        <div className="space-y-4">
-          {searchedProfiles.length ? searchedProfiles.map(p => (
-            <ProfileRow key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} onOpenFolderPick={onOpenFolderPick}/>
-          )) : <div className="text-gray-500 text-sm">검색 결과가 없습니다.</div>}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const SpotlightTab = ({
-  profiles, metaFolders, metaStarredMap, onAddFolder, onDeleteFolders, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar, onOpenFolderPick
-}) => {
-  const [activeFolder, setActiveFolder] = useState('전체');
-  const starredProfiles = useMemo(() => profiles.filter(p => p.starred), [profiles]);
-
-  const visible = useMemo(() => {
-    if (activeFolder === '전체') return starredProfiles;
-    const ids = Object.entries(metaStarredMap || {}).filter(([, arr]) => Array.isArray(arr) && arr.includes(activeFolder)).map(([id]) => id);
-    const setIds = new Set(ids);
-    return starredProfiles.filter(p => setIds.has(p.id));
-  }, [activeFolder, starredProfiles, metaStarredMap]);
-
-  return (
-    <div className="space-y-4">
-      {/* 폴더 바 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 flex-wrap">
-          {(metaFolders || ['전체']).map(name => (
-            <button
-              key={name}
-              onClick={()=>setActiveFolder(name)}
-              className={`px-3 py-1 rounded-full text-sm border ${activeFolder===name?'bg-yellow-500 text-white border-yellow-500':'bg-white text-gray-700 hover:bg-gray-50'}`}
-            >
-              <span className="inline-flex items-center gap-1"><Folder className="w-4 h-4"/>{name}</span>
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={onAddFolder} className="flex items-center gap-1 text-sm px-3 py-1 bg-gray-100 rounded-md hover:bg-gray-200"><FolderPlus className="w-4 h-4"/> 폴더 추가</button>
-          <button onClick={onDeleteFolders} className="flex items-center gap-1 text-sm px-3 py-1 bg-gray-100 rounded-md hover:bg-gray-200"><FolderMinus className="w-4 h-4"/> 폴더 삭제</button>
-        </div>
-      </div>
-
-      {/* 리스트 */}
-      <div className="space-y-4">
-        {visible.length ? visible.map(p => (
-          <ProfileRow key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} onOpenFolderPick={onOpenFolderPick}/>
-        )) : <div className="text-gray-500 text-sm">이 폴더에는 표시할 프로필이 없습니다.</div>}
-      </div>
-    </div>
-  );
-};
-
-const FunctionsRecoTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar, onOpenFolderPick }) => {
-  const recommendedProfiles = useMemo(() => {
-    const now = new Date();
-    const threeMonthsAgo = new Date(now); threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-    const scoreOf = (p) => {
-      const last = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
-      const days = last ? Math.max(1, Math.floor((now - last) / (1000*60*60*24))) : 180;
-      let score = Math.min(100, Math.round((days / 90) * 60));
-      if (p.priority === '3') score += 20;
-      const kw = TARGET_KEYWORDS.filter(k => (p.career||'').includes(k)).length;
-      score += Math.min(kw * 5, 15);
-      if (p.expertise) score += 5;
-      const snoozeUntil = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
-      if (snoozeUntil && snoozeUntil > now) score = -1;
-      return score;
-    };
-    return profiles
-      .map(p => ({ p, s: scoreOf(p) }))
-      .filter(x => x.s >= 0 && x.s >= 40)
-      .sort((a,b) => b.s - a.s)
-      .slice(0, 30)
-      .map(x => x.p);
-  }, [profiles]);
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 text-sm text-gray-600">
-        <AlertCircle className="w-4 h-4 text-yellow-600" />
-        <span>최근 팔로업 시점/스누즈/우선순위/IT 키워드 등을 반영해 계산합니다. ‘확인’을 누르면 보통 3개월 뒤 다시 나타납니다.</span>
-      </div>
-      <div className="space-y-4 mt-2">
-        {recommendedProfiles.length ? recommendedProfiles.map(p => (
-          <ProfileRow
-            key={p.id}
-            profile={p}
-            onUpdate={onUpdate}
-            onDelete={onDelete}
-            accessCode={accessCode}
-            onSyncOne={onSyncOne}
-            onShowSimilar={onShowSimilar}
-            onToggleStar={onToggleStar}
-            isAlarmRow={true}
-            onSnooze={async (id)=>onUpdate(id,{snoozeUntil:new Date(new Date().setMonth(new Date().getMonth()+3)).toISOString()})}
-            onConfirmAlarm={async (id)=>onUpdate(id,{lastReviewedDate:new Date().toISOString()})}
-            onOpenFolderPick={onOpenFolderPick}
-          />
-        )) : <div className="text-gray-500 text-sm">추천할 프로필이 없습니다.</div>}
-      </div>
-    </div>
-  );
-};
-
-const FunctionsLongTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar, onOpenFolderPick }) => {
-  const now = new Date();
-  const threeMonthsAgo = new Date(now); threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-
-  const longTermNoContactProfiles = useMemo(() => {
-    const list = [];
-    profiles.forEach(p => {
-      const lastContact = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
-      const snoozeUntil  = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
-      if (lastContact && lastContact < threeMonthsAgo && (!snoozeUntil || snoozeUntil < now)) list.push(p);
-    });
-    return list.sort((a,b) => (new Date(a.lastReviewedDate || a.eventDate||0)) - (new Date(b.lastReviewedDate || b.eventDate||0)));
-  }, [profiles]);
-
-  return (
-    <div className="space-y-4">
-      {longTermNoContactProfiles.length ? longTermNoContactProfiles.map(p => (
-        <ProfileRow
-          key={p.id}
-          profile={p}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-          accessCode={accessCode}
-          onSyncOne={onSyncOne}
-          onShowSimilar={onShowSimilar}
-          onToggleStar={onToggleStar}
-          isAlarmRow={true}
-          onSnooze={async (id)=>onUpdate(id,{snoozeUntil:new Date(new Date().setMonth(new Date().getMonth()+3)).toISOString()})}
-          onConfirmAlarm={async (id)=>onUpdate(id,{lastReviewedDate:new Date().toISOString()})}
-          onOpenFolderPick={onOpenFolderPick}
-        />
-      )) : <div className="text-gray-500 text-sm">없음</div>}
-    </div>
-  );
-};
-
-const FunctionsGraphsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar, onOpenFolderPick }) => {
-  const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
-
-  const handlePieClick = (type, data) => { if (!data || (data.value ?? data.count) === 0) return; setActiveFilter({ type, value: data.name }); };
-  const handleBarClick = (type, data) => { const count = data.count || data.value; if (count === 0) return; setActiveFilter({ type, value: data.name }); };
-
-  const ageData = useMemo(() => {
-    const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
-    profiles.forEach(({ age }) => {
-      if (!age) return;
-      if (age < 20) groups['10대']++;
-      else if (age < 30) groups['20대']++;
-      else if (age < 40) groups['30대']++;
-      else if (age < 50) groups['40대']++;
-      else groups['50대 이상']++;
-    });
-    return Object.entries(groups).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
-  }, [profiles]);
-
-  const priorityData = useMemo(() => {
-    const p = { '3 (상)': 0, '2 (중)': 0, '1 (하)': 0 };
-    profiles.forEach(x => { if (x.priority === '3') p['3 (상)']++; else if (x.priority === '2') p['2 (중)']++; else if (x.priority === '1') p['1 (하)']++; });
-    return Object.entries(p).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
-  }, [profiles]);
-
-  const companyData = useMemo(() => TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length })), [profiles]);
-
-  const expertiseData = useMemo(() => {
-    const c = {}; profiles.forEach(p => { if (p.expertise) c[p.expertise] = (c[p.expertise] || 0) + 1; });
-    return Object.entries(c).map(([name, count]) => ({ name, count }));
-  }, [profiles]);
-
-  const filteredProfiles = useMemo(() => {
-    if (!activeFilter.type) return [];
-    switch (activeFilter.type) {
-      case 'age': {
-        const g = activeFilter.value;
-        return profiles.filter(p => p.age && (
-          (g==='10대' && p.age<20) ||
-          (g==='20대' && p.age>=20 && p.age<30) ||
-          (g==='30대' && p.age>=30 && p.age<40) ||
-          (g==='40대' && p.age>=40 && p.age<50) ||
-          (g==='50대 이상' && p.age>=50)
-        ));
-      }
-      case 'priority': {
-        const v = activeFilter.value.split(' ')[0]; return profiles.filter(p => p.priority === v);
-      }
-      case 'company': return profiles.filter(p => p.career?.includes(activeFilter.value));
-      case 'expertise': return profiles.filter(p => p.expertise === activeFilter.value);
-      default: return [];
-    }
-  }, [profiles, activeFilter]);
-
-  return (
-    <div className="space-y-10">
-      {/* 우선순위 */}
-      <section className="bg-white p-6 rounded-xl shadow-md">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">우선순위별 분포</h2>
-        <ResponsiveContainer width="100%" height={300}>
-          <PieChart>
-            <defs>
-              <radialGradient id="gp-0"><stop offset="0%" stopColor="#FF4444" stopOpacity={0.7} /><stop offset="100%" stopColor="#FF4444" stopOpacity={1} /></radialGradient>
-              <radialGradient id="gp-1"><stop offset="0%" stopColor="#FFBB28" stopOpacity={0.7} /><stop offset="100%" stopColor="#FFBB28" stopOpacity={1} /></radialGradient>
-              <radialGradient id="gp-2"><stop offset="0%" stopColor="#00C49F" stopOpacity={0.7} /><stop offset="100%" stopColor="#00C49F" stopOpacity={1} /></radialGradient>
-            </defs>
-            <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label>
-              {priorityData.map((entry, i) => (
-                <Cell key={`cell-pr-${i}`} fill={`url(#gp-${i})`} stroke="#fff" onClick={() => handlePieClick('priority', entry)} style={{ cursor: 'pointer' }} />
-              ))}
-            </Pie>
-            <Tooltip formatter={(v) => `${v}명`} /><Legend />
-          </PieChart>
-        </ResponsiveContainer>
-        {activeFilter.type === 'priority' && (
-          <FilterResultSection
-            title={`"${activeFilter.value}" 필터 결과`}
-            profiles={profiles.filter(p => p.priority === activeFilter.value.split(' ')[0])}
-            onUpdate={onUpdate} onDelete={onDelete}
-            accessCode={accessCode} onSyncOne={onSyncOne}
-            onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} onOpenFolderPick={onOpenFolderPick}
-          />
-        )}
-      </section>
-
-      {/* 세대별 */}
-      <section className="bg-white p-6 rounded-xl shadow-md">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">세대별 분포</h2>
-        <ResponsiveContainer width="100%" height={300}>
-          <PieChart>
-            <defs>
-              {COLORS.map((c, i) => (
-                <radialGradient key={`g-age-${i}`} id={`g-age-${i}`} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
-                  <stop offset="0%" stopColor={c} stopOpacity={0.7} />
-                  <stop offset="100%" stopColor={c} stopOpacity={1} />
-                </radialGradient>
-              ))}
-            </defs>
-            <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label>
-              {ageData.map((entry, i) => (
-                <Cell key={`cell-age-${i}`} fill={`url(#g-age-${i})`} stroke="#fff" onClick={() => handlePieClick('age', entry)} style={{ cursor: 'pointer' }} />
-              ))}
-            </Pie>
-            <Tooltip formatter={(v) => `${v}명`} /><Legend />
-          </PieChart>
-        </ResponsiveContainer>
-        {activeFilter.type === 'age' && (
-          <FilterResultSection
-            title={`"${activeFilter.value}" 필터 결과`}
-            profiles={filteredProfiles}
-            onUpdate={onUpdate} onDelete={onDelete}
-            accessCode={accessCode} onSyncOne={onSyncOne}
-            onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} onOpenFolderPick={onOpenFolderPick}
-          />
-        )}
-      </section>
-
-      {/* 전문영역 */}
-      <section className="bg-white p-6 rounded-xl shadow-md">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">전문영역 분포</h2>
-        <ResponsiveContainer width="100%" height={350}>
-          <BarChart data={expertiseData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
-            <defs>
-              <linearGradient id="gradient-expertise" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00C49F" stopOpacity={0.8}/><stop offset="95%" stopColor="#82ca9d" stopOpacity={1}/></linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
-            <YAxis allowDecimals={false}/>
-            <Tooltip formatter={(v)=>`${v}명`} /><Legend />
-            <Bar dataKey="count" fill="url(#gradient-expertise)">
-              {expertiseData.map((entry, i) => (
-                <Cell key={`ex-${i}`} onClick={() => handleBarClick('expertise', entry)} style={{ cursor: 'pointer' }} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-        {activeFilter.type === 'expertise' && (
-          <FilterResultSection
-            title={`"${activeFilter.value}" 전문영역 필터 결과`}
-            profiles={profiles.filter(p => p.expertise === activeFilter.value)}
-            onUpdate={onUpdate} onDelete={onDelete}
-            accessCode={accessCode} onSyncOne={onSyncOne}
-            onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} onOpenFolderPick={onOpenFolderPick}
-          />
-        )}
-      </section>
-
-      {/* IT 기업 */}
-      <section className="bg-white p-6 rounded-xl shadow-md">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">IT 기업 경력 분포</h2>
-        <ResponsiveContainer width="100%" height={350}>
-          <BarChart data={TARGET_KEYWORDS.map(k=>({name:k, count: profiles.filter(p=>p.career?.includes(k)).length}))} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
-            <defs>
-              <linearGradient id="gradient-company" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#FFBB28" stopOpacity={0.8}/><stop offset="95%" stopColor="#FF8042" stopOpacity={1}/></linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
-            <YAxis allowDecimals={false}/><Tooltip formatter={(v)=>`${v}명`} /><Legend />
-            <Bar dataKey="count" fill="url(#gradient-company)">
-              {TARGET_KEYWORDS.map((entryName, i) => (
-                <Cell key={`co-${i}`} onClick={() => handleBarClick('company', {name: entryName, count: profiles.filter(p=>p.career?.includes(entryName)).length})} style={{ cursor: 'pointer' }} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-        {activeFilter.type === 'company' && (
-          <FilterResultSection
-            title={`"${activeFilter.value}" 필터 결과`}
-            profiles={profiles.filter(p => p.career?.includes(activeFilter.value))}
-            onUpdate={onUpdate} onDelete={onDelete}
-            accessCode={accessCode} onSyncOne={onSyncOne}
-            onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} onOpenFolderPick={onOpenFolderPick}
-          />
-        )}
-      </section>
-    </div>
-  );
-};
-
-const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState, accessCode, onSyncOne, onShowSimilar, onToggleStar, onOpenFolderPick }) => {
-  const { newName, newCareer, newAge, newOtherInfo, newExpertise, newPriority, newMeetingRecord } = formState;
-  const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewExpertise, setNewPriority, setNewMeetingRecord } = setFormState;
-  const [searchTerm, setSearchTerm] = useState('');
-
-  // 페이지네이션
-  const PROFILES_PER_PAGE = 10;
-  const [page, setPage] = useState(1);
-  const sorted = useMemo(()=>[...profiles].sort((a,b)=>a.name.localeCompare(b.name)), [profiles]);
-  const totalPages = useMemo(()=>Math.max(1, Math.ceil(sorted.length / PROFILES_PER_PAGE)), [sorted]);
-  const currentProfiles = useMemo(()=>{
-    const start = (page-1)*PROFILES_PER_PAGE;
-    return sorted.slice(start, start+PROFILES_PER_PAGE);
-  }, [sorted, page]);
-
-  useEffect(()=>{ setPage(1); }, [searchTerm, profiles.length]);
-
-  const searchedProfiles = useMemo(() => {
-    const term = searchTerm.trim(); if (!term) return [];
-    const orConditions = term.split(/\s+or\s+/i);
-    return profiles.filter(p => orConditions.some(cond => {
-      const andKeywords = cond.split(/\s+and\s+/i).filter(Boolean);
-      return andKeywords.every(keyword => {
-        const map = { '이름':'name','경력':'career','나이':'age','전문영역':'expertise','기타':'otherInfo','우선순위':'priority' };
-        const f = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
-        if (f) { const field = map[f[1]]; const val = f[2].toLowerCase(); const v = p[field] ? String(p[field]).toLowerCase() : ''; return v.includes(val); }
-        const ageG = keyword.match(/^(\d{1,2})대$/);
-        if (ageG) { const d = parseInt(ageG[1],10); if (d>=10) { const min=d, max=d+9; return p.age && p.age>=min && p.age<=max; } }
-        const txt = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
-        return txt.includes(keyword.toLowerCase());
-      });
-    }));
-  }, [searchTerm, profiles]);
-
-  // 페이지 번호 표시(1..n, 앞/뒤/처음/마지막)
-  const PageNav = () => (
-    <div className="flex items-center justify-center gap-1 mt-6 flex-wrap">
-      <button onClick={()=>setPage(1)} disabled={page===1} className="p-2 rounded hover:bg-gray-100 disabled:opacity-40"><ChevronsLeft /></button>
-      <button onClick={()=>setPage(p=>Math.max(1, p-1))} disabled={page===1} className="p-2 rounded hover:bg-gray-100 disabled:opacity-40"><ChevronLeft /></button>
-      {Array.from({length: totalPages}, (_,i)=>i+1).map(n => (
-        <button key={n} onClick={()=>setPage(n)} className={`px-3 py-1 rounded ${page===n?'bg-yellow-500 text-white':'hover:bg-gray-100'}`}>{n}</button>
-      ))}
-      <button onClick={()=>setPage(p=>Math.min(totalPages, p+1))} disabled={page===totalPages} className="p-2 rounded hover:bg-gray-100 disabled:opacity-40"><ChevronRight /></button>
-      <button onClick={()=>setPage(totalPages)} disabled={page===totalPages} className="p-2 rounded hover:bg-gray-100 disabled:opacity-40"><ChevronsRight /></button>
-    </div>
-  );
-
-  return (
-    <>
-      {/* 검색 */}
-      <section className="mb-6">
-        <div className="relative">
-          <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input type="text" placeholder="검색... (예: 경력:네이버 AND 20대)" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
-        </div>
-        {searchTerm.trim() && (
-          <div className="space-y-4 mt-4">
-            {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
-              <ProfileRow key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} onOpenFolderPick={onOpenFolderPick}/>
-            )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
-          </div>
-        )}
-      </section>
-
-      {/* 추가 폼 */}
-      <section className="bg-white p-6 rounded-xl shadow-md">
-        <h2 className="text-xl font-bold mb-4 flex items-center"><UserPlus className="mr-2 text-yellow-500"/>새 프로필 추가</h2>
-        <form onSubmit={handleFormSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <input type="text" placeholder="이름" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-2 border rounded" />
-            <input type="number" placeholder="나이" value={newAge} onChange={e => setNewAge(e.target.value)} className="w-full p-2 border rounded" />
-            <input type="text" placeholder="우선순위" value={newPriority} onChange={e => setNewPriority(e.target.value)} className="w-full p-2 border rounded" />
-          </div>
-          <input type="text" placeholder="전문영역" value={newExpertise} onChange={e => setNewExpertise(e.target.value)} className="w-full p-2 border rounded" />
-          <textarea placeholder="경력" value={newCareer} onChange={e => setNewCareer(e.target.value)} className="w-full p-2 border rounded h-24" />
-          <textarea placeholder="기타 정보" value={newOtherInfo} onChange={e => setNewOtherInfo(e.target.value)} className="w-full p-2 border rounded h-24" />
-          <textarea placeholder="미팅기록 (예: (25.08.14) 오후 7:00)" value={newMeetingRecord} onChange={e => setNewMeetingRecord(e.target.value)} className="w-full p-2 border rounded h-24" />
-          <div className="flex justify-end">
-            <button type="submit" className="bg-yellow-400 text-white px-4 py-2 rounded hover:bg-yellow-500">추가하기</button>
-          </div>
-        </form>
-      </section>
-
-      {/* 엑셀 업로드 */}
-      <ExcelUploader onBulkAdd={handleBulkAdd} />
-
-      {/* 전체 프로필 목록 */}
-      <section className="mt-6">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">전체 프로필 목록</h2>
-        <div className="space-y-4">
-          {currentProfiles.map(profile => (
-            <ProfileRow key={profile.id} profile={profile} onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} onOpenFolderPick={onOpenFolderPick}/>
-          ))}
-        </div>
-        <PageNav />
-      </section>
-    </>
-  );
-};
-
-const ExcelUploader = ({ onBulkAdd }) => {
-  const [file, setFile] = useState(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [message, setMessage] = useState('');
-
-  const handleFileChange = (e) => { setFile(e.target.files[0]); setMessage(''); };
-
-  const handleUpload = async () => {
-    if (!file) { setMessage('파일을 먼저 선택해주세요.'); return; }
-    if (!window.XLSX) { setMessage('엑셀 라이브러리가 아직 로드되지 않았습니다. 잠시 후 다시 시도해주세요.'); return; }
-
-    setIsUploading(true); setMessage('파일을 읽는 중...');
-    const read = () => new Promise((res, rej) => {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        try {
-          const data = new Uint8Array(e.target.result);
-          const workbook = window.XLSX.read(data, { type: 'array' });
-          const sheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[sheetName];
-          const json = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-          if (json.length < 2) { setMessage('엑셀 파일에 데이터가 없습니다 (2행부터 읽습니다).'); setIsUploading(false); return; }
-          const newProfiles = json.slice(1).map(row => ({
-            name: row[2] || '', career: row[3] || '', age: row[5] ? Number(row[5]) : null,
-            expertise: row[7] || '', priority: row[9] ? String(row[9]) : '',
-            meetingRecord: row[11] || '', otherInfo: row[13] || '',
-            eventDate: (()=>{const p=parseDateTimeFromRecord(row[11]||''); return p? p.date.toISOString():null;})(),
-          })).filter(p => p.name && p.career);
-          const msg = await onBulkAdd(newProfiles);
-          setMessage(msg); setFile(null);
-        } catch (err) {
-          console.error('엑셀 처리 오류:', err); setMessage('엑셀 파일을 처리하는 중 오류가 발생했습니다.');
-        } finally { setIsUploading(false); }
-      };
-      reader.onerror = rej;
-      reader.readAsArrayBuffer(file);
-    });
-
-    // 메인 스레드 잠김 방지
-    setTimeout(()=>read(), 0);
-  };
-
-  return (
-    <section className="bg-white p-6 rounded-xl shadow-md">
-      <h2 className="text-xl font-bold mb-4 flex items-center"><UploadCloud className="mr-2 text-yellow-500"/>엑셀로 일괄 등록</h2>
-      <div className="space-y-4">
-        <p className="text-sm text-gray-600">정해진 양식의 엑셀 파일을 업로드하여 여러 프로필을 한 번에 추가할 수 있습니다.</p>
-        <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md border">
-          <p className="font-semibold">엑셀 양식 안내:</p>
-          <p>2행부터 각 행을 한 프로필로 읽습니다.</p>
-          <p>각 열의 C=이름, D=경력, F=나이, H=전문영역, J=우선순위, L=미팅기록, N=기타정보 로 입력됩니다.</p>
-          <p className="font-bold mt-1">※ 기존 프로필과 이름이 겹칠 경우, 덮어쓰기됩니다.</p>
-        </div>
-        <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100"/>
-        <button onClick={handleUpload} disabled={!file || isUploading} className="w-full flex justify-center items-center py-2 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
-          {isUploading ? <Loader2 className="animate-spin" /> : '업로드 및 추가'}
-        </button>
-        {message && <p className="text-sm text-center text-gray-600">{message}</p>}
-      </div>
-    </section>
-  );
-};
-
-// ===============================
-// 공유 상세 보기 (URL)
+// 공유 보기
 // ===============================
 const ProfileDetailView = ({ profileId, accessCode }) => {
   const [profile, setProfile] = useState(null);
@@ -1158,29 +211,1109 @@ const ProfileDetailView = ({ profileId, accessCode }) => {
 };
 
 // ===============================
+// 로그인 화면
+// ===============================
+const LoginScreen = ({ onLogin, authStatus }) => {
+  const [codeInput, setCodeInput] = useState('');
+  const handleSubmit = (e) => { e.preventDefault(); if (codeInput.trim()) onLogin(codeInput.trim()); };
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
+      <div className="w-full max-w-md bg-white p-8 rounded-xl shadow-lg">
+        <div className="text-center">
+          <Users className="mx-auto text-yellow-400 w-12 h-12" />
+          <h2 className="mt-4 text-2xl font-bold text-gray-800">프로필 대시보드 접속</h2>
+          <p className="mt-2 text-sm text-gray-500">데이터를 불러올 접속 코드를 입력하세요.</p>
+        </div>
+        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+          <div className="relative">
+            <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <input type="text" placeholder="Access Code" className="w-full pl-10 pr-3 py-3 border rounded-lg" value={codeInput} onChange={(e) => setCodeInput(e.target.value)} />
+          </div>
+          <div>
+            <button type="submit" disabled={authStatus !== 'authenticated'} className="w-full flex justify-center py-3 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
+              {authStatus === 'authenticating' && <Loader2 className="animate-spin mr-2" />}
+              {authStatus === 'authenticated' ? '데이터 불러오기' : '인증 중...'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// ===============================
+// 모달 (유사 프로필 + 확대보기)
+// ===============================
+const SimilarModal = ({ open, onClose, baseProfile, items, onShowProfile, expanded, onBackInModal, actionHandlers }) => {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] p-6 overflow-hidden">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            {expanded && (
+              <button onClick={onBackInModal} className="text-gray-600 hover:text-gray-900 mr-2">
+                <ChevronLeft size={20} />
+              </button>
+            )}
+            <h3 className="text-lg font-bold text-gray-800">
+              유사 프로필 — <span className="text-yellow-600">{baseProfile?.name}</span>
+            </h3>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-800"><X size={20} /></button>
+        </div>
+
+        {!expanded && (
+          <>
+            <div className="text-sm text-gray-500 mb-3">유사도는 경력/전문영역/키워드/우선순위 등 텍스트 기반으로 계산돼요.</div>
+            <div className="overflow-y-auto pr-3" style={{ maxHeight: '70vh' }}>
+              {items.length === 0 ? (
+                <div className="text-center text-gray-500 py-8">표시할 유사 프로필이 없습니다.</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {items.map(({ profile, score }) => (
+                    <button
+                      key={profile.id}
+                      onClick={() => onShowProfile(profile)}
+                      className="text-left border rounded-lg p-3 bg-white shadow-sm hover:shadow-md transition"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="font-semibold text-yellow-700">{profile.name}</div>
+                        <div className="text-xs font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">{score}%</div>
+                      </div>
+                      {profile.expertise && <div className="text-xs text-gray-600 mt-1">{profile.expertise}</div>}
+                      <div className="text-xs text-gray-700 mt-2 whitespace-pre-wrap line-clamp-5">{profile.career}</div>
+                      {profile.otherInfo && <div className="text-[11px] text-gray-500 mt-2 whitespace-pre-wrap line-clamp-4">{profile.otherInfo}</div>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {expanded && (
+          <div className="overflow-y-auto pr-3" style={{ maxHeight: '70vh' }}>
+            <div className="border rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-baseline gap-2">
+                  <h4 className="text-xl font-bold text-yellow-700">{expanded.name}</h4>
+                  {expanded.age ? <span className="text-sm text-gray-500">{expanded.age}세</span> : null}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => actionHandlers.onShare(expanded)} className="text-gray-600 hover:text-gray-900" title="공유 링크 복사"><Share2 size={18} /></button>
+                  <button onClick={() => actionHandlers.onEdit(expanded)} className="text-blue-600 hover:text-blue-800" title="수정"><Edit size={18} /></button>
+                  <button onClick={() => actionHandlers.onDelete(expanded)} className="text-red-600 hover:text-red-800" title="삭제"><Trash2 size={18} /></button>
+                </div>
+              </div>
+              {expanded.expertise && <div className="mt-1 text-sm font-semibold text-gray-600">{expanded.expertise}</div>}
+              <div className="mt-3">
+                <div className="text-xs font-semibold text-gray-500">경력</div>
+                <div className="text-sm whitespace-pre-wrap">{expanded.career}</div>
+              </div>
+              {expanded.otherInfo && (
+                <div className="mt-3">
+                  <div className="text-xs font-semibold text-gray-500">기타 정보</div>
+                  <div className="text-sm whitespace-pre-wrap">{expanded.otherInfo}</div>
+                </div>
+              )}
+              {expanded.meetingRecord && (
+                <div className="mt-3">
+                  <div className="text-xs font-semibold text-gray-500">미팅 기록</div>
+                  <div className="text-sm whitespace-pre-wrap">{expanded.meetingRecord}</div>
+                </div>
+              )}
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button onClick={() => actionHandlers.onStar(expanded)} className={`text-xs font-semibold px-3 py-1 rounded-full ${expanded.starred ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
+                  {expanded.starred ? '주목중' : '모아보기'}
+                </button>
+                <button onClick={() => actionHandlers.onCalendar(expanded)} className="text-xs bg-blue-500 text-white font-semibold px-3 py-1 rounded-full hover:bg-blue-600">
+                  {expanded.gcalEventId ? '캘린더 수정' : '캘린더 등록'}
+                </button>
+                {expanded.gcalEventId ? (
+                  <a href={expanded.gcalHtmlLink || '#'} target="_blank" rel="noreferrer" className="text-xs text-blue-600 underline">Google Calendar에서 보기</a>
+                ) : <span className="text-xs text-gray-400">캘린더 미연동</span>}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ===============================
+// 확인 모달 (삭제 등 공용)
+// ===============================
+const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
+    <div className="bg-white rounded-lg p-8 shadow-xl max-w-sm w-full mx-4">
+      <div className="text-center">
+        <ShieldAlert className="mx-auto h-12 w-12 text-red-500" />
+        <h3 className="mt-4 text-lg font-medium text-gray-900">확인</h3>
+        <div className="mt-2 text-sm text-gray-500"><p>{message}</p></div>
+      </div>
+      <div className="mt-6 flex justify-center gap-4">
+        <button onClick={onCancel} className="px-6 py-2 rounded-md text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300">취소</button>
+        <button onClick={onConfirm} className="px-6 py-2 rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700">확인</button>
+      </div>
+    </div>
+  </div>
+);
+
+// ===============================
+// 폴더 선택 모달 (모아보기 저장용)
+// ===============================
+const FolderSelectModal = ({ open, onClose, folders, selected, setSelected, onSave }) => {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md p-5">
+        <h3 className="text-lg font-bold mb-3">폴더 선택</h3>
+        <div className="max-h-[50vh] overflow-y-auto space-y-2 pr-1">
+          {folders.order.map(id => {
+            const f = folders.byId[id];
+            const checked = selected.includes(id);
+            return (
+              <label key={id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => {
+                    if (e.target.checked) setSelected(prev => Array.from(new Set([...prev, id])));
+                    else setSelected(prev => prev.filter(x => x !== id));
+                  }}
+                />
+                <span className="flex items-center gap-2"><Folder size={16} className="text-yellow-500"/> {f.name}</span>
+              </label>
+            );
+          })}
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-md bg-gray-100 hover:bg-gray-200">취소</button>
+          <button onClick={onSave} className="px-3 py-1.5 text-sm rounded-md bg-yellow-500 text-white hover:bg-yellow-600">저장</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ===============================
+// 프로필 카드 (가로형 / 반응형) + 액션버튼
+// ===============================
+const ProfileCard = ({
+  profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm,
+  accessCode, onSyncOne, onShowSimilar, onToggleStarAskFolder, onShareLink, onEditStart
+}) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedProfile, setEditedProfile] = useState(profile);
+  const [syncing, setSyncing] = useState(false);
+
+  useEffect(() => { setEditedProfile(profile); }, [profile]);
+
+  const priorityColors = {
+    '3': 'bg-red-100 text-red-800',
+    '2': 'bg-yellow-100 text-yellow-800',
+    '1': 'bg-green-100 text-green-800',
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setEditedProfile(prev => ({ ...prev, [name]: name === 'age' ? (value ? Number(value) : '') : value }));
+  };
+
+  const handleSave = async () => {
+    const parsed = parseDateTimeFromRecord(editedProfile.meetingRecord);
+    const eventDate = parsed ? new Date(parsed.date).toISOString() : null;
+    try {
+      await onUpdate(profile.id, { ...editedProfile, eventDate });
+      setIsEditing(false);
+    } catch (e) {
+      console.error('프로필 저장 실패:', e);
+      alert('프로필 저장 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleShare = () => onShareLink(profile);
+  const handleSyncClick = async () => { setSyncing(true); try { await onSyncOne(profile); } finally { setSyncing(false); } };
+
+  return (
+    <div className="bg-white rounded-xl shadow p-4 transition hover:shadow-md">
+      {/* 가로 배치: 좌 텍스트, 우측 액션 */}
+      <div className="flex flex-col md:flex-row md:items-start gap-3">
+        <div className="flex-1">
+          {/* 상단 이름/우선순위 */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-baseline gap-2">
+              <h3 className="font-bold text-yellow-600">{profile.name}</h3>
+              <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
+              {profile.expertise && <span className="text-xs text-gray-600 font-semibold px-2 py-0.5 rounded bg-gray-50 border">{profile.expertise}</span>}
+            </div>
+            {profile.priority && (
+              <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${priorityColors[profile.priority] || 'bg-gray-100 text-gray-800'}`}>
+                {profile.priority}
+              </span>
+            )}
+          </div>
+
+          {/* 본문 */}
+          <div className="mt-2 text-sm text-gray-800 whitespace-pre-wrap">{profile.career}</div>
+          {profile.otherInfo && <div className="mt-2 text-xs text-gray-500 whitespace-pre-wrap">{profile.otherInfo}</div>}
+          {profile.meetingRecord && (
+            <div className="mt-2 pt-2 border-t">
+              <p className="text-xs font-semibold text-gray-500">미팅기록:</p>
+              <p className="text-xs text-gray-600 whitespace-pre-wrap">{profile.meetingRecord}</p>
+            </div>
+          )}
+
+          {/* 알림 카드 하단 버튼(확인/스누즈) */}
+          {isAlarmCard && (
+            <div className="mt-3 flex gap-2">
+              <button onClick={() => onConfirmAlarm(profile.id)} className="text-xs bg-gray-200 text-gray-700 font-semibold px-3 py-1 rounded-full hover:bg-gray-300">확인</button>
+              <button onClick={() => onSnooze(profile.id)} className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-3 py-1 rounded-full hover:bg-indigo-200">3개월 후 다시 알림</button>
+            </div>
+          )}
+        </div>
+
+        {/* 우측 액션 버튼 묶음 */}
+        <div className="min-w-[220px] md:w-[240px] grid grid-cols-2 gap-2">
+          {/* 모아보기 / 유사 프로필 */}
+          <button
+            onClick={() => onToggleStarAskFolder(profile)}
+            className={`text-xs font-semibold px-3 py-2 rounded-lg border ${profile.starred ? 'bg-purple-600 text-white border-purple-600 hover:bg-purple-700' : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border-gray-200'}`}
+            title={profile.starred ? '주목중' : '모아보기'}
+          >
+            {profile.starred ? '주목중' : '모아보기'}
+          </button>
+          <button
+            onClick={() => onShowSimilar?.(profile)}
+            className="text-xs font-semibold px-3 py-2 rounded-lg border bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-100"
+          >
+            유사 프로필
+          </button>
+
+          {/* 캘린더/공유 */}
+          <button
+            onClick={handleSyncClick}
+            disabled={syncing}
+            className="text-xs font-semibold px-3 py-2 rounded-lg border bg-blue-500 text-white hover:bg-blue-600 disabled:bg-blue-300 flex items-center justify-center gap-1"
+          >
+            {syncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <CalendarPlus className="w-3 h-3" />}
+            {profile.gcalEventId ? '캘린더 수정' : '캘린더 등록'}
+          </button>
+          <button onClick={handleShare} className="text-xs font-semibold px-3 py-2 rounded-lg border bg-gray-50 text-gray-700 hover:bg-gray-100">
+            공유 링크
+          </button>
+
+          {/* 수정/삭제 */}
+          <button onClick={() => onEditStart(profile)} className="text-xs font-semibold px-3 py-2 rounded-lg border bg-white text-blue-600 hover:bg-blue-50">수정</button>
+          <button onClick={() => onDelete(profile.id, profile.name)} className="text-xs font-semibold px-3 py-2 rounded-lg border bg-white text-red-600 hover:bg-red-50">삭제</button>
+        </div>
+      </div>
+
+      {/* 인라인 편집 폼 (필요시) */}
+      {isEditing && (
+        <div className="mt-4 border-t pt-3 space-y-2">
+          <input name="name" value={editedProfile.name} onChange={handleInputChange} placeholder="이름" className="w-full p-2 border rounded text-sm font-bold" />
+          <input name="expertise" value={editedProfile.expertise || ''} onChange={handleInputChange} placeholder="전문영역" className="w-full p-2 border rounded text-sm" />
+          <textarea name="career" value={editedProfile.career} onChange={handleInputChange} placeholder="경력" className="w-full p-2 border rounded text-sm h-20" />
+          <div className="grid grid-cols-2 gap-2">
+            <input name="age" type="number" value={editedProfile.age || ''} onChange={handleInputChange} placeholder="나이" className="w-full p-2 border rounded text-sm" />
+            <input name="priority" type="text" value={editedProfile.priority || ''} onChange={handleInputChange} placeholder="우선순위" className="w-full p-2 border rounded text-sm" />
+          </div>
+          <textarea name="otherInfo" value={editedProfile.otherInfo || ''} onChange={handleInputChange} placeholder="기타 정보" className="w-full p-2 border rounded text-sm h-20" />
+          <textarea name="meetingRecord" value={editedProfile.meetingRecord || ''} onChange={handleInputChange} placeholder="미팅기록 (예: (25.08.14) 오후 7:00)" className="w-full p-2 border rounded text-sm h-20" />
+          <div className="flex justify-end space-x-2">
+            <button onClick={() => setIsEditing(false)} className="p-2 text-gray-500 hover:text-gray-800"><X size={20} /></button>
+            <button onClick={handleSave} className="p-2 text-green-600 hover:text-green-800"><Save size={20} /></button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ===============================
+// 필터 결과 섹션 (그래프 아래 표시)
+// ===============================
+const FilterResultSection = ({ title, profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStarAskFolder, onShareLink, onEditStart, onClear }) => (
+  <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in mt-4">
+    <div className="flex justify-between items-center mb-4">
+      <h3 className="text-lg font-bold text-gray-800">{title}</h3>
+      <button onClick={onClear} className="text-sm text-gray-500 hover:text-gray-800">필터 해제</button>
+    </div>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {profiles.length > 0 ? (
+        profiles.map((profile, index) => (
+          <ProfileCard
+            key={profile.id}
+            profile={profile}
+            onUpdate={onUpdate}
+            onDelete={onDelete}
+            accessCode={accessCode}
+            onSyncOne={onSyncOne}
+            onShowSimilar={onShowSimilar}
+            onToggleStarAskFolder={onToggleStarAskFolder}
+            onShareLink={onShareLink}
+            onEditStart={onEditStart}
+          />
+        ))
+      ) : (
+        <p className="text-gray-500 text-center col-span-full">해당 조건의 프로필이 없습니다.</p>
+      )}
+    </div>
+  </section>
+);
+
+// ===============================
+// 검색 탭
+// ===============================
+const SearchTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStarAskFolder, onShareLink, onEditStart }) => {
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const searchedProfiles = useMemo(() => {
+    const term = searchTerm.trim(); if (!term) return [];
+    const orConditions = term.split(/\s+or\s+/i);
+    return profiles.filter(p => orConditions.some(cond => {
+      const andKeywords = cond.split(/\s+and\s+/i).filter(Boolean);
+      return andKeywords.every(keyword => {
+        const map = { '이름':'name','경력':'career','나이':'age','전문영역':'expertise','기타':'otherInfo','우선순위':'priority' };
+        const f = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
+        if (f) { const field = map[f[1]]; const val = f[2].toLowerCase(); const v = p[field] ? String(p[field]).toLowerCase() : ''; return v.includes(val); }
+        const ageG = keyword.match(/^(\d{1,2})대$/);
+        if (ageG) { const d = parseInt(ageG[1],10); if (d>=10) { const min=d, max=d+9; return p.age && p.age>=min && p.age<=max; } }
+        const txt = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
+        return txt.includes(keyword.toLowerCase());
+      });
+    }));
+  }, [searchTerm, profiles]);
+
+  return (
+    <section className="p-4">
+      <div className="relative">
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input
+          type="text"
+          placeholder="검색... (예: 경력:네이버 AND 20대)"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full p-4 pl-12 border rounded-xl shadow-sm"
+        />
+      </div>
+      {searchTerm.trim() && (
+        <div className="mt-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
+              <ProfileCard
+                key={profile.id}
+                profile={profile}
+                onUpdate={onUpdate}
+                onDelete={onDelete}
+                accessCode={accessCode}
+                onSyncOne={onSyncOne}
+                onShowSimilar={onShowSimilar}
+                onToggleStarAskFolder={onToggleStarAskFolder}
+                onShareLink={onShareLink}
+                onEditStart={onEditStart}
+              />
+            )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+};
+
+// ===============================
+// 주목 중 탭 (폴더링)
+// ===============================
+const SpotlightTab = ({
+  profiles, folders, setFolders, selectedFolder, setSelectedFolder,
+  onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStarAskFolder, onShareLink, onEditStart,
+  onAddFolder, onDeleteFolders
+}) => {
+
+  const spotlightProfiles = useMemo(() => {
+    return profiles.filter(p => {
+      if (!p.starred) return false;
+      const arr = Array.isArray(p.starredFolders) ? p.starredFolders : ['all'];
+      return selectedFolder === 'all' ? true : arr.includes(selectedFolder);
+    });
+  }, [profiles, selectedFolder]);
+
+  return (
+    <section className="p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-lg font-bold">
+          <StarIcon className="text-yellow-500" size={18} /> 주목 중인 프로필들
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const name = window.prompt('새 폴더 이름을 입력하세요', '');
+              if (name != null) onAddFolder(name);
+            }}
+            className="text-xs px-2 py-1 rounded-md border bg-gray-50 hover:bg-gray-100 flex items-center gap-1"
+          >
+            <FolderPlus size={14}/> 폴더 추가
+          </button>
+          <button
+            onClick={() => onDeleteFolders()}
+            className="text-xs px-2 py-1 rounded-md border bg-gray-50 hover:bg-gray-100 flex items-center gap-1"
+          >
+            <FolderX size={14}/> 폴더 삭제
+          </button>
+        </div>
+      </div>
+
+      {/* 폴더 목록 (칩) */}
+      <div className="flex flex-wrap gap-2">
+        {folders.order.map(id => {
+          const f = folders.byId[id];
+          const active = selectedFolder === id;
+          return (
+            <button
+              key={id}
+              onClick={() => setSelectedFolder(id)}
+              className={`px-3 py-1.5 rounded-full border text-sm flex items-center gap-2 ${active ? 'bg-yellow-500 text-white border-yellow-500' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+            >
+              <Folder size={14} className={active ? 'text-white' : 'text-yellow-500'} /> {f.name}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 리스트 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {spotlightProfiles.length === 0 ? (
+          <div className="text-gray-500 p-4 text-sm">없음</div>
+        ) : spotlightProfiles.map(p => (
+          <ProfileCard
+            key={p.id}
+            profile={p}
+            onUpdate={onUpdate}
+            onDelete={onDelete}
+            accessCode={accessCode}
+            onSyncOne={onSyncOne}
+            onShowSimilar={onShowSimilar}
+            onToggleStarAskFolder={onToggleStarAskFolder}
+            onShareLink={onShareLink}
+            onEditStart={onEditStart}
+          />
+        ))}
+      </div>
+    </section>
+  );
+};
+
+// ===============================
+// 그래프 & 필터 (Functions > GRAPHS)
+// ===============================
+const GraphsPanel = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStarAskFolder, onShareLink, onEditStart }) => {
+  const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
+
+  const ageData = useMemo(() => {
+    const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
+    profiles.forEach(({ age }) => {
+      if (!age) return;
+      if (age < 20) groups['10대']++;
+      else if (age < 30) groups['20대']++;
+      else if (age < 40) groups['30대']++;
+      else if (age < 50) groups['40대']++;
+      else groups['50대 이상']++;
+    });
+    return Object.entries(groups).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
+  }, [profiles]);
+
+  const priorityData = useMemo(() => {
+    const p = { '3 (상)': 0, '2 (중)': 0, '1 (하)': 0 };
+    profiles.forEach(x => { if (x.priority === '3') p['3 (상)']++; else if (x.priority === '2') p['2 (중)']++; else if (x.priority === '1') p['1 (하)']++; });
+    return Object.entries(p).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
+  }, [profiles]);
+
+  const companyData = useMemo(() => TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length })), [profiles]);
+
+  const expertiseData = useMemo(() => {
+    const c = {}; profiles.forEach(p => { if (p.expertise) c[p.expertise] = (c[p.expertise] || 0) + 1; });
+    return Object.entries(c).map(([name, count]) => ({ name, count }));
+  }, [profiles]);
+
+  const filteredProfiles = useMemo(() => {
+    if (!activeFilter.type) return [];
+    switch (activeFilter.type) {
+      case 'age': {
+        const g = activeFilter.value;
+        return profiles.filter(p => p.age && (
+          (g==='10대' && p.age<20) ||
+          (g==='20대' && p.age>=20 && p.age<30) ||
+          (g==='30대' && p.age>=30 && p.age<40) ||
+          (g==='40대' && p.age>=40 && p.age<50) ||
+          (g==='50대 이상' && p.age>=50)
+        ));
+      }
+      case 'priority': {
+        const v = activeFilter.value.split(' ')[0]; return profiles.filter(p => p.priority === v);
+      }
+      case 'company': return profiles.filter(p => p.career?.includes(activeFilter.value));
+      case 'expertise': return profiles.filter(p => p.expertise === activeFilter.value);
+      default: return [];
+    }
+  }, [profiles, activeFilter]);
+
+  return (
+    <section className="p-4 space-y-8">
+      {/* 우선순위별 */}
+      <section className="bg-white p-6 rounded-xl shadow-md">
+        <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><Layers size={18}/> 우선순위별 분포</h2>
+        <ResponsiveContainer width="100%" height={300}>
+          <PieChart>
+            <defs>
+              <radialGradient id="gp-0"><stop offset="0%" stopColor="#FF4444" stopOpacity={0.7} /><stop offset="100%" stopColor="#FF4444" stopOpacity={1} /></radialGradient>
+              <radialGradient id="gp-1"><stop offset="0%" stopColor="#FFBB28" stopOpacity={0.7} /><stop offset="100%" stopColor="#FFBB28" stopOpacity={1} /></radialGradient>
+              <radialGradient id="gp-2"><stop offset="0%" stopColor="#00C49F" stopOpacity={0.7} /><stop offset="100%" stopColor="#00C49F" stopOpacity={1} /></radialGradient>
+            </defs>
+            <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label>
+              {priorityData.map((entry, i) => (
+                <Cell
+                  key={`cell-pr-${i}`}
+                  fill={`url(#gp-${i})`}
+                  stroke="#fff"
+                  onClick={() => setActiveFilter({ type: 'priority', value: entry.name })}
+                  style={{ cursor: 'pointer' }}
+                />
+              ))}
+            </Pie>
+            <Tooltip formatter={(v) => `${v}명`} /><Legend />
+          </PieChart>
+        </ResponsiveContainer>
+        {activeFilter.type === 'priority' && (
+          <FilterResultSection
+            title={`"${activeFilter.value}" 필터 결과`}
+            profiles={profiles.filter(p => p.priority === activeFilter.value.split(' ')[0])}
+            onUpdate={onUpdate} onDelete={onDelete}
+            accessCode={accessCode} onSyncOne={onSyncOne}
+            onShowSimilar={onShowSimilar} onToggleStarAskFolder={onToggleStarAskFolder}
+            onShareLink={onShareLink} onEditStart={onEditStart}
+            onClear={() => setActiveFilter({ type: null, value: null })}
+          />
+        )}
+      </section>
+
+      {/* 세대별 */}
+      <section className="bg-white p-6 rounded-xl shadow-md">
+        <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><Grid size={18}/> 세대별 분포</h2>
+        <ResponsiveContainer width="100%" height={300}>
+          <PieChart>
+            <defs>
+              {COLORS.map((c, i) => (
+                <radialGradient key={`g-age-${i}`} id={`g-age-${i}`} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+                  <stop offset="0%" stopColor={c} stopOpacity={0.7} />
+                  <stop offset="100%" stopColor={c} stopOpacity={1} />
+                </radialGradient>
+              ))}
+            </defs>
+            <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label>
+              {ageData.map((entry, i) => (
+                <Cell
+                  key={`cell-age-${i}`}
+                  fill={`url(#g-age-${i})`}
+                  stroke="#fff"
+                  onClick={() => setActiveFilter({ type: 'age', value: entry.name })}
+                  style={{ cursor: 'pointer' }}
+                />
+              ))}
+            </Pie>
+            <Tooltip formatter={(v) => `${v}명`} /><Legend />
+          </PieChart>
+        </ResponsiveContainer>
+        {activeFilter.type === 'age' && (
+          <FilterResultSection
+            title={`"${activeFilter.value}" 필터 결과`}
+            profiles={filteredProfiles}
+            onUpdate={onUpdate} onDelete={onDelete}
+            accessCode={accessCode} onSyncOne={onSyncOne}
+            onShowSimilar={onShowSimilar} onToggleStarAskFolder={onToggleStarAskFolder}
+            onShareLink={onShareLink} onEditStart={onEditStart}
+            onClear={() => setActiveFilter({ type: null, value: null })}
+          />
+        )}
+      </section>
+
+      {/* 전문영역 */}
+      <section className="bg-white p-6 rounded-xl shadow-md">
+        <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><Settings2 size={18}/> 전문영역 분포</h2>
+        <ResponsiveContainer width="100%" height={350}>
+          <BarChart data={useMemo(()=>{const c={}; profiles.forEach(p=>{if(p.expertise) c[p.expertise]=(c[p.expertise]||0)+1;}); return Object.entries(c).map(([name,count])=>({name,count}));},[profiles])} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+            <defs>
+              <linearGradient id="gradient-expertise" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00C49F" stopOpacity={0.8}/><stop offset="95%" stopColor="#82ca9d" stopOpacity={1}/></linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
+            <YAxis allowDecimals={false}/>
+            <Tooltip formatter={(v)=>`${v}명`} /><Legend />
+            <Bar dataKey="count" fill="url(#gradient-expertise)">
+              {useMemo(()=>{const c={}; profiles.forEach(p=>{if(p.expertise) c[p.expertise]=(c[p.expertise]||0)+1;}); const arr = Object.entries(c).map(([name,count])=>({name,count})); return arr.map((entry,i)=>(<Cell key={`ex-${i}`} onClick={()=>setActiveFilter({type:'expertise', value: entry.name})} style={{cursor:'pointer'}} />));},[profiles])}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+        {activeFilter.type === 'expertise' && (
+          <FilterResultSection
+            title={`"${activeFilter.value}" 전문영역 필터 결과`}
+            profiles={profiles.filter(p => p.expertise === activeFilter.value)}
+            onUpdate={onUpdate} onDelete={onDelete}
+            accessCode={accessCode} onSyncOne={onSyncOne}
+            onShowSimilar={onShowSimilar} onToggleStarAskFolder={onToggleStarAskFolder}
+            onShareLink={onShareLink} onEditStart={onEditStart}
+            onClear={() => setActiveFilter({ type: null, value: null })}
+          />
+        )}
+      </section>
+
+      {/* IT 기업 */}
+      <section className="bg-white p-6 rounded-xl shadow-md">
+        <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><LineChart size={18}/> IT 기업 경력 분포</h2>
+        <ResponsiveContainer width="100%" height={350}>
+          <BarChart data={TARGET_KEYWORDS.map(k=>({name:k, count: profiles.filter(p=>p.career?.includes(k)).length}))} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+            <defs>
+              <linearGradient id="gradient-company" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#FFBB28" stopOpacity={0.8}/><stop offset="95%" stopColor="#FF8042" stopOpacity={1}/></linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
+            <YAxis allowDecimals={false}/><Tooltip formatter={(v)=>`${v}명`} /><Legend />
+            <Bar dataKey="count" fill="url(#gradient-company)">
+              {TARGET_KEYWORDS.map((entry, i) => (
+                <Cell key={`co-${i}`} onClick={() => setActiveFilter({ type: 'company', value: entry })} style={{ cursor: 'pointer' }} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+        {activeFilter.type === 'company' && (
+          <FilterResultSection
+            title={`"${activeFilter.value}" 필터 결과`}
+            profiles={profiles.filter(p => p.career?.includes(activeFilter.value))}
+            onUpdate={onUpdate} onDelete={onDelete}
+            accessCode={accessCode} onSyncOne={onSyncOne}
+            onShowSimilar={onShowSimilar} onToggleStarAskFolder={onToggleStarAskFolder}
+            onShareLink={onShareLink} onEditStart={onEditStart}
+            onClear={() => setActiveFilter({ type: null, value: null })}
+          />
+        )}
+      </section>
+    </section>
+  );
+};
+
+// ===============================
+// 추천/장기관리 패널
+// ===============================
+const RecommendPanel = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStarAskFolder, onShareLink, onEditStart }) => {
+  const recommendedProfiles = useMemo(() => {
+    const now = new Date();
+    const scoreOf = (p) => {
+      const last = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
+      const days = last ? Math.max(1, Math.floor((now - last) / (1000*60*60*24))) : 180;
+      let score = Math.min(100, Math.round((days / 90) * 60)); // 0~60
+      if (p.priority === '3') score += 20;
+      const kw = TARGET_KEYWORDS.filter(k => (p.career||'').includes(k)).length;
+      score += Math.min(kw * 5, 15);
+      if (p.expertise) score += 5;
+      const snoozeUntil = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
+      if (snoozeUntil && snoozeUntil > now) score = -1; // 제외
+      return score;
+    };
+    const rec = profiles
+      .map(p => ({ p, s: scoreOf(p) }))
+      .filter(x => x.s >= 0 && x.s >= 40)
+      .sort((a,b) => b.s - a.s)
+      .slice(0, 30)
+      .map(x => x.p);
+    return rec;
+  }, [profiles]);
+
+  const handleSnooze = async (profileId) => {
+    const snoozeDate = new Date(); snoozeDate.setMonth(snoozeDate.getMonth() + 3);
+    await onUpdate(profileId, { snoozeUntil: snoozeDate.toISOString() });
+  };
+  const handleConfirmAlarm = async (profileId) => onUpdate(profileId, { lastReviewedDate: new Date().toISOString() });
+
+  return (
+    <section className="p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-lg font-bold">
+          <AlertCircle className="text-yellow-600" size={18}/> 추천 : 다시 들여다볼 프로필
+        </div>
+        <div className="text-xs text-gray-500 hidden md:block">최근 팔로업/스누즈/우선순위/IT 키워드 반영</div>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {recommendedProfiles.length === 0 ? (
+          <div className="text-gray-500 p-4 text-sm">없음</div>
+        ) : (
+          recommendedProfiles.map(p => (
+            <ProfileCard
+              key={p.id}
+              profile={p}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
+              isAlarmCard={true}
+              onSnooze={handleSnooze}
+              onConfirmAlarm={handleConfirmAlarm}
+              accessCode={accessCode}
+              onSyncOne={onSyncOne}
+              onShowSimilar={onShowSimilar}
+              onToggleStarAskFolder={onToggleStarAskFolder}
+              onShareLink={onShareLink}
+              onEditStart={onEditStart}
+            />
+          ))
+        )}
+      </div>
+    </section>
+  );
+};
+
+const LongtermPanel = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStarAskFolder, onShareLink, onEditStart }) => {
+  const longTermNoContactProfiles = useMemo(() => {
+    const now = new Date();
+    const threeMonthsAgo = new Date(now); threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    const longTerm = [];
+    profiles.forEach(p => {
+      const lastContact = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
+      const snoozeUntil  = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
+      if (lastContact && lastContact < threeMonthsAgo && (!snoozeUntil || snoozeUntil < now)) {
+        longTerm.push(p);
+      }
+    });
+    return longTerm.sort((a,b) => (new Date(a.lastReviewedDate || a.eventDate||0)) - (new Date(b.lastReviewedDate || b.eventDate||0)));
+  }, [profiles]);
+
+  return (
+    <section className="p-4 space-y-4">
+      <div className="flex items-center gap-2 text-lg font-bold">
+        <BellRing className="text-orange-500" size={18}/> 장기 미접촉 알림 (3개월 이상)
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {longTermNoContactProfiles.length === 0 ? (
+          <div className="text-gray-500 p-4 text-sm">없음</div>
+        ) : (
+          longTermNoContactProfiles.map(p => (
+            <ProfileCard
+              key={p.id}
+              profile={p}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
+              isAlarmCard={true}
+              onSnooze={(id)=>onUpdate(id,{snoozeUntil:new Date(new Date().setMonth(new Date().getMonth()+3)).toISOString()})}
+              onConfirmAlarm={(id)=>onUpdate(id,{lastReviewedDate:new Date().toISOString()})}
+              accessCode={accessCode}
+              onSyncOne={onSyncOne}
+              onShowSimilar={onShowSimilar}
+              onToggleStarAskFolder={onToggleStarAskFolder}
+              onShareLink={onShareLink}
+              onEditStart={onEditStart}
+            />
+          ))
+        )}
+      </div>
+    </section>
+  );
+};
+
+// ===============================
+// 알림 탭 (오늘/다가오는)
+// ===============================
+const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStarAskFolder, onShareLink, onEditStart }) => {
+  const { todayProfiles, upcomingProfiles } = useMemo(() => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const tomorrowStart = new Date(todayStart); tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+    const threeDaysLater = new Date(todayStart); threeDaysLater.setDate(threeDaysLater.getDate() + 4);
+
+    const today = [], upcoming = [];
+    profiles.forEach(p => {
+      if (!p.eventDate) return;
+      const eventDate = new Date(p.eventDate);
+      if (eventDate >= todayStart && eventDate < tomorrowStart) today.push(p);
+      else if (eventDate > now && eventDate < threeDaysLater) upcoming.push(p);
+    });
+
+    return {
+      todayProfiles: today.sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate)),
+      upcomingProfiles: upcoming.sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate)),
+    };
+  }, [profiles]);
+
+  return (
+    <section className="p-4 space-y-8">
+      {todayProfiles.length > 0 && (
+        <section>
+          <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Calendar className="text-red-500" size={18}/> 오늘의 일정</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {todayProfiles.map(p => (
+              <ProfileCard
+                key={p.id}
+                profile={p}
+                onUpdate={onUpdate}
+                onDelete={onDelete}
+                accessCode={accessCode}
+                onSyncOne={onSyncOne}
+                onShowSimilar={onShowSimilar}
+                onToggleStarAskFolder={onToggleStarAskFolder}
+                onShareLink={onShareLink}
+                onEditStart={onEditStart}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {upcomingProfiles.length > 0 && (
+        <section>
+          <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Zap className="text-blue-500" size={18}/> 다가오는 일정</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {upcomingProfiles.map(p => (
+              <ProfileCard
+                key={p.id}
+                profile={p}
+                onUpdate={onUpdate}
+                onDelete={onDelete}
+                accessCode={accessCode}
+                onSyncOne={onSyncOne}
+                onShowSimilar={onShowSimilar}
+                onToggleStarAskFolder={onToggleStarAskFolder}
+                onShareLink={onShareLink}
+                onEditStart={onEditStart}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+    </section>
+  );
+};
+
+// ===============================
+// 관리 탭 (페이징 + 엑셀 업로드 안전)
+// ===============================
+const Pagination = ({ totalPages, currentPage, setCurrentPage }) => {
+  if (totalPages <= 1) return null;
+  const pages = Array.from({length: totalPages}, (_,i)=>i+1);
+  const goto = (n) => { if (n<1 || n>totalPages) return; setCurrentPage(n); };
+  return (
+    <nav className="mt-8 flex flex-wrap items-center gap-2 justify-center">
+      <button onClick={() => goto(1)} className="px-2 py-1 border rounded hover:bg-gray-50"><ChevronsLeft size={16}/></button>
+      <button onClick={() => goto(currentPage-1)} className="px-2 py-1 border rounded hover:bg-gray-50"><ChevronLeft size={16}/></button>
+      {pages.map(n => (
+        <button
+          key={n}
+          onClick={() => goto(n)}
+          className={`px-3 py-1 border rounded ${currentPage===n?'bg-yellow-400 text-white border-yellow-400':'hover:bg-gray-50'}`}
+        >
+          {n}
+        </button>
+      ))}
+      <button onClick={() => goto(currentPage+1)} className="px-2 py-1 border rounded hover:bg-gray-50"><ChRight size={16}/></button>
+      <button onClick={() => goto(totalPages)} className="px-2 py-1 border rounded hover:bg-gray-50"><ChevronsRight size={16}/></button>
+    </nav>
+  );
+};
+
+const ExcelUploader = ({ onBulkAdd }) => {
+  const [file, setFile] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const handleFileChange = (e) => { setFile(e.target.files[0]); setMessage(''); };
+
+  const handleUpload = async () => {
+    if (!file) { setMessage('파일을 먼저 선택해주세요.'); return; }
+    setIsUploading(true); setMessage('파일을 읽는 중...');
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = window.XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const json = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        if (json.length < 2) { setMessage('엑셀 파일에 데이터가 없습니다 (2행부터 읽습니다).'); setIsUploading(false); return; }
+        const newProfiles = json.slice(1).map(row => ({
+          name: row[2] || '', career: row[3] || '', age: row[5] ? Number(row[5]) : null,
+          expertise: row[7] || '', priority: row[9] ? String(row[9]) : '',
+          meetingRecord: row[11] || '', otherInfo: row[13] || '',
+          eventDate: (()=>{const p=parseDateTimeFromRecord(row[11]||''); return p? p.date.toISOString():null;})(),
+          starred: false, starredFolders: []
+        })).filter(p => p.name && p.career);
+
+        // 대용량 안전: 300개 단위 커밋
+        const msg = await onBulkAdd(newProfiles);
+        setMessage(msg); setFile(null);
+      } catch (err) {
+        console.error('엑셀 처리 오류:', err); setMessage('엑셀 파일을 처리하는 중 오류가 발생했습니다.');
+      } finally { setIsUploading(false); }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  return (
+    <section className="bg-white p-6 rounded-xl shadow-md">
+      <h2 className="text-xl font-bold mb-4 flex items-center"><UploadCloud className="mr-2 text-yellow-500"/>엑셀로 일괄 등록</h2>
+      <div className="space-y-4">
+        <p className="text-sm text-gray-600">정해진 양식의 엑셀 파일을 업로드하여 여러 프로필을 한 번에 추가할 수 있습니다.</p>
+        <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md border">
+          <p className="font-semibold">엑셀 양식 안내:</p>
+          <p>2행부터 각 행을 한 프로필로 읽습니다.</p>
+          <p>각 열의 C=이름, D=경력, F=나이, H=전문영역, J=우선순위, L=미팅기록, N=기타정보 로 입력됩니다.</p>
+          <p className="font-bold mt-1">※ 기존 프로필과 이름이 겹칠 경우, 덮어쓰기됩니다.</p>
+        </div>
+        <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100"/>
+        <button onClick={handleUpload} disabled={!file || isUploading} className="w-full flex justify-center items-center py-2 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
+          {isUploading ? <Loader2 className="animate-spin" /> : '업로드 및 추가'}
+        </button>
+        {message && <p className="text-sm text-center text-gray-600">{message}</p>}
+      </div>
+    </section>
+  );
+};
+
+const ManageTab = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState, accessCode, onSyncOne, onShowSimilar, onToggleStarAskFolder, onShareLink, onEditStart }) => {
+  const { newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord } = formState;
+  const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord } = setFormState;
+
+  const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const PROFILES_PER_PAGE = 10;
+
+  const searchedProfiles = useMemo(() => {
+    const term = searchTerm.trim(); if (!term) return [];
+    const orConditions = term.split(/\s+or\s+/i);
+    return profiles.filter(p => orConditions.some(cond => {
+      const andKeywords = cond.split(/\s+and\s+/i).filter(Boolean);
+      return andKeywords.every(keyword => {
+        const map = { '이름':'name','경력':'career','나이':'age','전문영역':'expertise','기타':'otherInfo','우선순위':'priority' };
+        const f = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
+        if (f) { const field = map[f[1]]; const val = f[2].toLowerCase(); const v = p[field] ? String(p[field]).toLowerCase() : ''; return v.includes(val); }
+        const ageG = keyword.match(/^(\d{1,2})대$/);
+        if (ageG) { const d = parseInt(ageG[1],10); if (d>=10) { const min=d, max=d+9; return p.age && p.age>=min && p.age<=max; } }
+        const txt = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
+        return txt.includes(keyword.toLowerCase());
+      });
+    }));
+  }, [searchTerm, profiles]);
+
+  const { currentProfiles, totalPages } = useMemo(() => {
+    const sorted = [...profiles].sort((a,b) => a.name.localeCompare(b.name));
+    const end = currentPage * PROFILES_PER_PAGE, start = end - PROFILES_PER_PAGE;
+    return { currentProfiles: sorted.slice(start,end), totalPages: Math.ceil(sorted.length / PROFILES_PER_PAGE) };
+  }, [currentPage, profiles]);
+
+  useEffect(() => { setCurrentPage(1); }, [searchTerm]);
+
+  return (
+    <section className="p-4 space-y-8">
+      {/* 검색 */}
+      <section>
+        <div className="relative mb-6">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input type="text" placeholder="검색... (예: 경력:네이버 AND 20대)" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-4 pl-12 border rounded-xl shadow-sm" />
+        </div>
+        {searchTerm.trim() && (
+          <div>
+            <h2 className="text-xl font-bold mb-4">검색 결과</h2>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {searchedProfiles.length > 0 ? searchedProfiles.map(profile => (
+                <ProfileCard
+                  key={profile.id}
+                  profile={profile}
+                  onUpdate={onUpdate}
+                  onDelete={onDelete}
+                  accessCode={accessCode}
+                  onSyncOne={onSyncOne}
+                  onShowSimilar={onShowSimilar}
+                  onToggleStarAskFolder={onToggleStarAskFolder}
+                  onShareLink={onShareLink}
+                  onEditStart={onEditStart}
+                />
+              )) : <p className="text-gray-500">검색 결과가 없습니다.</p>}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* 추가 폼 */}
+      <section className="bg-white p-6 rounded-xl shadow-md">
+        <h2 className="text-xl font-bold mb-4 flex items-center"><UserPlus className="mr-2 text-yellow-500"/>새 프로필 추가</h2>
+        <form onSubmit={handleFormSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <input type="text" placeholder="이름" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-2 border rounded" />
+            <input type="number" placeholder="나이" value={newAge} onChange={e => setNewAge(e.target.value)} className="w-full p-2 border rounded" />
+            <input type="text" placeholder="우선순위" value={newPriority} onChange={e => setNewPriority(e.target.value)} className="w-full p-2 border rounded" />
+          </div>
+          <input type="text" placeholder="전문영역" value={newExpertise} onChange={e => setNewExpertise(e.target.value)} className="w-full p-2 border rounded" />
+          <textarea placeholder="경력" value={newCareer} onChange={e => setNewCareer(e.target.value)} className="w-full p-2 border rounded h-24" />
+          <textarea placeholder="기타 정보" value={newOtherInfo} onChange={e => setNewOtherInfo(e.target.value)} className="w-full p-2 border rounded h-24" />
+          <textarea placeholder="미팅기록 (예: (25.08.14) 오후 7:00)" value={newMeetingRecord} onChange={e => setNewMeetingRecord(e.target.value)} className="w-full p-2 border rounded h-24" />
+          <div className="flex justify-end">
+            <button type="submit" className="bg-yellow-400 text-white px-4 py-2 rounded hover:bg-yellow-500">추가하기</button>
+          </div>
+        </form>
+      </section>
+
+      <ExcelUploader onBulkAdd={handleBulkAdd} />
+
+      {/* 전체 목록 */}
+      <section>
+        <h2 className="text-xl font-bold text-gray-800 mb-4">전체 프로필 목록</h2>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {currentProfiles.map(profile => (
+            <ProfileCard
+              key={profile.id}
+              profile={profile}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
+              accessCode={accessCode}
+              onSyncOne={onSyncOne}
+              onShowSimilar={onShowSimilar}
+              onToggleStarAskFolder={onToggleStarAskFolder}
+              onShareLink={onShareLink}
+              onEditStart={onEditStart}
+            />
+          ))}
+        </div>
+        <Pagination totalPages={Math.ceil(profiles.length/10)} currentPage={currentPage} setCurrentPage={setCurrentPage} />
+      </section>
+    </section>
+  );
+};
+
+// ===============================
 // App
 // ===============================
 export default function App() {
+  // --- 기본 상태
   const [accessCode, setAccessCode] = useState(typeof window !== 'undefined' ? (localStorage.getItem('profileDbAccessCode') || null) : null);
   const [profiles, setProfiles]     = useState([]);
   const [authStatus, setAuthStatus] = useState('authenticating');
-  const [activeNav, setActiveNav]   = useState(NAV.ALERTS);
-  const [funOpen, setFunOpen]       = useState(true);
-  const [sideOpen, setSideOpen]     = useState(true);
+  const [activeMain, setActiveMain] = useState(MAIN_TAB.ALERTS);
+  const [activeFuncSub, setActiveFuncSub] = useState(FUNC_SUB.RECOMMEND);
+  const [functionsOpen, setFunctionsOpen] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
+
+  // 모바일 사이드바
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // Similar modal
   const [similarOpen, setSimilarOpen] = useState(false);
   const [similarBase, setSimilarBase] = useState(null);
   const [similarList, setSimilarList] = useState([]);
+  const [similarExpanded, setSimilarExpanded] = useState(null);
 
   // Folder select modal
-  const [folderPickOpen, setFolderPickOpen] = useState(false);
-  const [folderPickTarget, setFolderPickTarget] = useState(null);
-
-  // Meta (폴더/매핑)
-  const [metaFolders, setMetaFolders] = useState(['전체']);
-  const [metaStarredMap, setMetaStarredMap] = useState({}); // {profileId: string[]}
+  const [folderModalOpen, setFolderModalOpen] = useState(false);
+  const [folderModalTarget, setFolderModalTarget] = useState(null);
+  const [folderModalSelected, setFolderModalSelected] = useState(['all']);
 
   // Google API 상태
   const [gapiClient, setGapiClient]   = useState(null);
@@ -1194,11 +1327,43 @@ export default function App() {
   const [newCareer, setNewCareer] = useState('');
   const [newAge, setNewAge] = useState('');
   const [newOtherInfo, setNewOtherInfo] = useState('');
+  const [newEventDate, setNewEventDate] = useState('');
   const [newExpertise, setNewExpertise] = useState('');
   const [newPriority, setNewPriority] = useState('');
   const [newMeetingRecord, setNewMeetingRecord] = useState('');
 
-  // 공유 URL 파라미터
+  // --- Firestore refs
+  const profilesCollectionRef = useMemo(() => {
+    if (!accessCode) return null;
+    return collection(db, 'artifacts', appId, 'public', 'data', accessCode);
+  }, [accessCode]);
+
+  // 예약어 피함 & segment 짝수 보장: meta/{accessCode} 문서
+  const metaDocRef = useMemo(() => {
+    if (!accessCode) return null;
+    return doc(db, 'artifacts', appId, 'meta', accessCode);
+  }, [accessCode]);
+
+  // --- folders meta
+  const META_DEFAULT = useMemo(()=>({
+    byId: { all: { id: 'all', name: '전체', order: 0 } },
+    order: ['all'],
+  }), []);
+  const [folders, setFolders] = useState(META_DEFAULT);
+  const [selectedFolder, setSelectedFolder] = useState('all');
+  const [foldersLoading, setFoldersLoading] = useState(false);
+
+  const normalizeFolders = useCallback((sf) => {
+    if (!sf || typeof sf !== 'object') return META_DEFAULT;
+    const byId = sf.byId && typeof sf.byId === 'object' ? sf.byId : {};
+    const order = Array.isArray(sf.order) ? sf.order : [];
+    const fixedById = { ...byId, all: byId.all || { id: 'all', name: '전체', order: 0 } };
+    const fixedOrder = Array.from(new Set(['all', ...order.filter(id => fixedById[id])]));
+    fixedOrder.forEach((id, i) => { fixedById[id] = { ...fixedById[id], order: i }; });
+    return { byId: fixedById, order: fixedOrder };
+  }, [META_DEFAULT]);
+
+  // --- 공유 URL 모드
   const urlParams = useMemo(() => {
     if (typeof window === 'undefined') return new URLSearchParams('');
     return new URLSearchParams(window.location.search);
@@ -1206,7 +1371,7 @@ export default function App() {
   const profileIdFromUrl = urlParams.get('profile');
   const accessCodeFromUrl = urlParams.get('code');
 
-  // 외부 스크립트 로드 (gapi + gis + sheetjs)
+  // 외부 스크립트 로드
   useEffect(() => {
     const xlsx = document.createElement('script');
     xlsx.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
@@ -1265,18 +1430,7 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  const profilesCollectionRef = useMemo(() => {
-    if (!accessCode) return null;
-    return collection(db, 'artifacts', appId, 'public', 'data', accessCode);
-  }, [accessCode]);
-
-  const metaDocRef = useMemo(() => {
-    if (!accessCode) return null;
-    // ✅ 예약어/세그먼트 문제 없는 메타 도큐먼트 경로
-    return doc(db, 'artifacts', appId, 'meta', accessCode);
-  }, [accessCode]);
-
-  // 프로필 실시간 구독
+  // 프로필 구독
   useEffect(() => {
     if (!profilesCollectionRef) { setProfiles([]); return; }
     const q = query(profilesCollectionRef);
@@ -1287,34 +1441,42 @@ export default function App() {
     return () => unsub();
   }, [profilesCollectionRef]);
 
-  // 메타 로딩(폴더/매핑)
+  // folders meta 로드
   useEffect(() => {
+    if (!metaDocRef) return;
+    let cancelled = false;
     (async () => {
-      if (!metaDocRef) { setMetaFolders(['전체']); setMetaStarredMap({}); return; }
+      setFoldersLoading(true);
       try {
         const snap = await getDoc(metaDocRef);
         if (!snap.exists()) {
-          await setDoc(metaDocRef, { folders: ['전체'], starredMap: {} }, { merge: true });
-          setMetaFolders(['전체']); setMetaStarredMap({});
+          if (!cancelled) setFolders(META_DEFAULT);
+          await setDoc(metaDocRef, { starredFolders: META_DEFAULT }, { merge: true });
         } else {
-          const d = snap.data() || {};
-          setMetaFolders(Array.isArray(d.folders) && d.folders.length ? d.folders : ['전체']);
-          setMetaStarredMap(typeof d.starredMap === 'object' && d.starredMap ? d.starredMap : {});
+          const sf = snap.data()?.starredFolders;
+          const fixed = normalizeFolders(sf);
+          if (!cancelled) setFolders(fixed);
+          if (JSON.stringify(sf) !== JSON.stringify(fixed)) {
+            await setDoc(metaDocRef, { starredFolders: fixed }, { merge: true });
+          }
         }
-      } catch (err) {
-        console.warn('meta doc load error', err);
-        // 초기 실패 시 기본값
-        setMetaFolders(['전체']);
-        setMetaStarredMap({});
+      } catch (e) {
+        console.error('meta load error', e);
+        if (!cancelled) setFolders(META_DEFAULT);
+      } finally {
+        if (!cancelled) setFoldersLoading(false);
       }
     })();
-  }, [metaDocRef]);
+    return () => { cancelled = true; };
+  }, [metaDocRef, META_DEFAULT, normalizeFolders]);
 
+  // 로그인
   const handleLogin = (code) => {
     setAccessCode(code);
     if (typeof window !== 'undefined') localStorage.setItem('profileDbAccessCode', code);
   };
 
+  // 프로필 추가
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!newName.trim() || !newCareer.trim() || !profilesCollectionRef) return;
@@ -1323,30 +1485,36 @@ export default function App() {
     const profileData = {
       name: newName, career: newCareer, age: newAge ? Number(newAge) : null, otherInfo: newOtherInfo, eventDate,
       expertise: newExpertise || null, priority: newPriority || null, meetingRecord: newMeetingRecord || null,
-      starred: false
+      starred: false, starredFolders: []
     };
     try {
       await addDoc(profilesCollectionRef, profileData);
-      setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewExpertise(''); setNewPriority(''); setNewMeetingRecord('');
+      setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewEventDate(''); setNewExpertise(''); setNewPriority(''); setNewMeetingRecord('');
     } catch (err) { console.error("프로필 저장 오류: ", err); }
   };
 
+  // 일괄 추가(대용량 chunk)
   const handleBulkAdd = async (newProfiles) => {
     if (!profilesCollectionRef || newProfiles.length === 0) return '업로드할 프로필이 없습니다.';
     const map = new Map(profiles.map(p => [p.name, p.id]));
-    const batch = writeBatch(db);
+    const CHUNK = 300;
     let updated=0, added=0;
-    newProfiles.forEach(p => {
-      const existingId = map.get(p.name);
-      const payload = { starred: false, ...p };
-      if (existingId) { batch.set(doc(profilesCollectionRef, existingId), payload); updated++; }
-      else { batch.set(doc(profilesCollectionRef), payload); added++; }
-    });
-    await batch.commit();
+    for (let i=0; i<newProfiles.length; i+=CHUNK) {
+      const batch = writeBatch(db);
+      const slice = newProfiles.slice(i, i+CHUNK);
+      slice.forEach(p => {
+        const existingId = map.get(p.name);
+        const payload = { starred: p.starred ?? false, starredFolders: p.starredFolders ?? [], ...p };
+        if (existingId) { batch.set(doc(profilesCollectionRef, existingId), payload); updated++; }
+        else { batch.set(doc(profilesCollectionRef), payload); added++; }
+      });
+      await batch.commit();
+    }
     return `${added}건 추가, ${updated}건 업데이트 완료.`;
   };
 
   const handleUpdate = async (profileId, updatedData) => {
+    if (!profilesCollectionRef) return;
     const { id, ...dataToUpdate } = updatedData;
     await updateDoc(doc(profilesCollectionRef, profileId), dataToUpdate);
   };
@@ -1357,7 +1525,7 @@ export default function App() {
     setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
   };
 
-  // Google Calendar 동기화
+  // 캘린더 인증/동기화 (비공개 이벤트)
   const ensureGoogleAuth = () => {
     return new Promise((resolve, reject) => {
       const token = gapiClient?.client?.getToken?.();
@@ -1381,9 +1549,7 @@ export default function App() {
     catch (e) { alert(e.message || 'Google 인증에 실패했습니다.'); return; }
 
     let parsed = parseDateTimeFromRecord(profile.meetingRecord);
-    if (!parsed && profile.eventDate) {
-      parsed = { date: new Date(profile.eventDate), hadTime: true };
-    }
+    if (!parsed && profile.eventDate) parsed = { date: new Date(profile.eventDate), hadTime: true };
     if (!parsed) { alert('미팅 날짜/시간을 인식할 수 없습니다. "미팅기록"에 날짜를 입력해주세요.'); return; }
 
     const startDate = parsed.date;
@@ -1398,8 +1564,6 @@ export default function App() {
         start: { dateTime: startLocal, timeZone: TZ },
         end:   { dateTime: endLocal,   timeZone: TZ },
         visibility: 'private',
-        guestsCanInviteOthers: false,
-        guestsCanSeeOtherGuests: false,
         reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 30 }] },
       };
       const ten = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 10, 0, 0);
@@ -1417,8 +1581,6 @@ export default function App() {
         start: { date: dateStr },
         end:   { date: endStr  },
         visibility: 'private',
-        guestsCanInviteOthers: false,
-        guestsCanSeeOtherGuests: false,
       };
     }
 
@@ -1430,7 +1592,7 @@ export default function App() {
         result = await gapiClient.client.calendar.events.insert({ calendarId: 'primary', resource: eventResource });
       }
       const ev = result.result || {};
-      await updateDoc(doc(profilesCollectionRef, profile.id), {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', accessCode, profile.id), {
         gcalEventId: ev.id || profile.gcalEventId || null,
         gcalHtmlLink: ev.htmlLink || profile.gcalHtmlLink || null,
         gcalLastSyncAt: new Date().toISOString(),
@@ -1442,50 +1604,113 @@ export default function App() {
     }
   };
 
-  // 주목(모아보기) 토글 및 폴더 저장
-  const handleToggleStar = async (profileId, flag, folders=[]) => {
-    await updateDoc(doc(profilesCollectionRef, profileId), { starred: !!flag });
+  // 공유 링크
+  const handleShareLink = (profile) => {
+    const shareUrl = `${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`;
+    navigator.clipboard.writeText(shareUrl).then(
+      () => alert('공유 링크가 클립보드에 복사되었습니다.'),
+      () => alert('링크 복사에 실패했습니다.')
+    );
+  };
+
+  // 프로필 편집(카드 내 간이 편집 대신 모달 편집을 따로 쓰려면 여기에 구현 가능)
+  const handleEditStart = (/* profile */) => {
+    alert('카드 내 인라인 편집 영역을 사용하세요. (상단의 수정 버튼을 눌러 편집)');
+  };
+
+  // 모아보기 토글 (추가 시 폴더 선택 모달 열기)
+  const handleToggleStarAskFolder = async (profile) => {
+    if (!profilesCollectionRef) return;
+    const ref = doc(profilesCollectionRef, profile.id);
+    if (profile.starred) {
+      if (!window.confirm('모아보기에서 제외하시겠습니까?')) return;
+      await updateDoc(ref, { starred: false, starredFolders: [] });
+    } else {
+      setFolderModalTarget(profile);
+      const preset = Array.isArray(profile.starredFolders) && profile.starredFolders.length ? profile.starredFolders : ['all'];
+      setFolderModalSelected(preset);
+      setFolderModalOpen(true);
+    }
+  };
+  const saveFoldersForTarget = async () => {
+    if (!folderModalTarget || !profilesCollectionRef) return;
+    const ref = doc(profilesCollectionRef, folderModalTarget.id);
+    const uniq = Array.from(new Set(folderModalSelected));
+    await updateDoc(ref, { starred: true, starredFolders: uniq });
+    setFolderModalOpen(false);
+    setFolderModalTarget(null);
+  };
+
+  // 폴더 추가/삭제
+  const addFolder = async (name) => {
     if (!metaDocRef) return;
-    const newMap = { ...(metaStarredMap || {}) };
-    if (flag) newMap[profileId] = folders.length? folders : ['전체'];
-    else delete newMap[profileId];
-    await setDoc(metaDocRef, { starredMap: newMap }, { merge: true });
-    setMetaStarredMap(newMap);
+    const n = (name || '').trim();
+    if (!n) return;
+    const exists = Object.values(folders.byId).some(f => f.name === n);
+    const safeName = exists ? `${n} (${Date.now().toString().slice(-4)})` : n;
+    const id = `f_${Date.now()}`;
+    const next = {
+      byId: { ...folders.byId, [id]: { id, name: safeName, order: folders.order.length } },
+      order: [...folders.order, id],
+    };
+    await setDoc(metaDocRef, { starredFolders: next }, { merge: true });
+    setFolders(next);
+  };
+  const deleteFolders = async () => {
+    if (!metaDocRef) return;
+    const choices = folders.order.filter(id => id !== 'all');
+    if (choices.length === 0) { alert('삭제할 폴더가 없습니다.'); return; }
+    const picked = window.prompt(`삭제할 폴더 id를 쉼표로 입력하세요:\n${choices.join(', ')}`);
+    if (!picked) return;
+    const ids = picked.split(',').map(s=>s.trim()).filter(Boolean).filter(id => choices.includes(id));
+    if (ids.length === 0) return;
+    if (!window.confirm(`정말 삭제하시겠습니까?\n(${ids.join(', ')})`)) return;
+
+    const nextById = { ...folders.byId };
+    let nextOrder = folders.order.slice();
+    ids.forEach(id => { delete nextById[id]; nextOrder = nextOrder.filter(x => x !== id); });
+    // order 재정렬
+    nextOrder.forEach((id,i)=>{ nextById[id] = { ...nextById[id], order: i }; });
+    const next = { byId: nextById, order: nextOrder };
+
+    // 프로필들에서 해당 폴더 id 제거 (starredFolders)
+    if (profilesCollectionRef) {
+      const batch = writeBatch(db);
+      profiles.forEach(p => {
+        if (Array.isArray(p.starredFolders) && p.starredFolders.some(x => ids.includes(x))) {
+          const newArr = p.starredFolders.filter(x => !ids.includes(x));
+          batch.update(doc(profilesCollectionRef, p.id), { starredFolders: newArr });
+        }
+      });
+      await batch.commit();
+    }
+
+    await setDoc(metaDocRef, { starredFolders: next }, { merge: true });
+    setFolders(next);
+    if (ids.includes(selectedFolder)) setSelectedFolder('all');
   };
 
-  // 폴더 선택 모달 오픈
-  const openFolderPick = (p) => {
-    setFolderPickTarget(p);
-    setFolderPickOpen(true);
-  };
-  const handleFolderSave = async (foldersPicked) => {
-    if (!folderPickTarget) return setFolderPickOpen(false);
-    await handleToggleStar(folderPickTarget.id, true, foldersPicked);
-    setFolderPickOpen(false);
-  };
-
-  // 유사 프로필 모달 열기
+  // 유사 모달
   const openSimilarModal = (base) => {
     const others = profiles.filter(p => p.id !== base.id).map(p => ({ profile: p, score: similarityScore(base, p) }));
     const sorted = others.sort((a,b) => b.score - a.score).slice(0, 20);
     setSimilarBase(base);
     setSimilarList(sorted);
+    setSimilarExpanded(null);
     setSimilarOpen(true);
   };
-  const renderActionsInline = (p) => (
-    <div className="flex items-center gap-2">
-      <button onClick={()=>openFolderPick(p)} className={`text-xs font-semibold px-3 py-1 rounded-full ${p.starred ? 'bg-purple-600 text-white' : 'bg-gray-200 text-gray-700'}`}>{p.starred ? '주목중' : '모아보기'}</button>
-      <button onClick={()=>openSimilarModal(p)} className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-3 py-1 rounded-full">유사 프로필</button>
-      <button onClick={()=>handleSyncOneToCalendar(p)} className="text-xs bg-blue-500 text-white font-semibold px-3 py-1 rounded-full">캘린더</button>
-    </div>
-  );
 
-  // 상단 카운트 박스 값
+  const similarActionHandlers = useMemo(() => ({
+    onShare: handleShareLink,
+    onEdit: handleEditStart,
+    onDelete: (p) => handleDeleteRequest(p.id, p.name),
+    onStar: handleToggleStarAskFolder,
+    onCalendar: handleSyncOneToCalendar
+  }), [handleShareLink, handleEditStart, handleToggleStarAskFolder]);
+
+  // 카운트 박스
   const totalCount = profiles.length;
   const meetingCount = useMemo(() => profiles.filter(p => !!p.eventDate).length, [profiles]);
-
-  const formState = { newName, newCareer, newAge, newOtherInfo, newExpertise, newPriority, newMeetingRecord };
-  const setFormState = { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewExpertise, setNewPriority, setNewMeetingRecord };
 
   // 공유 모드
   if (profileIdFromUrl && accessCodeFromUrl) {
@@ -1505,212 +1730,280 @@ export default function App() {
         />
       )}
 
-      {/* 레이아웃: 사이드 + 본문 */}
-      <div className="flex">
-        <SideNav open={sideOpen} setOpen={setSideOpen} active={activeNav} setActive={setActiveNav} funOpen={funOpen} setFunOpen={setFunOpen} />
+      {/* 상단 헤더 */}
+      <header className="sticky top-0 z-20 bg-white border-b">
+        <div className="flex items-center justify-between p-3 md:p-4">
+          <div className="flex items-center gap-3">
+            {/* 모바일 햄버거 */}
+            <button
+              onClick={() => setMobileNavOpen(true)}
+              className="md:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-600 hover:bg-gray-100"
+              aria-label="Open menu"
+            >
+              <Menu/>
+            </button>
 
-        <main className="flex-1 p-4 md:p-6">
-          {/* 헤더: 제목/엑세스코드 + 카운트 + 구글 상태 */}
-          <header className="flex flex-col gap-3 p-3 sm:p-4 border-b bg-white rounded-lg">
-            <div className="flex flex-wrap justify-between items-center gap-4">
-              <div className="flex items-center space-x-3">
-                <Users className="text-yellow-500 w-8 h-8" />
-                <h1 className="text-2xl font-bold text-gray-800">프로필 대시보드</h1>
-                <span className="text-sm bg-gray-200 px-3 py-1 rounded-full font-mono">{accessCode}</span>
+            <div className="flex items-center space-x-3">
+              <Users className="text-yellow-500 w-7 h-7" />
+              <h1 className="text-xl md:text-2xl font-bold text-gray-800">프로필 대시보드</h1>
+              <span className="text-xs md:text-sm bg-gray-200 px-2 md:px-3 py-1 rounded-full font-mono">{accessCode}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {/* 카운트 박스 */}
+            <div className="hidden sm:flex items-center gap-3">
+              <div className="bg-white p-3 rounded-xl shadow-sm border">
+                <h3 className="text-xs font-medium text-gray-500">총 등록된 프로필</h3>
+                <p className="text-xl font-bold text-yellow-500 mt-0.5 text-right">{totalCount}</p>
               </div>
-
-              <div className="flex items-center space-x-3">
-                <div className="bg-white p-3 rounded-xl shadow-sm border">
-                  <h3 className="text-xs font-medium text-gray-500">총 등록된 프로필</h3>
-                  <p className="text-2xl font-bold text-yellow-500 mt-1 text-center">{totalCount}</p>
-                </div>
-                <div className="bg-white p-3 rounded-xl shadow-sm border">
-                  <h3 className="text-xs font-medium text-gray-500">미팅 진행 프로필</h3>
-                  <p className="text-2xl font-bold text-yellow-500 mt-1 text-center">{meetingCount}</p>
-                </div>
-
-                <div className="hidden sm:flex items-center space-x-2 ml-2">
-                  {googleApiReady === false && (
-                    <span className="text-xs text-red-500">Google Calendar 연동 비활성화됨{googleError ? ` (${googleError})` : ' (초기화 실패)'}</span>
-                  )}
-                  {googleApiReady === true && (
-                    isGoogleSignedIn ? (
-                      <button
-                        onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
-                        className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
-                      >
-                        Google 로그아웃
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => tokenClient?.requestAccessToken({ prompt: 'consent' })}
-                        className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
-                      >
-                        Google 로그인
-                      </button>
-                    )
-                  )}
-                  <button onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }} className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center">
-                    <LogOut className="w-4 h-4 mr-1.5" /> 로그아웃
-                  </button>
-                </div>
+              <div className="bg-white p-3 rounded-xl shadow-sm border">
+                <h3 className="text-xs font-medium text-gray-500">미팅 진행 프로필</h3>
+                <p className="text-xl font-bold text-yellow-500 mt-0.5 text-right">{meetingCount}</p>
               </div>
             </div>
-          </header>
 
-          {/* 본문 탭 */}
-          <div className="mt-6 space-y-8">
-            {activeNav === NAV.ALERTS && (
-              <AlertsTab
-                profiles={profiles}
-                onUpdate={handleUpdate}
-                onDelete={handleDeleteRequest}
-                accessCode={accessCode}
-                onSyncOne={handleSyncOneToCalendar}
-                onShowSimilar={openSimilarModal}
-                onToggleStar={handleToggleStar}
-                onOpenFolderPick={openFolderPick}
-              />
+            {/* 구글 상태 */}
+            {googleApiReady === false && (
+              <span className="hidden md:block text-xs text-red-500">GCal 비활성{googleError ? ` (${googleError})` : ''}</span>
+            )}
+            {googleApiReady === true && (
+              isGoogleSignedIn ? (
+                <button
+                  onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
+                  className="hidden md:block text-sm font-semibold text-gray-600 hover:text-yellow-600"
+                >
+                  Google 로그아웃
+                </button>
+              ) : (
+                <button
+                  onClick={() => tokenClient?.requestAccessToken({ prompt: 'consent' })}
+                  className="hidden md:block text-sm font-semibold text-gray-600 hover:text-yellow-600"
+                >
+                  Google 로그인
+                </button>
+              )
             )}
 
-            {activeNav === NAV.SEARCH && (
-              <SearchTab
-                profiles={profiles}
-                onUpdate={handleUpdate}
-                onDelete={handleDeleteRequest}
-                accessCode={accessCode}
-                onSyncOne={handleSyncOneToCalendar}
-                onShowSimilar={openSimilarModal}
-                onToggleStar={handleToggleStar}
-                onOpenFolderPick={openFolderPick}
-              />
-            )}
-
-            {activeNav === NAV.SPOTLIGHT && (
-              <SpotlightTab
-                profiles={profiles}
-                metaFolders={metaFolders}
-                metaStarredMap={metaStarredMap}
-                onAddFolder={async ()=>{
-                  const name = window.prompt('새 폴더 이름을 입력하세요.');
-                  if (!name) return;
-                  if (metaFolders.includes(name)) { alert('이미 존재하는 폴더입니다.'); return; }
-                  const next = [...metaFolders, name];
-                  await setDoc(metaDocRef, { folders: next }, { merge: true });
-                  setMetaFolders(next);
-                }}
-                onDeleteFolders={async ()=>{
-                  const deletables = metaFolders.filter(f=>f!=='전체');
-                  if (!deletables.length) { alert('삭제할 폴더가 없습니다.'); return; }
-                  const pick = window.prompt(`삭제할 폴더명(들)을 콤마로 입력:\n${deletables.join(', ')}`);
-                  if (!pick) return;
-                  let names = pick.split(',').map(s=>s.trim()).filter(Boolean);
-                  names = names.filter(n=>n!=='전체' && metaFolders.includes(n));
-                  if (!names.length) return;
-                  if (!window.confirm(`정말 삭제하시겠습니까? (${names.join(', ')})`)) return;
-                  const remain = metaFolders.filter(f=>!names.includes(f));
-                  const newMap = {...metaStarredMap};
-                  Object.keys(newMap).forEach(pid => {
-                    newMap[pid] = (newMap[pid]||[]).filter(f=>!names.includes(f));
-                    if (newMap[pid].length===0) delete newMap[pid];
-                  });
-                  await setDoc(metaDocRef, { folders: remain, starredMap: newMap }, { merge: true });
-                  setMetaFolders(remain); setMetaStarredMap(newMap);
-                }}
-                onUpdate={handleUpdate}
-                onDelete={handleDeleteRequest}
-                accessCode={accessCode}
-                onSyncOne={handleSyncOneToCalendar}
-                onShowSimilar={openSimilarModal}
-                onToggleStar={handleToggleStar}
-                onOpenFolderPick={openFolderPick}
-              />
-            )}
-
-            {activeNav === NAV.FUN_RECO && (
-              <FunctionsRecoTab
-                profiles={profiles}
-                onUpdate={handleUpdate}
-                onDelete={handleDeleteRequest}
-                accessCode={accessCode}
-                onSyncOne={handleSyncOneToCalendar}
-                onShowSimilar={openSimilarModal}
-                onToggleStar={handleToggleStar}
-                onOpenFolderPick={openFolderPick}
-              />
-            )}
-
-            {activeNav === NAV.FUN_LONG && (
-              <FunctionsLongTab
-                profiles={profiles}
-                onUpdate={handleUpdate}
-                onDelete={handleDeleteRequest}
-                accessCode={accessCode}
-                onSyncOne={handleSyncOneToCalendar}
-                onShowSimilar={openSimilarModal}
-                onToggleStar={handleToggleStar}
-                onOpenFolderPick={openFolderPick}
-              />
-            )}
-
-            {activeNav === NAV.FUN_GRAPHS && (
-              <FunctionsGraphsTab
-                profiles={profiles}
-                onUpdate={handleUpdate}
-                onDelete={handleDeleteRequest}
-                accessCode={accessCode}
-                onSyncOne={handleSyncOneToCalendar}
-                onShowSimilar={openSimilarModal}
-                onToggleStar={handleToggleStar}
-                onOpenFolderPick={openFolderPick}
-              />
-            )}
-
-            {activeNav === NAV.MANAGE && (
-              <ManageTab
-                profiles={profiles}
-                onUpdate={handleUpdate}
-                onDelete={handleDeleteRequest}
-                handleFormSubmit={handleFormSubmit}
-                handleBulkAdd={handleBulkAdd}
-                formState={formState}
-                setFormState={setFormState}
-                accessCode={accessCode}
-                onSyncOne={handleSyncOneToCalendar}
-                onShowSimilar={openSimilarModal}
-                onToggleStar={handleToggleStar}
-                onOpenFolderPick={openFolderPick}
-              />
-            )}
+            {/* 로그아웃 */}
+            <button onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }} className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center">
+              <LogOut className="w-4 h-4 mr-1.5" /> 로그아웃
+            </button>
           </div>
+        </div>
+      </header>
+
+      {/* 모바일 오버레이 */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 bg-black/30 z-30 md:hidden" onClick={() => setMobileNavOpen(false)} />
+      )}
+
+      <div className="flex">
+        {/* 사이드바 */}
+        <aside
+          className={`
+            fixed md:static z-40 top-0 left-0 h-full md:h-[calc(100vh-57px)] md:top-auto
+            w-72 md:w-64 bg-white border-r transform transition-transform duration-200
+            ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
+          `}
+        >
+          <div className="md:hidden p-3 flex justify-end">
+            <button onClick={() => setMobileNavOpen(false)} className="text-sm px-2 py-1 rounded-md bg-gray-100 hover:bg-gray-200">닫기</button>
+          </div>
+
+          <nav className="p-3 space-y-1 overflow-y-auto h-[calc(100%-44px)] md:h-full">
+            <button
+              onClick={() => { setActiveMain(MAIN_TAB.ALERTS); setMobileNavOpen(false); }}
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md hover:bg-yellow-50 ${activeMain===MAIN_TAB.ALERTS?'bg-yellow-100 text-yellow-800':'text-gray-700'}`}
+            >
+              <Bell size={16}/> 알림
+            </button>
+            <button
+              onClick={() => { setActiveMain(MAIN_TAB.SEARCH); setMobileNavOpen(false); }}
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md hover:bg-yellow-50 ${activeMain===MAIN_TAB.SEARCH?'bg-yellow-100 text-yellow-800':'text-gray-700'}`}
+            >
+              <Search size={16}/> 검색
+            </button>
+            <button
+              onClick={() => { setActiveMain(MAIN_TAB.SPOTLIGHT); setMobileNavOpen(false); }}
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md hover:bg-yellow-50 ${activeMain===MAIN_TAB.SPOTLIGHT?'bg-yellow-100 text-yellow-800':'text-gray-700'}`}
+            >
+              <StarIcon size={16}/> 주목 중인 프로필들
+            </button>
+
+            {/* Functions */}
+            <div className="mt-3">
+              <button
+                onClick={() => setFunctionsOpen(v=>!v)}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-md hover:bg-yellow-50 ${activeMain===MAIN_TAB.FUNCTIONS?'bg-yellow-100 text-yellow-800':'text-gray-700'}`}
+              >
+                <span className="flex items-center gap-2"><Settings2 size={16}/> Functions</span>
+                {functionsOpen ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}
+              </button>
+              {functionsOpen && (
+                <div className="ml-6 mt-1 space-y-1">
+                  <button
+                    onClick={() => { setActiveMain(MAIN_TAB.FUNCTIONS); setActiveFuncSub(FUNC_SUB.RECOMMEND); setMobileNavOpen(false); }}
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-yellow-50 ${activeMain===MAIN_TAB.FUNCTIONS && activeFuncSub===FUNC_SUB.RECOMMEND ? 'bg-yellow-100 text-yellow-800' : 'text-gray-700'}`}
+                  >
+                    <AlertCircle size={14}/> 추천
+                  </button>
+                  <button
+                    onClick={() => { setActiveMain(MAIN_TAB.FUNCTIONS); setActiveFuncSub(FUNC_SUB.LONGTERM); setMobileNavOpen(false); }}
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-yellow-50 ${activeMain===MAIN_TAB.FUNCTIONS && activeFuncSub===FUNC_SUB.LONGTERM ? 'bg-yellow-100 text-yellow-800' : 'text-gray-700'}`}
+                  >
+                    <Clock size={14}/> 장기관리
+                  </button>
+                  <button
+                    onClick={() => { setActiveMain(MAIN_TAB.FUNCTIONS); setActiveFuncSub(FUNC_SUB.GRAPHS); setMobileNavOpen(false); }}
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-yellow-50 ${activeMain===MAIN_TAB.FUNCTIONS && activeFuncSub===FUNC_SUB.GRAPHS ? 'bg-yellow-100 text-yellow-800' : 'text-gray-700'}`}
+                  >
+                    <LineChart size={14}/> 그래프&필터
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={() => { setActiveMain(MAIN_TAB.MANAGE); setMobileNavOpen(false); }}
+              className={`mt-3 w-full flex items-center gap-2 px-3 py-2 rounded-md hover:bg-yellow-50 ${activeMain===MAIN_TAB.MANAGE?'bg-yellow-100 text-yellow-800':'text-gray-700'}`}
+            >
+              <Layers size={16}/> 프로필 관리
+            </button>
+          </nav>
+        </aside>
+
+        {/* 메인 컨텐트 */}
+        <main className="flex-1 p-3 md:p-6">
+          {activeMain === MAIN_TAB.ALERTS && (
+            <AlertsTab
+              profiles={profiles}
+              onUpdate={handleUpdate}
+              onDelete={handleDeleteRequest}
+              accessCode={accessCode}
+              onSyncOne={handleSyncOneToCalendar}
+              onShowSimilar={openSimilarModal}
+              onToggleStarAskFolder={handleToggleStarAskFolder}
+              onShareLink={handleShareLink}
+              onEditStart={handleEditStart}
+            />
+          )}
+
+          {activeMain === MAIN_TAB.SEARCH && (
+            <SearchTab
+              profiles={profiles}
+              onUpdate={handleUpdate}
+              onDelete={handleDeleteRequest}
+              accessCode={accessCode}
+              onSyncOne={handleSyncOneToCalendar}
+              onShowSimilar={openSimilarModal}
+              onToggleStarAskFolder={handleToggleStarAskFolder}
+              onShareLink={handleShareLink}
+              onEditStart={handleEditStart}
+            />
+          )}
+
+          {activeMain === MAIN_TAB.SPOTLIGHT && (
+            <SpotlightTab
+              profiles={profiles}
+              folders={folders}
+              setFolders={setFolders}
+              selectedFolder={selectedFolder}
+              setSelectedFolder={setSelectedFolder}
+              onUpdate={handleUpdate}
+              onDelete={handleDeleteRequest}
+              accessCode={accessCode}
+              onSyncOne={handleSyncOneToCalendar}
+              onShowSimilar={openSimilarModal}
+              onToggleStarAskFolder={handleToggleStarAskFolder}
+              onShareLink={handleShareLink}
+              onEditStart={handleEditStart}
+              onAddFolder={addFolder}
+              onDeleteFolders={deleteFolders}
+            />
+          )}
+
+          {activeMain === MAIN_TAB.FUNCTIONS && activeFuncSub === FUNC_SUB.RECOMMEND && (
+            <RecommendPanel
+              profiles={profiles}
+              onUpdate={handleUpdate}
+              onDelete={handleDeleteRequest}
+              accessCode={accessCode}
+              onSyncOne={handleSyncOneToCalendar}
+              onShowSimilar={openSimilarModal}
+              onToggleStarAskFolder={handleToggleStarAskFolder}
+              onShareLink={handleShareLink}
+              onEditStart={handleEditStart}
+            />
+          )}
+          {activeMain === MAIN_TAB.FUNCTIONS && activeFuncSub === FUNC_SUB.LONGTERM && (
+            <LongtermPanel
+              profiles={profiles}
+              onUpdate={handleUpdate}
+              onDelete={handleDeleteRequest}
+              accessCode={accessCode}
+              onSyncOne={handleSyncOneToCalendar}
+              onShowSimilar={openSimilarModal}
+              onToggleStarAskFolder={handleToggleStarAskFolder}
+              onShareLink={handleShareLink}
+              onEditStart={handleEditStart}
+            />
+          )}
+          {activeMain === MAIN_TAB.FUNCTIONS && activeFuncSub === FUNC_SUB.GRAPHS && (
+            <GraphsPanel
+              profiles={profiles}
+              onUpdate={handleUpdate}
+              onDelete={handleDeleteRequest}
+              accessCode={accessCode}
+              onSyncOne={handleSyncOneToCalendar}
+              onShowSimilar={openSimilarModal}
+              onToggleStarAskFolder={handleToggleStarAskFolder}
+              onShareLink={handleShareLink}
+              onEditStart={handleEditStart}
+            />
+          )}
+
+          {activeMain === MAIN_TAB.MANAGE && (
+            <ManageTab
+              profiles={profiles}
+              onUpdate={handleUpdate}
+              onDelete={handleDeleteRequest}
+              handleFormSubmit={handleFormSubmit}
+              handleBulkAdd={handleBulkAdd}
+              formState={{ newName, newCareer, newAge, newOtherInfo, newEventDate, newExpertise, newPriority, newMeetingRecord }}
+              setFormState={{ setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewEventDate, setNewExpertise, setNewPriority, setNewMeetingRecord }}
+              accessCode={accessCode}
+              onSyncOne={handleSyncOneToCalendar}
+              onShowSimilar={openSimilarModal}
+              onToggleStarAskFolder={handleToggleStarAskFolder}
+              onShareLink={handleShareLink}
+              onEditStart={handleEditStart}
+            />
+          )}
         </main>
       </div>
 
-      {/* 모달들 */}
+      {/* 유사 프로필 모달 */}
       <SimilarModal
         open={similarOpen}
         onClose={() => setSimilarOpen(false)}
         baseProfile={similarBase}
         items={similarList}
-        onShowProfileActions={renderActionsInline}
+        expanded={similarExpanded}
+        onShowProfile={(p) => setSimilarExpanded(p)}
+        onBackInModal={() => setSimilarExpanded(null)}
+        actionHandlers={similarActionHandlers}
       />
 
+      {/* 폴더 선택 모달 */}
       <FolderSelectModal
-        open={folderPickOpen}
-        folders={metaFolders}
-        defaultChecked={['전체']}
-        onClose={()=>setFolderPickOpen(false)}
-        onSave={handleFolderSave}
+        open={folderModalOpen}
+        onClose={() => setFolderModalOpen(false)}
+        folders={folders}
+        selected={folderModalSelected}
+        setSelected={setFolderModalSelected}
+        onSave={saveFoldersForTarget}
       />
-
-      {/* 삭제 확인 모달 */}
-      {showDeleteConfirm.show && (
-        <ConfirmationModal
-          message={`'${showDeleteConfirm.profileName}' 프로필을 정말로 삭제하시겠습니까?`}
-          onConfirm={confirmDelete}
-          onCancel={() => setShowDeleteConfirm({ show: false, profileId: null, profileName: '' })}
-        />
-      )}
     </div>
   );
 }
