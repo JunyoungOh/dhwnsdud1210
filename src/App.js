@@ -6,7 +6,7 @@ import {
 import {
   Users, LogOut, Search as SearchIcon, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save,
   UploadCloud, BellRing, Share2, CalendarPlus, AlertCircle, Star, StarOff, Folder, ChevronLeft, ChevronRight,
-  ChevronDoubleLeft, ChevronDoubleRight, Layers, Filter, Clock, Sparkles
+  ChevronsLeft, ChevronsRight, Layers, Filter, Clock, Sparkles
 } from 'lucide-react';
 
 import { initializeApp } from 'firebase/app';
@@ -1277,13 +1277,13 @@ function ManageTab({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
         </div>
         {/* 페이지네이션: 숫자/좌우/더블 */}
         <div className="mt-6 flex items-center justify-center gap-1">
-          <button className="px-2 py-1 border rounded disabled:opacity-40" disabled={page<=1} onClick={()=>setPage(1)}><ChevronDoubleLeft size={16}/></button>
+          <button className="px-2 py-1 border rounded disabled:opacity-40" disabled={page<=1} onClick={()=>setPage(1)}><ChevronsLeft size={16}/></button>
           <button className="px-2 py-1 border rounded disabled:opacity-40" disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}><ChevronLeft size={16}/></button>
           {Array.from({length: totalPages}, (_,i)=>i+1).slice(Math.max(0, page-6), Math.max(0, page-6)+10).map(n=>(
             <button key={n} className={`px-2 py-1 border rounded ${n===page?'bg-yellow-400 text-white border-yellow-400':''}`} onClick={()=>setPage(n)}>{n}</button>
           ))}
           <button className="px-2 py-1 border rounded disabled:opacity-40" disabled={page>=totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))}><ChevronRight size={16}/></button>
-          <button className="px-2 py-1 border rounded disabled:opacity-40" disabled={page>=totalPages} onClick={()=>setPage(totalPages)}><ChevronDoubleRight size={16}/></button>
+          <button className="px-2 py-1 border rounded disabled:opacity-40" disabled={page>=totalPages} onClick={()=>setPage(totalPages)}><ChevronsRight size={16}/></button>
         </div>
       </section>
     </>
