@@ -4,7 +4,7 @@ import {
   PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer
 } from 'recharts';
 import {
-  Users, LogOut, Search as SearchIcon, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, ShieldAlert, X, Save,
+  Users, LogOut, Search as SearchIcon, Calendar, Zap, UserPlus, KeyRound, Loader2, Edit, Trash2, X, Save,
   UploadCloud, BellRing, Share2, CalendarPlus, AlertCircle, Star, StarOff, Folder, ChevronLeft, ChevronRight,
   ChevronsLeft, ChevronsRight, Layers, Filter, Clock, Sparkles
 } from 'lucide-react';
@@ -177,8 +177,8 @@ function similarityScore(a, b) {
   let score = jaccard(ta, tb) * 100; // 0~100
   if (a.priority && b.priority && a.priority === b.priority) score += 6;
   const ak = TARGET_KEYWORDS.filter(k => (a.career||'').includes(k));
-  const bk = TARGET_KEYWORDS.filter(k => (b.career||'').includes(k));
-  score += Math.min(ak.filter(k => bk.includes(k)).length * 6, 18);
+  const bk = TARGET_KEYWORDS.filter(k => (b.career||'').includes(k)).length;
+  score += Math.min(ak.filter(k => (b.career||'').includes(k)).length * 6, 18);
   if (a.expertise && b.expertise && a.expertise === b.expertise) score += 8;
   return Math.max(0, Math.min(100, Math.round(score)));
 }
@@ -299,7 +299,7 @@ const ProfileDetailView = ({ profileId, accessCode }) => {
 // ==============================
 // Profile UI (PC: Wide row, Mobile: Card)
 // ==============================
-function WideProfileRow({ profile, accessCode, onUpdate, onDelete, onShowSimilar, onSyncOne, onStarClick }) {
+function WideProfileRow({ profile, accessCode, onUpdate, onDelete, onShowSimilar, onSyncOne, onPickFolder }) {
   const [isEditing, setIsEditing] = React.useState(false);
   const [edited, setEdited] = React.useState(profile);
   React.useEffect(()=>setEdited(profile),[profile]);
@@ -342,7 +342,7 @@ function WideProfileRow({ profile, accessCode, onUpdate, onDelete, onShowSimilar
   return (
     <div className="relative bg-white border rounded-xl p-4 shadow-sm">
       <div className="absolute right-2 top-2 flex items-center gap-1">
-        <button onClick={onStarClick} className={smallIconBtn} title={profile.starred?'주목 해제':'모아보기'}>{profile.starred ? <Star size={16} className="text-yellow-500"/> : <StarOff size={16}/>}</button>
+        <button onClick={()=>onPickFolder?.(profile)} className={smallIconBtn} title={profile.starred?'폴더 지정/해제':'모아보기 지정'}>{profile.starred ? <Star size={16} className="text-yellow-500"/> : <StarOff size={16}/>}</button>
         <button onClick={()=>onShowSimilar?.(profile)} className={smallIconBtn} title="유사 프로필"><Users size={16}/></button>
         <button onClick={share} className={smallIconBtn} title="공유"><Share2 size={16}/></button>
         <button onClick={()=>setIsEditing(true)} className={smallIconBtn} title="수정"><Edit size={16}/></button>
@@ -383,7 +383,7 @@ function WideProfileRow({ profile, accessCode, onUpdate, onDelete, onShowSimilar
   );
 }
 
-function ProfileCardMobile({ profile, accessCode, onUpdate, onDelete, onShowSimilar, onSyncOne, onStarClick }) {
+function ProfileCardMobile({ profile, accessCode, onUpdate, onDelete, onShowSimilar, onSyncOne, onPickFolder }) {
   const [isEditing, setIsEditing] = React.useState(false);
   const [edited, setEdited] = React.useState(profile);
   React.useEffect(()=>setEdited(profile),[profile]);
@@ -427,7 +427,7 @@ function ProfileCardMobile({ profile, accessCode, onUpdate, onDelete, onShowSimi
   return (
     <div className="bg-white p-4 rounded-lg shadow relative">
       <div className="absolute right-2 top-2 flex items-center gap-1">
-        <button onClick={onStarClick} className="p-1 rounded-md hover:bg-gray-100 text-gray-500">{profile.starred ? <Star size={16} className="text-yellow-500"/> : <StarOff size={16}/>}</button>
+        <button onClick={()=>onPickFolder?.(profile)} className="p-1 rounded-md hover:bg-gray-100 text-gray-500">{profile.starred ? <Star size={16} className="text-yellow-500"/> : <StarOff size={16}/>}</button>
         <button onClick={()=>onShowSimilar?.(profile)} className="p-1 rounded-md hover:bg-gray-100 text-gray-500"><Users size={16}/></button>
         <button onClick={()=>onSyncOne?.(profile)} className="p-1 rounded-md hover:bg-gray-100 text-gray-500"><CalendarPlus size={16}/></button>
         <button onClick={()=>setIsEditing(true)} className="p-1 rounded-md hover:bg-gray-100 text-gray-500"><Edit size={16}/></button>
@@ -460,7 +460,7 @@ function ProfileCardMobile({ profile, accessCode, onUpdate, onDelete, onShowSimi
 // ==============================
 // Similar modal
 // ==============================
-function SimilarModal({ open, onClose, baseProfile, items, accessCode, onUpdate, onDelete, onShowSimilar, onSyncOne, onStarClick }) {
+function SimilarModal({ open, onClose, baseProfile, items, accessCode, onUpdate, onDelete, onShowSimilar, onSyncOne, onPickFolder }) {
   const [focus, setFocus] = React.useState(null);
   React.useEffect(()=>{ if(!open) setFocus(null); },[open]);
 
@@ -503,7 +503,7 @@ function SimilarModal({ open, onClose, baseProfile, items, accessCode, onUpdate,
               onDelete={onDelete}
               onShowSimilar={onShowSimilar}
               onSyncOne={onSyncOne}
-              onStarClick={()=>onStarClick?.(focus)}
+              onPickFolder={onPickFolder}
             />
           </div>
         )}
@@ -513,95 +513,75 @@ function SimilarModal({ open, onClose, baseProfile, items, accessCode, onUpdate,
 }
 
 // ==============================
-// Spotlight folders panel
+// Pick Folder Modal
 // ==============================
-function PickFolderContent({ folders, onSave, onCancel }) {
-  const [sel, setSel] = React.useState(()=>Object.fromEntries(Object.keys(folders).map(k=>[k,k==='all']))); // all 기본 ON
+function PickFolderModal({ open, onClose, profile, folders, onSave, onUnstar }) {
+  const [sel, setSel] = React.useState({});
+
+  React.useEffect(() => {
+    if (!open || !profile) return;
+    const initial = Object.fromEntries(Object.keys(folders).map(k => [k, (folders[k]||[]).includes(profile.id)]));
+    // 기본값: all 은 항상 체크되도록 보정
+    initial.all = true;
+    setSel(initial);
+  }, [open, profile, folders]);
+
+  if (!open || !profile) return null;
+
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-2">
-        {Object.keys(folders).sort((a,b)=>a==='all'?-1:b==='all'?1:a.localeCompare(b)).map(fn => (
-          <label key={fn} className="flex items-center gap-2 border rounded-md p-2 text-sm">
-            <input type="checkbox" checked={!!sel[fn]} onChange={e=>setSel(s=>({...s,[fn]:e.target.checked}))}/>
-            <span>📁 {fn}</span>
-          </label>
-        ))}
+    <Modal onClose={onClose} title={`폴더 선택 — ${profile.name}`}>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-2">
+          {Object.keys(folders).sort((a,b)=>a==='all'?-1:b==='all'?1:a.localeCompare(b)).map(fn => (
+            <label key={fn} className="flex items-center gap-2 border rounded-md p-2 text-sm">
+              <input
+                type="checkbox"
+                checked={!!sel[fn]}
+                onChange={e=>{
+                  const checked = e.target.checked;
+                  setSel(s=>{
+                    const next = { ...s, [fn]: checked };
+                    // all은 최소 1개 보장 로직: 사용자가 all을 끄려해도 다시 켜줌
+                    if (fn === 'all') next.all = true;
+                    // 어떤 폴더도 체크되지 않으면 all만 강제 체크
+                    const any = Object.entries(next).some(([k,v])=>k!=='all' && v);
+                    if (!any) next.all = true;
+                    return next;
+                  });
+                }}
+              />
+              <span>📁 {fn}</span>
+            </label>
+          ))}
+        </div>
+
+        <div className="flex justify-between">
+          <button onClick={onUnstar} className="px-3 py-1 rounded-md bg-gray-100 text-gray-700 border">모아보기 해제</button>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-3 py-1 rounded-md border">취소</button>
+            <button onClick={()=>onSave(sel)} className="px-3 py-1 rounded-md bg-yellow-500 text-white">저장</button>
+          </div>
+        </div>
       </div>
-      <div className="flex justify-end gap-2">
-        <button onClick={onCancel} className="px-3 py-1 rounded-md border">취소</button>
-        <button onClick={()=>onSave(sel)} className="px-3 py-1 rounded-md bg-yellow-500 text-white">저장</button>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
-function SpotlightFoldersPanel({ accessCode, profiles, onToggleStar, onUpdate, onDelete, onShowSimilar, onSyncOne }) {
-  const [folders, setFolders] = React.useState({ all: [] });
+// ==============================
+// Spotlight folders panel (stateless; meta는 상위(App)에서 주입)
+// ==============================
+function SpotlightFoldersPanel({ accessCode, profiles, folders, onAddFolder, onDeleteFolders, onPickFolder }) {
   const [activeFolder, setActiveFolder] = React.useState('all');
   const [showAddModal, setShowAddModal] = React.useState(false);
   const [newFolderName, setNewFolderName] = React.useState('');
   const [deleting, setDeleting] = React.useState(false);
   const [deleteTargets, setDeleteTargets] = React.useState({});
-  const [showPickFolder, setShowPickFolder] = React.useState(false);
-  const [pickTargetId, setPickTargetId] = React.useState(null);
-
-  React.useEffect(() => { (async()=>{ if(!accessCode) return; const meta = await readMeta(accessCode); const sf = { all: [], ...(meta.spotlightFolders||{}) }; setFolders(sf); })(); }, [accessCode]);
 
   const folderProfiles = React.useMemo(() => {
     const ids = folders[activeFolder] || [];
     const map = new Map(profiles.map(p => [p.id, p]));
     return ids.map(id => map.get(id)).filter(Boolean);
   }, [folders, activeFolder, profiles]);
-
-  const createFolder = async () => {
-    const name = (newFolderName||'').trim();
-    if (!name || name==='all') { alert('폴더명은 비워둘 수 없고 "all"은 사용할 수 없습니다.'); return; }
-    if (folders[name]) { alert('이미 존재하는 폴더입니다.'); return; }
-    const next = { ...folders, [name]: [] };
-    setFolders(next);
-    setShowAddModal(false);
-    setNewFolderName('');
-    await writeMeta(accessCode, { spotlightFolders: next });
-  };
-
-  const doDeleteFolders = async () => {
-    const remain = { ...folders };
-    let changed = false;
-    Object.keys(deleteTargets).forEach(fn => {
-      if (fn!=='all' && deleteTargets[fn]) { delete remain[fn]; changed = true; }
-    });
-    setDeleting(false); setDeleteTargets({});
-    if (changed) { setFolders(remain); await writeMeta(accessCode, { spotlightFolders: remain }); if (!remain[activeFolder]) setActiveFolder('all'); }
-  };
-
-  const openPick = async (profileId) => { setPickTargetId(profileId); setShowPickFolder(true); };
-  const savePick = async (selected) => {
-    const next = { ...folders };
-    Object.keys(next).forEach(fn => {
-      if (selected[fn]) {
-        if (!next[fn].includes(pickTargetId)) next[fn] = [...next[fn], pickTargetId];
-      } else {
-        if (next[fn].includes(pickTargetId)) next[fn] = next[fn].filter(x => x !== pickTargetId);
-      }
-    });
-    if (!next.all.includes(pickTargetId)) next.all = [...next.all, pickTargetId];
-    setFolders(next);
-    setShowPickFolder(false);
-    setPickTargetId(null);
-    await writeMeta(accessCode, { spotlightFolders: next });
-  };
-
-  const handleStarClick = async (profile) => {
-    if (profile.starred) {
-      await onToggleStar(profile.id, false);
-      const next = Object.fromEntries(Object.entries(folders).map(([k, arr]) => [k, arr.filter(id => id !== profile.id)]));
-      setFolders(next);
-      await writeMeta(accessCode, { spotlightFolders: next });
-    } else {
-      await onToggleStar(profile.id, true);
-      openPick(profile.id);
-    }
-  };
 
   return (
     <section className="space-y-4">
@@ -629,11 +609,11 @@ function SpotlightFoldersPanel({ accessCode, profiles, onToggleStar, onUpdate, o
               key={p.id}
               profile={p}
               accessCode={accessCode}
-              onUpdate={onUpdate}
-              onDelete={onDelete}
-              onShowSimilar={onShowSimilar}
-              onSyncOne={onSyncOne}
-              onStarClick={()=>handleStarClick(p)}
+              onUpdate={()=>{}}
+              onDelete={()=>{}}
+              onShowSimilar={()=>{}}
+              onSyncOne={()=>{}}
+              onPickFolder={onPickFolder}
             />
           ))}
         </div>
@@ -645,7 +625,13 @@ function SpotlightFoldersPanel({ accessCode, profiles, onToggleStar, onUpdate, o
             <input className="w-full border rounded-md p-2" placeholder="폴더 이름" value={newFolderName} onChange={e=>setNewFolderName(e.target.value)}/>
             <div className="flex justify-end gap-2">
               <button onClick={()=>setShowAddModal(false)} className="px-3 py-1 rounded-md border">취소</button>
-              <button onClick={createFolder} className="px-3 py-1 rounded-md bg-yellow-500 text-white">생성</button>
+              <button onClick={async ()=>{
+                const name = (newFolderName||'').trim();
+                if (!name || name==='all') { alert('폴더명은 비워둘 수 없고 "all"은 사용할 수 없습니다.'); return; }
+                await onAddFolder(name);
+                setNewFolderName('');
+                setShowAddModal(false);
+              }} className="px-3 py-1 rounded-md bg-yellow-500 text-white">생성</button>
             </div>
           </div>
         </Modal>
@@ -665,18 +651,15 @@ function SpotlightFoldersPanel({ accessCode, profiles, onToggleStar, onUpdate, o
             </div>
             <div className="flex justify-end gap-2">
               <button onClick={()=>setDeleting(false)} className="px-3 py-1 rounded-md border">취소</button>
-              <button onClick={()=>{
+              <button onClick={async ()=>{
                 if (!window.confirm('정말 삭제하시겠습니까? 폴더만 삭제되며 프로필은 보존됩니다.')) return;
-                doDeleteFolders();
+                const targets = Object.keys(deleteTargets).filter(k=>deleteTargets[k]);
+                await onDeleteFolders(targets);
+                setDeleteTargets({});
+                setDeleting(false);
               }} className="px-3 py-1 rounded-md bg-red-500 text-white">삭제</button>
             </div>
           </div>
-        </Modal>
-      )}
-
-      {showPickFolder && (
-        <Modal onClose={()=>{setShowPickFolder(false); setPickTargetId(null);}} title="폴더 선택">
-          <PickFolderContent folders={folders} onSave={savePick} onCancel={()=>{setShowPickFolder(false); setPickTargetId(null);}}/>
         </Modal>
       )}
     </section>
@@ -686,25 +669,22 @@ function SpotlightFoldersPanel({ accessCode, profiles, onToggleStar, onUpdate, o
 // ==============================
 // Filter results section
 // ==============================
-const FilterResultSection = ({ title, profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => (
+const FilterResultSection = ({ title, profiles, onPickFolder, accessCode }) => (
   <section className="bg-white p-4 rounded-xl shadow-md mt-4">
     <div className="flex justify-between items-center mb-3">
       <h3 className="text-lg font-bold text-gray-800">{title}</h3>
       <span className="text-xs text-gray-400">필터 해제는 그래프 영역 밖 클릭</span>
     </div>
-    {/* PC: 와이드, Mobile: 카드 */}
     <div className="hidden md:grid md:grid-cols-2 gap-4">
       {profiles.map(p => (
         <WideProfileRow key={p.id} profile={p} accessCode={accessCode}
-          onUpdate={onUpdate} onDelete={onDelete} onShowSimilar={onShowSimilar}
-          onSyncOne={onSyncOne} onStarClick={()=>onToggleStar(p.id, !p.starred)} />
+          onPickFolder={onPickFolder} />
       ))}
     </div>
     <div className="md:hidden grid grid-cols-1 gap-4">
       {profiles.map(p => (
         <ProfileCardMobile key={p.id} profile={p} accessCode={accessCode}
-          onUpdate={onUpdate} onDelete={onDelete} onShowSimilar={onShowSimilar}
-          onSyncOne={onSyncOne} onStarClick={()=>onToggleStar(p.id, !p.starred)} />
+          onPickFolder={onPickFolder} />
       ))}
     </div>
   </section>
@@ -779,7 +759,7 @@ function ExcelUploader({ onBulkAdd }) {
 // ==============================
 // Tabs content (Alerts/Search/Spotlight/Functions/Manage)
 // ==============================
-function AlertsTodayUpcoming({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) {
+function AlertsTodayUpcoming({ profiles, accessCode, onPickFolder }) {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const tomorrowStart = new Date(todayStart); tomorrowStart.setDate(tomorrowStart.getDate() + 1);
@@ -790,52 +770,36 @@ function AlertsTodayUpcoming({ profiles, onUpdate, onDelete, accessCode, onSyncO
   const upcoming = profiles.filter(p => p.eventDate && new Date(p.eventDate) > now && new Date(p.eventDate) < threeDaysLater)
                            .sort((a,b)=>new Date(a.eventDate)-new Date(b.eventDate));
 
+  const ProfileList = ({items}) => (
+    <>
+      <div className="hidden md:grid md:grid-cols-2 gap-4">
+        {items.map(p => (<WideProfileRow key={p.id} profile={p} accessCode={accessCode} onPickFolder={onPickFolder}/>))}
+      </div>
+      <div className="md:hidden grid grid-cols-1 gap-4">
+        {items.map(p => (<ProfileCardMobile key={p.id} profile={p} accessCode={accessCode} onPickFolder={onPickFolder}/>))}
+      </div>
+    </>
+  );
+
   return (
     <>
       {today.length>0 && (
         <section className="mb-8">
           <SectionTitle icon={Calendar} text="오늘의 일정" />
-          <div className="hidden md:grid md:grid-cols-2 gap-4">
-            {today.map(p => (
-              <WideProfileRow key={p.id} profile={p} accessCode={accessCode} onUpdate={onUpdate}
-                onDelete={onDelete} onShowSimilar={onShowSimilar} onSyncOne={onSyncOne}
-                onStarClick={()=>onToggleStar(p.id, !p.starred)} />
-            ))}
-          </div>
-          <div className="md:hidden grid grid-cols-1 gap-4">
-            {today.map(p => (
-              <ProfileCardMobile key={p.id} profile={p} accessCode={accessCode} onUpdate={onUpdate}
-                onDelete={onDelete} onShowSimilar={onShowSimilar} onSyncOne={onSyncOne}
-                onStarClick={()=>onToggleStar(p.id, !p.starred)} />
-            ))}
-          </div>
+          <ProfileList items={today}/>
         </section>
       )}
-
       {upcoming.length>0 && (
         <section className="mb-8">
           <SectionTitle icon={Zap} text="다가오는 일정" />
-          <div className="hidden md:grid md:grid-cols-2 gap-4">
-            {upcoming.map(p => (
-              <WideProfileRow key={p.id} profile={p} accessCode={accessCode} onUpdate={onUpdate}
-                onDelete={onDelete} onShowSimilar={onShowSimilar} onSyncOne={onSyncOne}
-                onStarClick={()=>onToggleStar(p.id, !p.starred)} />
-            ))}
-          </div>
-          <div className="md:hidden grid grid-cols-1 gap-4">
-            {upcoming.map(p => (
-              <ProfileCardMobile key={p.id} profile={p} accessCode={accessCode} onUpdate={onUpdate}
-                onDelete={onDelete} onShowSimilar={onShowSimilar} onSyncOne={onSyncOne}
-                onStarClick={()=>onToggleStar(p.id, !p.starred)} />
-            ))}
-          </div>
+          <ProfileList items={upcoming}/>
         </section>
       )}
     </>
   );
 }
 
-function SearchOnly({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) {
+function SearchOnly({ profiles, accessCode, onPickFolder }) {
   const [term, setTerm] = React.useState('');
   const results = React.useMemo(() => {
     const t = term.trim(); if (!t) return [];
@@ -866,18 +830,10 @@ function SearchOnly({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
         <div className="space-y-4">
           <SectionTitle icon={Filter} text="검색 결과" />
           <div className="hidden md:grid md:grid-cols-2 gap-4">
-            {results.map(p => (
-              <WideProfileRow key={p.id} profile={p} accessCode={accessCode} onUpdate={onUpdate}
-                onDelete={onDelete} onShowSimilar={onShowSimilar} onSyncOne={onSyncOne}
-                onStarClick={()=>onToggleStar(p.id, !p.starred)} />
-            ))}
+            {results.map(p => (<WideProfileRow key={p.id} profile={p} accessCode={accessCode} onPickFolder={onPickFolder}/>))}
           </div>
           <div className="md:hidden grid grid-cols-1 gap-4">
-            {results.map(p => (
-              <ProfileCardMobile key={p.id} profile={p} accessCode={accessCode} onUpdate={onUpdate}
-                onDelete={onDelete} onShowSimilar={onShowSimilar} onSyncOne={onSyncOne}
-                onStarClick={()=>onToggleStar(p.id, !p.starred)} />
-            ))}
+            {results.map(p => (<ProfileCardMobile key={p.id} profile={p} accessCode={accessCode} onPickFolder={onPickFolder}/>))}
           </div>
         </div>
       )}
@@ -885,24 +841,23 @@ function SearchOnly({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
   );
 }
 
-function SpotlightTab({ accessCode, profiles, onToggleStar, onUpdate, onDelete, onShowSimilar, onSyncOne }) {
+function SpotlightTab({ accessCode, profiles, folders, onAddFolder, onDeleteFolders, onPickFolder }) {
   return (
     <section>
       <SectionTitle icon={Star} text="주목 중인 프로필들" />
       <SpotlightFoldersPanel
         accessCode={accessCode}
         profiles={profiles.filter(p => !!p.starred)}
-        onToggleStar={onToggleStar}
-        onUpdate={onUpdate}
-        onDelete={onDelete}
-        onShowSimilar={onShowSimilar}
-        onSyncOne={onSyncOne}
+        folders={folders}
+        onAddFolder={onAddFolder}
+        onDeleteFolders={onDeleteFolders}
+        onPickFolder={onPickFolder}
       />
     </section>
   );
 }
 
-function RecoContent({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) {
+function RecoContent({ profiles, accessCode, onPickFolder }) {
   const now = new Date();
   const rec = React.useMemo(() => {
     const scoreOf = (p) => {
@@ -923,12 +878,6 @@ function RecoContent({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSh
       .slice(0, 30).map(x=>x.p);
   }, [profiles, now]);
 
-  const handleSnooze = async (id) => {
-    const snoozeDate = new Date(); snoozeDate.setMonth(snoozeDate.getMonth() + 3);
-    await onUpdate(id, { snoozeUntil: snoozeDate.toISOString() });
-  };
-  const handleConfirm = async (id) => onUpdate(id, { lastReviewedDate: new Date().toISOString() });
-
   return (
     <section>
       <div className="flex items-center gap-2 mb-2">
@@ -937,7 +886,6 @@ function RecoContent({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSh
             <AlertCircle className="w-4 h-4 text-yellow-600 cursor-default" />
             <div className="absolute z-10 hidden group-hover:block bg-gray-900 text-white text-xs rounded-md px-3 py-2 w-72 -left-2 mt-2 shadow-lg">
               최근 팔로업 시점/스누즈/우선순위/IT 키워드 등을 반영해 점수를 계산해요.
-              ‘확인’을 누르면 목록에서 제외되고, 보통 3개월 후 조건 충족 시 다시 나타납니다.
             </div>
           </div>}
         />
@@ -947,24 +895,10 @@ function RecoContent({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSh
       ) : (
         <>
           <div className="hidden md:grid md:grid-cols-2 gap-4">
-            {rec.map(p => (
-              <WideProfileRow key={p.id} profile={p} accessCode={accessCode} onUpdate={onUpdate}
-                onDelete={onDelete} onShowSimilar={onShowSimilar} onSyncOne={onSyncOne}
-                onStarClick={()=>onToggleStar(p.id, !p.starred)} />
-            ))}
+            {rec.map(p => (<WideProfileRow key={p.id} profile={p} accessCode={accessCode} onPickFolder={onPickFolder}/>))}
           </div>
           <div className="md:hidden grid grid-cols-1 gap-4">
-            {rec.map(p => (
-              <div key={p.id}>
-                <ProfileCardMobile profile={p} accessCode={accessCode} onUpdate={onUpdate}
-                  onDelete={onDelete} onShowSimilar={onShowSimilar} onSyncOne={onSyncOne}
-                  onStarClick={()=>onToggleStar(p.id, !p.starred)} />
-                <div className="mt-2 flex justify-end gap-2">
-                  <button onClick={()=>handleConfirm(p.id)} className="text-xs bg-gray-200 px-3 py-1 rounded">확인</button>
-                  <button onClick={()=>handleSnooze(p.id)} className="text-xs bg-indigo-100 text-indigo-700 px-3 py-1 rounded">3개월 후 다시</button>
-                </div>
-              </div>
-            ))}
+            {rec.map(p => (<ProfileCardMobile key={p.id} profile={p} accessCode={accessCode} onPickFolder={onPickFolder}/>))}
           </div>
         </>
       )}
@@ -972,7 +906,7 @@ function RecoContent({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSh
   );
 }
 
-function LongTermContent({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) {
+function LongTermContent({ profiles, accessCode, onPickFolder }) {
   const now = new Date();
   const threeMonthsAgo = new Date(now); threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
   const longTerm = React.useMemo(() => {
@@ -983,12 +917,6 @@ function LongTermContent({ profiles, onUpdate, onDelete, accessCode, onSyncOne, 
     }).sort((a,b)=> (new Date(a.lastReviewedDate || a.eventDate||0)) - (new Date(b.lastReviewedDate || b.eventDate||0)));
   }, [profiles, now, threeMonthsAgo]);
 
-  const handleSnooze = async (id) => {
-    const snoozeDate = new Date(); snoozeDate.setMonth(snoozeDate.getMonth() + 3);
-    await onUpdate(id, { snoozeUntil: snoozeDate.toISOString() });
-  };
-  const handleConfirm = async (id) => onUpdate(id, { lastReviewedDate: new Date().toISOString() });
-
   return (
     <section>
       <SectionTitle icon={BellRing} text="장기 미접촉 알림 (3개월 이상)" />
@@ -997,24 +925,10 @@ function LongTermContent({ profiles, onUpdate, onDelete, accessCode, onSyncOne, 
       ) : (
         <>
           <div className="hidden md:grid md:grid-cols-2 gap-4">
-            {longTerm.map(p => (
-              <WideProfileRow key={p.id} profile={p} accessCode={accessCode} onUpdate={onUpdate}
-                onDelete={onDelete} onShowSimilar={onShowSimilar} onSyncOne={onSyncOne}
-                onStarClick={()=>onToggleStar(p.id, !p.starred)} />
-            ))}
+            {longTerm.map(p => (<WideProfileRow key={p.id} profile={p} accessCode={accessCode} onPickFolder={onPickFolder}/>))}
           </div>
           <div className="md:hidden grid grid-cols-1 gap-4">
-            {longTerm.map(p => (
-              <div key={p.id}>
-                <ProfileCardMobile profile={p} accessCode={accessCode} onUpdate={onUpdate}
-                  onDelete={onDelete} onShowSimilar={onShowSimilar} onSyncOne={onSyncOne}
-                  onStarClick={()=>onToggleStar(p.id, !p.starred)} />
-                <div className="mt-2 flex justify-end gap-2">
-                  <button onClick={()=>handleConfirm(p.id)} className="text-xs bg-gray-200 px-3 py-1 rounded">확인</button>
-                  <button onClick={()=>handleSnooze(p.id)} className="text-xs bg-indigo-100 text-indigo-700 px-3 py-1 rounded">3개월 후 다시</button>
-                </div>
-              </div>
-            ))}
+            {longTerm.map(p => (<ProfileCardMobile key={p.id} profile={p} accessCode={accessCode} onPickFolder={onPickFolder}/>))}
           </div>
         </>
       )}
@@ -1022,7 +936,7 @@ function LongTermContent({ profiles, onUpdate, onDelete, accessCode, onSyncOne, 
   );
 }
 
-function GraphsFiltersContent({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) {
+function GraphsFiltersContent({ profiles, accessCode, onPickFolder }) {
   const [activeFilter, setActiveFilter] = React.useState({ type: null, value: null });
 
   const ageData = React.useMemo(() => {
@@ -1093,12 +1007,11 @@ function GraphsFiltersContent({ profiles, onUpdate, onDelete, accessCode, onSync
         </ResponsiveContainer>
         {activeFilter.type==='priority' && (
           <FilterResultSection title={`"${activeFilter.value}" 필터 결과`} profiles={filteredProfiles}
-            onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne}
-            onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
+            onPickFolder={()=>{}} accessCode={accessCode} />
         )}
       </section>
 
-      <section className="bg-white p-6 rounded-xl shadow-md mt-8">
+      <section className="bg-white p-6 rounded-xl shadow-md mt-8" onClick={clear}>
         <SectionTitle icon={Clock} text="세대별 분포" />
         <ResponsiveContainer width="100%" height={300}>
           <PieChart>
@@ -1113,7 +1026,7 @@ function GraphsFiltersContent({ profiles, onUpdate, onDelete, accessCode, onSync
             <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label>
               {ageData.map((entry, i) => (
                 <Cell key={`cell-age-${i}`} fill={`url(#g-age-${i})`} stroke="#fff"
-                  onClick={() => setActiveFilter({ type:'age', value: entry.name })} style={{ cursor:'pointer' }}/>
+                  onClick={(e) => { e.stopPropagation(); setActiveFilter({ type:'age', value: entry.name }); }} style={{ cursor:'pointer' }}/>
               ))}
             </Pie>
             <Tooltip formatter={(v)=>`${v}명`} /><Legend />
@@ -1121,12 +1034,11 @@ function GraphsFiltersContent({ profiles, onUpdate, onDelete, accessCode, onSync
         </ResponsiveContainer>
         {activeFilter.type==='age' && (
           <FilterResultSection title={`"${activeFilter.value}" 필터 결과`} profiles={filteredProfiles}
-            onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne}
-            onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
+            onPickFolder={onPickFolder} accessCode={accessCode} />
         )}
       </section>
 
-      <section className="bg-white p-6 rounded-xl shadow-md mt-8">
+      <section className="bg-white p-6 rounded-xl shadow-md mt-8" onClick={clear}>
         <SectionTitle icon={Filter} text="전문영역 분포" />
         <ResponsiveContainer width="100%" height={350}>
           <BarChart data={expertiseData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
@@ -1138,19 +1050,18 @@ function GraphsFiltersContent({ profiles, onUpdate, onDelete, accessCode, onSync
             <YAxis allowDecimals={false}/><Tooltip formatter={(v)=>`${v}명`} /><Legend />
             <Bar dataKey="count" fill="url(#gradient-expertise)">
               {expertiseData.map((entry, i) => (
-                <Cell key={`ex-${i}`} onClick={() => setActiveFilter({ type:'expertise', value: entry.name })} style={{ cursor: 'pointer' }} />
+                <Cell key={`ex-${i}`} onClick={(e) => { e.stopPropagation(); setActiveFilter({ type:'expertise', value: entry.name }); }} style={{ cursor: 'pointer' }} />
               ))}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
         {activeFilter.type==='expertise' && (
           <FilterResultSection title={`"${activeFilter.value}" 전문영역 필터 결과`} profiles={filteredProfiles}
-            onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne}
-            onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
+            onPickFolder={onPickFolder} accessCode={accessCode} />
         )}
       </section>
 
-      <section className="bg-white p-6 rounded-xl shadow-md mt-8">
+      <section className="bg-white p-6 rounded-xl shadow-md mt-8" onClick={clear}>
         <SectionTitle icon={Filter} text="IT 기업 경력 분포" />
         <ResponsiveContainer width="100%" height={350}>
           <BarChart data={companyData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
@@ -1162,22 +1073,21 @@ function GraphsFiltersContent({ profiles, onUpdate, onDelete, accessCode, onSync
             <YAxis allowDecimals={false}/><Tooltip formatter={(v)=>`${v}명`} /><Legend />
             <Bar dataKey="count" fill="url(#gradient-company)">
               {companyData.map((entry, i) => (
-                <Cell key={`co-${i}`} onClick={() => setActiveFilter({ type:'company', value: entry.name })} style={{ cursor: 'pointer' }} />
+                <Cell key={`co-${i}`} onClick={(e) => { e.stopPropagation(); setActiveFilter({ type:'company', value: entry.name }); }} style={{ cursor: 'pointer' }} />
               ))}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
         {activeFilter.type==='company' && (
           <FilterResultSection title={`"${activeFilter.value}" 필터 결과`} profiles={filteredProfiles}
-            onUpdate={onUpdate} onDelete={onDelete} accessCode={accessCode} onSyncOne={onSyncOne}
-            onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
+            onPickFolder={onPickFolder} accessCode={accessCode} />
         )}
       </section>
     </>
   );
 }
 
-function ManageTab({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState, accessCode, onSyncOne, onShowSimilar, onToggleStar }) {
+function ManageTab({ profiles, accessCode, onPickFolder, handleFormSubmit, handleBulkAdd, formState, setFormState }) {
   const [searchTerm, setSearchTerm] = React.useState('');
   const [page, setPage] = React.useState(1);
   const PAGE_SIZE = 10;
@@ -1222,18 +1132,10 @@ function ManageTab({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
           <div>
             <SectionTitle icon={Filter} text="검색 결과" />
             <div className="hidden md:grid md:grid-cols-2 gap-4">
-              {results.map(p => (
-                <WideProfileRow key={p.id} profile={p} accessCode={accessCode} onUpdate={onUpdate}
-                  onDelete={onDelete} onShowSimilar={onShowSimilar} onSyncOne={onSyncOne}
-                  onStarClick={()=>onToggleStar(p.id, !p.starred)} />
-              ))}
+              {results.map(p => (<WideProfileRow key={p.id} profile={p} accessCode={accessCode} onPickFolder={onPickFolder}/>))}
             </div>
             <div className="md:hidden grid grid-cols-1 gap-4">
-              {results.map(p => (
-                <ProfileCardMobile key={p.id} profile={p} accessCode={accessCode} onUpdate={onUpdate}
-                  onDelete={onDelete} onShowSimilar={onShowSimilar} onSyncOne={onSyncOne}
-                  onStarClick={()=>onToggleStar(p.id, !p.starred)} />
-              ))}
+              {results.map(p => (<ProfileCardMobile key={p.id} profile={p} accessCode={accessCode} onPickFolder={onPickFolder}/>))}
             </div>
           </div>
         )}
@@ -1262,18 +1164,10 @@ function ManageTab({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkA
       <section>
         <SectionTitle icon={Users} text="전체 프로필 목록" />
         <div className="hidden md:grid md:grid-cols-2 gap-4">
-          {current.map(p => (
-            <WideProfileRow key={p.id} profile={p} accessCode={accessCode} onUpdate={onUpdate}
-              onDelete={onDelete} onShowSimilar={onShowSimilar} onSyncOne={onSyncOne}
-              onStarClick={()=>onToggleStar(p.id, !p.starred)} />
-          ))}
+          {current.map(p => (<WideProfileRow key={p.id} profile={p} accessCode={accessCode} onPickFolder={onPickFolder}/>))}
         </div>
         <div className="md:hidden grid grid-cols-1 gap-4">
-          {current.map(p => (
-            <ProfileCardMobile key={p.id} profile={p} accessCode={accessCode} onUpdate={onUpdate}
-              onDelete={onDelete} onShowSimilar={onShowSimilar} onSyncOne={onSyncOne}
-              onStarClick={()=>onToggleStar(p.id, !p.starred)} />
-          ))}
+          {current.map(p => (<ProfileCardMobile key={p.id} profile={p} accessCode={accessCode} onPickFolder={onPickFolder}/>))}
         </div>
         {/* 페이지네이션: 숫자/좌우/더블 */}
         <div className="mt-6 flex items-center justify-center gap-1">
@@ -1301,15 +1195,22 @@ export default function App() {
   // Data
   const [profiles, setProfiles] = React.useState([]);
 
+  // Spotlight meta folders (centralized)
+  const [folders, setFolders] = React.useState({ all: [] });
+
   // UI
   const [activeSection, setActiveSection] = React.useState(SECTIONS.ALERTS);
   const [functionTab, setFunctionTab] = React.useState(FUNCTION_TABS.RECO);
-  const [sidebarOpen, setSidebarOpen] = React.useState(true); // 모바일에서 완전 숨김 토글
+  const [sidebarOpen, setSidebarOpen] = React.useState(true);
 
   // Similar modal
   const [similarOpen, setSimilarOpen] = React.useState(false);
   const [similarBase, setSimilarBase] = React.useState(null);
   const [similarList, setSimilarList] = React.useState([]);
+
+  // Pick folder modal
+  const [pickOpen, setPickOpen] = React.useState(false);
+  const [pickProfile, setPickProfile] = React.useState(null);
 
   // Google API
   const [gapiClient, setGapiClient]   = React.useState(null);
@@ -1406,11 +1307,42 @@ export default function App() {
     return () => unsub();
   }, [profilesCollectionRef]);
 
+  // Realtime spotlight meta
+  React.useEffect(() => {
+    if (!accessCode) { setFolders({ all: [] }); return; }
+    const ref = getMetaDocRef(accessCode);
+    let createdOnce = false;
+    const unsub = onSnapshot(ref, async (snap) => {
+      if (snap.exists()) {
+        const sf = snap.data()?.spotlightFolders || {};
+        const safe = { all: [], ...sf };
+        setFolders(safe);
+      } else if (!createdOnce) {
+        createdOnce = true;
+        await setDoc(ref, { spotlightFolders: { all: [] } }, { merge: true });
+      }
+    }, (err)=>console.error('meta onSnapshot error', err));
+    return () => unsub();
+  }, [accessCode]);
+
+  // Reconcile: 기존에 starred=true 이지만 all 폴더에 누락된 경우 자동 보정
+  React.useEffect(() => {
+    if (!accessCode) return;
+    const starredIds = profiles.filter(p=>p.starred).map(p=>p.id);
+    const need = starredIds.filter(id => !(folders.all||[]).includes(id));
+    if (need.length > 0) {
+      const next = { ...folders, all: [...new Set([...(folders.all||[]), ...need])] };
+      setFolders(next);
+      writeMeta(accessCode, { spotlightFolders: next });
+    }
+  }, [profiles, folders, accessCode]);
+
   const handleLogin = (code) => {
     setAccessCode(code);
     if (typeof window !== 'undefined') localStorage.setItem('profileDbAccessCode', code);
   };
 
+  // CRUD
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!newName.trim() || !newCareer.trim() || !profilesCollectionRef) return;
@@ -1447,11 +1379,68 @@ export default function App() {
     const { id, ...dataToUpdate } = updatedData;
     await updateDoc(doc(profilesCollectionRef, profileId), dataToUpdate);
   };
-
-  const handleDeleteRequest = async (profileId/*, profileName*/) => {
+  const handleDeleteRequest = async (profileId) => {
     if (!profilesCollectionRef) return;
     if (!window.confirm('정말 삭제하시겠습니까?')) return;
     await deleteDoc(doc(profilesCollectionRef, profileId));
+    // 폴더에서도 제거
+    const next = Object.fromEntries(Object.entries(folders).map(([k, arr]) => [k, (arr||[]).filter(x => x !== profileId)]));
+    setFolders(next);
+    await writeMeta(accessCode, { spotlightFolders: next });
+  };
+
+  // Spotlight folder ops
+  const addFolder = async (name) => {
+    if (!accessCode) return;
+    const next = { ...folders, [name]: (folders[name]||[]) };
+    setFolders(next);
+    await writeMeta(accessCode, { spotlightFolders: next });
+  };
+  const deleteFolders = async (targetNames) => {
+    if (!accessCode) return;
+    const next = { ...folders };
+    targetNames.forEach(n => { if (n!=='all') delete next[n]; });
+    setFolders(next);
+    await writeMeta(accessCode, { spotlightFolders: next });
+  };
+  const assignProfileToFolders = async (profileId, selected) => {
+    if (!accessCode || !profilesCollectionRef) return;
+    // selected: {folderName: boolean}
+    const next = { ...folders };
+    Object.keys(next).forEach(fn => {
+      const arr = new Set(next[fn] || []);
+      if (selected[fn]) arr.add(profileId);
+      else arr.delete(profileId);
+      next[fn] = Array.from(arr);
+    });
+    // all은 항상 포함
+    if (!next.all.includes(profileId)) next.all = [...next.all, profileId];
+
+    setFolders(next);
+    await writeMeta(accessCode, { spotlightFolders: next });
+    await updateDoc(doc(profilesCollectionRef, profileId), { starred: true });
+  };
+  const unstarProfile = async (profileId) => {
+    if (!accessCode || !profilesCollectionRef) return;
+    const next = Object.fromEntries(Object.entries(folders).map(([k, arr]) => [k, (arr||[]).filter(x => x !== profileId)]));
+    setFolders(next);
+    await writeMeta(accessCode, { spotlightFolders: next });
+    await updateDoc(doc(profilesCollectionRef, profileId), { starred: false });
+  };
+
+  // Pick folder modal open from anywhere
+  const handlePickFolder = (profile) => {
+    setPickProfile(profile);
+    setPickOpen(true);
+  };
+
+  // Similar modal open
+  const openSimilarModal = (base) => {
+    const others = profiles.filter(p => p.id !== base.id).map(p => ({ profile: p, score: similarityScore(base, p) }));
+    const sorted = others.sort((a,b) => b.score - a.score).slice(0, 20);
+    setSimilarBase(base);
+    setSimilarList(sorted);
+    setSimilarOpen(true);
   };
 
   // Google Calendar sync (private)
@@ -1473,7 +1462,7 @@ export default function App() {
     });
   };
   const handleSyncOneToCalendar = async (profile) => {
-    if (!googleApiReady) { alert('Google API가 준비되지 않았습니다.'); return; }
+    if (!gapiClient) { alert('Google API가 준비되지 않았습니다.'); return; }
     try { await ensureGoogleAuth(); }
     catch (e) { alert(e.message || 'Google 인증에 실패했습니다.'); return; }
 
@@ -1506,7 +1495,6 @@ export default function App() {
         start: { date: dateStr },
         end:   { date: endStr  },
         visibility: 'private',
-        extendedProperties: { private: { visibility: 'private' } },
       };
     }
 
@@ -1528,20 +1516,6 @@ export default function App() {
       console.error('Google Calendar 동기화 실패:', e);
       alert('캘린더 동기화에 실패했습니다. 콘솔 오류를 확인해주세요.');
     }
-  };
-
-  const handleToggleStar = async (profileId, flag) => {
-    if (!profilesCollectionRef) return;
-    await updateDoc(doc(profilesCollectionRef, profileId), { starred: !!flag });
-  };
-
-  // Similar modal open
-  const openSimilarModal = (base) => {
-    const others = profiles.filter(p => p.id !== base.id).map(p => ({ profile: p, score: similarityScore(base, p) }));
-    const sorted = others.sort((a,b) => b.score - a.score).slice(0, 20);
-    setSimilarBase(base);
-    setSimilarList(sorted);
-    setSimilarOpen(true);
   };
 
   // counts
@@ -1629,8 +1603,8 @@ export default function App() {
       </aside>
 
       {/* Main */}
-      <div className="flex-1 min-w-0 md:ml-0 ml-0">
-        {/* Top bar (counts + mobile menu btn) */}
+      <div className="flex-1 min-w-0">
+        {/* Top bar */}
         <header className="flex items-center justify-between gap-3 p-4 sm:p-6 border-b bg-white sticky top-0 z-10">
           <div className="flex items-center gap-2">
             <button className="md:hidden px-3 py-2 border rounded" onClick={()=>setSidebarOpen(s=>!s)}>
@@ -1657,24 +1631,16 @@ export default function App() {
           {activeSection===SECTIONS.ALERTS && (
             <AlertsTodayUpcoming
               profiles={profiles}
-              onUpdate={handleUpdate}
-              onDelete={handleDeleteRequest}
               accessCode={accessCode}
-              onSyncOne={handleSyncOneToCalendar}
-              onShowSimilar={openSimilarModal}
-              onToggleStar={handleToggleStar}
+              onPickFolder={handlePickFolder}
             />
           )}
 
           {activeSection===SECTIONS.SEARCH && (
             <SearchOnly
               profiles={profiles}
-              onUpdate={handleUpdate}
-              onDelete={handleDeleteRequest}
               accessCode={accessCode}
-              onSyncOne={handleSyncOneToCalendar}
-              onShowSimilar={openSimilarModal}
-              onToggleStar={handleToggleStar}
+              onPickFolder={handlePickFolder}
             />
           )}
 
@@ -1682,11 +1648,10 @@ export default function App() {
             <SpotlightTab
               accessCode={accessCode}
               profiles={profiles}
-              onToggleStar={handleToggleStar}
-              onUpdate={handleUpdate}
-              onDelete={handleDeleteRequest}
-              onShowSimilar={openSimilarModal}
-              onSyncOne={handleSyncOneToCalendar}
+              folders={folders}
+              onAddFolder={addFolder}
+              onDeleteFolders={deleteFolders}
+              onPickFolder={handlePickFolder}
             />
           )}
 
@@ -1695,34 +1660,22 @@ export default function App() {
               {functionTab===FUNCTION_TABS.RECO && (
                 <RecoContent
                   profiles={profiles}
-                  onUpdate={handleUpdate}
-                  onDelete={handleDeleteRequest}
                   accessCode={accessCode}
-                  onSyncOne={handleSyncOneToCalendar}
-                  onShowSimilar={openSimilarModal}
-                  onToggleStar={handleToggleStar}
+                  onPickFolder={handlePickFolder}
                 />
               )}
               {functionTab===FUNCTION_TABS.LONG && (
                 <LongTermContent
                   profiles={profiles}
-                  onUpdate={handleUpdate}
-                  onDelete={handleDeleteRequest}
                   accessCode={accessCode}
-                  onSyncOne={handleSyncOneToCalendar}
-                  onShowSimilar={openSimilarModal}
-                  onToggleStar={handleToggleStar}
+                  onPickFolder={handlePickFolder}
                 />
               )}
               {functionTab===FUNCTION_TABS.GRAPHS && (
                 <GraphsFiltersContent
                   profiles={profiles}
-                  onUpdate={handleUpdate}
-                  onDelete={handleDeleteRequest}
                   accessCode={accessCode}
-                  onSyncOne={handleSyncOneToCalendar}
-                  onShowSimilar={openSimilarModal}
-                  onToggleStar={handleToggleStar}
+                  onPickFolder={handlePickFolder}
                 />
               )}
             </>
@@ -1731,16 +1684,12 @@ export default function App() {
           {activeSection===SECTIONS.MANAGE && (
             <ManageTab
               profiles={profiles}
-              onUpdate={handleUpdate}
-              onDelete={handleDeleteRequest}
+              accessCode={accessCode}
+              onPickFolder={handlePickFolder}
               handleFormSubmit={handleFormSubmit}
               handleBulkAdd={handleBulkAdd}
               formState={formState}
               setFormState={setFormState}
-              accessCode={accessCode}
-              onSyncOne={handleSyncOneToCalendar}
-              onShowSimilar={openSimilarModal}
-              onToggleStar={handleToggleStar}
             />
           )}
         </main>
@@ -1757,7 +1706,23 @@ export default function App() {
         onDelete={handleDeleteRequest}
         onShowSimilar={openSimilarModal}
         onSyncOne={handleSyncOneToCalendar}
-        onStarClick={(p)=>handleToggleStar(p.id, !p.starred)}
+        onPickFolder={handlePickFolder}
+      />
+
+      {/* Pick Folder Modal (centralized) */}
+      <PickFolderModal
+        open={pickOpen}
+        onClose={()=>{ setPickOpen(false); setPickProfile(null); }}
+        profile={pickProfile}
+        folders={folders}
+        onSave={async (selected)=>{
+          await assignProfileToFolders(pickProfile.id, selected);
+          setPickOpen(false); setPickProfile(null);
+        }}
+        onUnstar={async ()=>{
+          await unstarProfile(pickProfile.id);
+          setPickOpen(false); setPickProfile(null);
+        }}
       />
     </div>
   );
