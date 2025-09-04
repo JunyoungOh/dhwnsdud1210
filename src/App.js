@@ -16,7 +16,7 @@ import {
   ShieldAlert, X, Save, UploadCloud, BellRing, Share2, CalendarPlus, AlertCircle,
   Star, FolderPlus, FolderX, Folder as FolderIcon, ChevronRight, ChevronLeft,
   ChevronsRight, ChevronsLeft, LayoutList, LineChart, ListFilter, Sparkles,
-  Link as LinkIcon, MoreHorizontal, MapPin, Copy, PanelsTopLeft, PanelLeftClose, PanelLeftOpen,
+  Link as LinkIcon, MapPin, PanelsTopLeft, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 
 // ==============================
@@ -273,7 +273,6 @@ function getProfilesCollectionRef(accessCode) {
   return collection(db, 'artifacts', appId, 'public', 'data', accessCode);
 }
 function getMetaDocRef(accessCode) {
-  // meta/{accessCode} 문서에 spotlightFolders 보관
   return doc(db, 'artifacts', appId, 'public', 'data', 'meta', accessCode);
 }
 async function readMeta(accessCode) {
@@ -400,7 +399,7 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
 );
 
 // ===============================
-// 프로필 카드 (PC: 가로 와이드 / 모바일: 세로)
+// 프로필 카드
 // ===============================
 const ProfileCard = ({
   profile, onUpdate, onDelete, isAlarmCard, onSnooze, onConfirmAlarm,
@@ -445,13 +444,12 @@ const ProfileCard = ({
     try { await onSyncOne(profile); } finally { setSyncing(false); }
   };
 
-  // 편집 모드 카드 (간소)
   if (isEditing) {
     return (
       <div className="bg-white p-4 rounded-lg shadow border relative space-y-3">
         <div className="flex items-center justify-between">
           <input name="name" value={editedProfile.name} onChange={handleInputChange} placeholder="이름" className="w-1/2 p-2 border rounded text-sm font-bold" />
-          <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1">
             <button onClick={() => setIsEditing(false)} className="p-1 text-gray-500 hover:text-gray-800"><X size={18} /></button>
             <button onClick={handleSave} className="p-1 text-green-600 hover:text-green-800"><Save size={18} /></button>
           </div>
@@ -468,10 +466,9 @@ const ProfileCard = ({
     );
   }
 
-  // 와이드(PC)/세로(모바일) 공용
   return (
     <div className="bg-white p-4 rounded-lg shadow border relative">
-      {/* 액션 버튼 묶음 (우상단, 작은 아이콘) */}
+      {/* 우상단 작은 액션 묶음 */}
       <div className="absolute top-2 right-2 flex items-center gap-2">
         <button
           onClick={() => onOpenStarModal(profile)}
@@ -494,20 +491,21 @@ const ProfileCard = ({
         </button>
       </div>
 
-      {/* 상단 라인 (이름, 우선순위) */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pr-10">
         <div className="flex items-baseline gap-2">
           <h3 className="font-bold text-yellow-600 text-lg">{profile.name}</h3>
           <span className="text-sm text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
         </div>
         {profile.priority && (
-          <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${priorityColors[profile.priority] || 'bg-gray-100 text-gray-800'}`}>
+          <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
+            profile.priority==='3'?'bg-red-100 text-red-800':
+            profile.priority==='2'?'bg-yellow-100 text-yellow-800':
+            profile.priority==='1'?'bg-green-100 text-green-800':'bg-gray-100 text-gray-800'}`}>
             우선순위 {profile.priority}
           </span>
         )}
       </div>
 
-      {/* 본문 (PC 가로/ 모바일 세로) */}
       <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="md:col-span-1">
           {profile.expertise && <p className="text-sm font-semibold text-gray-600">{profile.expertise}</p>}
@@ -524,7 +522,6 @@ const ProfileCard = ({
         </div>
       </div>
 
-      {/* 하단 액션 (캘린더) */}
       <div className="mt-3 flex items-center justify-between">
         <div className="text-xs text-gray-500 flex items-center gap-2">
           <MapPin className="w-3 h-3" />
@@ -551,7 +548,7 @@ const ProfileCard = ({
 };
 
 // ===============================
-// 필터 결과 섹션 (각 그래프 하단)
+// 필터 결과 섹션
 // ===============================
 const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, accessCode, onSyncOne, onShowSimilar, onOpenStarModal }) => (
   <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in mt-4">
@@ -582,7 +579,7 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, acc
 );
 
 // ===============================
-// 검색 탭 (검색창만)
+// 검색 탭
 // ===============================
 const SearchOnlyTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onOpenStarModal }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -639,12 +636,10 @@ const SearchOnlyTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, on
 };
 
 // ===============================
-// 알림 탭 (오늘/다가오는 일정)
+// 알림 탭
 // ===============================
 const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onOpenStarModal }) => {
-  const {
-    todayProfiles, upcomingProfiles
-  } = useMemo(() => {
+  const { todayProfiles, upcomingProfiles } = useMemo(() => {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const tomorrowStart = new Date(todayStart); tomorrowStart.setDate(tomorrowStart.getDate() + 1);
@@ -667,7 +662,6 @@ const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShow
 
   return (
     <>
-      {/* 오늘의 일정 */}
       <section className="mb-8">
         <h2 className="text-xl font-bold mb-4 flex items-center"><Calendar className="mr-2 text-red-500" />오늘의 일정</h2>
         <div className="space-y-4">
@@ -687,7 +681,6 @@ const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShow
         </div>
       </section>
 
-      {/* 다가오는 일정 */}
       <section className="mb-8">
         <h2 className="text-xl font-bold mb-4 flex items-center"><Zap className="mr-2 text-blue-500" />다가오는 일정</h2>
         <div className="space-y-4">
@@ -711,31 +704,29 @@ const AlertsTab = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShow
 };
 
 // ===============================
-// Functions: 추천 / 장기관리 / 그래프&필터
+// Functions
 // ===============================
 const RecommendSection = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onOpenStarModal }) => {
   const recommendedProfiles = useMemo(() => {
     const now = new Date();
-    const threeMonthsAgo = new Date(now); threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
     const scoreOf = (p) => {
       const last = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
       const days = last ? Math.max(1, Math.floor((now - last) / (1000*60*60*24))) : 180;
-      let score = Math.min(100, Math.round((days / 90) * 60)); // 0~60
+      let score = Math.min(100, Math.round((days / 90) * 60));
       if (p.priority === '3') score += 20;
       const kw = TARGET_KEYWORDS.filter(k => (p.career||'').includes(k)).length;
       score += Math.min(kw * 5, 15);
       if (p.expertise) score += 5;
       const snoozeUntil = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
-      if (snoozeUntil && snoozeUntil > now) score = -1; // 제외
+      if (snoozeUntil && snoozeUntil > now) score = -1;
       return score;
     };
-    const rec = profiles
+    return profiles
       .map(p => ({ p, s: scoreOf(p) }))
       .filter(x => x.s >= 0 && x.s >= 40)
       .sort((a,b) => b.s - a.s)
       .slice(0, 30)
       .map(x => x.p);
-    return rec;
   }, [profiles]);
 
   const handleSnooze = async (profileId) => {
@@ -876,7 +867,6 @@ const GraphsSection = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, on
 
   return (
     <>
-      {/* 우선순위 분포 */}
       <section className="bg-white p-6 rounded-xl shadow-md mb-8">
         <h2 className="text-xl font-bold text-gray-800 mb-4">우선순위별 분포</h2>
         <ResponsiveContainer width="100%" height={300}>
@@ -906,7 +896,6 @@ const GraphsSection = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, on
         )}
       </section>
 
-      {/* 세대별 분포 */}
       <section className="bg-white p-6 rounded-xl shadow-md mb-8">
         <h2 className="text-xl font-bold text-gray-800 mb-4">세대별 분포</h2>
         <ResponsiveContainer width="100%" height={300}>
@@ -939,7 +928,6 @@ const GraphsSection = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, on
         )}
       </section>
 
-      {/* 전문영역 분포 */}
       <section className="bg-white p-6 rounded-xl shadow-md mb-8">
         <h2 className="text-xl font-bold text-gray-800 mb-4">전문영역 분포</h2>
         <ResponsiveContainer width="100%" height={350}>
@@ -970,7 +958,6 @@ const GraphsSection = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, on
         )}
       </section>
 
-      {/* IT 기업 경력 분포 */}
       <section className="bg-white p-6 rounded-xl shadow-md">
         <h2 className="text-xl font-bold text-gray-800 mb-4">IT 기업 경력 분포</h2>
         <ResponsiveContainer width="100%" height={350}>
@@ -1045,7 +1032,6 @@ const StarredTab = ({
 
   return (
     <section className="space-y-4">
-      {/* 폴더 헤더 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <FolderIcon className="w-5 h-5 text-yellow-600" />
@@ -1061,7 +1047,6 @@ const StarredTab = ({
         </div>
       </div>
 
-      {/* 폴더 목록 */}
       <div className="flex flex-wrap gap-2">
         {Object.keys(folders).map(key => (
           <button
@@ -1074,7 +1059,6 @@ const StarredTab = ({
         ))}
       </div>
 
-      {/* 폴더 내 프로필 */}
       <div className="mt-4 space-y-4">
         {starredProfiles.length === 0 ? (
           <div className="text-gray-500 p-4">없음</div>
@@ -1094,7 +1078,6 @@ const StarredTab = ({
         )}
       </div>
 
-      {/* 폴더 삭제 모달 */}
       {showDeleteFolder && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
           <div className="bg-white rounded-xl p-6 w-full max-w-md">
@@ -1124,7 +1107,7 @@ const StarredTab = ({
 };
 
 // ===============================
-// 관리 탭 (추가/검색/엑셀/목록)
+// 관리 탭
 // ===============================
 const ManageTab = ({
   profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd,
@@ -1163,7 +1146,6 @@ const ManageTab = ({
 
   return (
     <>
-      {/* 검색 */}
       <section className="mb-6">
         <div className="relative">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -1171,7 +1153,6 @@ const ManageTab = ({
         </div>
       </section>
 
-      {/* 새 프로필 추가 */}
       <section className="bg-white p-6 rounded-xl shadow-md mb-8">
         <h2 className="text-xl font-bold mb-4 flex items-center"><UserPlus className="mr-2 text-yellow-500"/>새 프로필 추가</h2>
         <form onSubmit={handleFormSubmit} className="space-y-4">
@@ -1190,10 +1171,8 @@ const ManageTab = ({
         </form>
       </section>
 
-      {/* 엑셀 업로더 */}
       <ExcelUploader onBulkAdd={handleBulkAdd} />
 
-      {/* 목록 */}
       <section>
         <h2 className="text-xl font-bold text-gray-800 mb-4">전체 프로필 목록</h2>
         <div className="space-y-4">
@@ -1211,7 +1190,6 @@ const ManageTab = ({
           ))}
         </div>
 
-        {/* 페이지네이션 */}
         {totalPages > 1 && (
           <nav className="mt-6 flex items-center justify-center gap-2">
             <button disabled={page===1} onClick={()=>setPage(1)} className="p-2 rounded border disabled:opacity-40"><ChevronsLeft className="w-4 h-4" /></button>
@@ -1234,7 +1212,6 @@ const ExcelUploader = ({ onBulkAdd }) => {
   const [message, setMessage] = useState('');
 
   const handleFileChange = (e) => { setFile(e.target.files[0]); setMessage(''); };
-
   const handleUpload = async () => {
     if (!file) { setMessage('파일을 먼저 선택해주세요.'); return; }
     setIsUploading(true); setMessage('파일을 읽는 중...');
@@ -1287,19 +1264,11 @@ const ExcelUploader = ({ onBulkAdd }) => {
 // App
 // ===============================
 export default function App() {
-  // 공유 모드 URL 파라미터는 최초 계산 (Hook 아님)
+  // 공유보기 모드 플래그 (훅 호출 전에 '계산'만 하고, 조기 return은 하지 않음)
   const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams('');
   const profileIdFromUrl = params.get('profile');
   const accessCodeFromUrl = params.get('code');
-
-  // 공유 모드 빠른 리턴 (Hook 사용 전)
-  if (profileIdFromUrl && accessCodeFromUrl) {
-    return (
-      <ErrorBoundary>
-        <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />
-      </ErrorBoundary>
-    );
-  }
+  const sharedMode = Boolean(profileIdFromUrl && accessCodeFromUrl);
 
   // ===== States =====
   const [accessCode, setAccessCode] = useState(typeof window !== 'undefined' ? (localStorage.getItem('profileDbAccessCode') || null) : null);
@@ -1309,7 +1278,7 @@ export default function App() {
   // UI
   const [activeMain, setActiveMain] = useState(MAIN.ALERTS);
   const [functionsOpen, setFunctionsOpen] = useState(true);
-  const [sidebarOpen, setSidebarOpen] = useState(true); // 모바일에서 토글
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // 삭제 확인
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
@@ -1345,7 +1314,7 @@ export default function App() {
 
   // ===== Effects =====
   useEffect(() => {
-    // 외부 스크립트: gapi, gis, sheetjs
+    if (sharedMode) return; // 공유보기면 외부 스크립트 로딩 불필요
     const xlsx = document.createElement('script');
     xlsx.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
     xlsx.async = true; document.body.appendChild(xlsx);
@@ -1389,10 +1358,11 @@ export default function App() {
     return () => {
       [xlsx, gapiScript, gisScript].forEach(s => { if (s && document.body.contains(s)) document.body.removeChild(s); });
     };
-  }, []);
+  }, [sharedMode]);
 
   // Firebase 익명 로그인
   useEffect(() => {
+    if (sharedMode) return; // 공유보기면 로그인/구독 불필요
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (user) setAuthStatus('authenticated');
       else {
@@ -1401,7 +1371,7 @@ export default function App() {
       }
     });
     return () => unsub();
-  }, []);
+  }, [sharedMode]);
 
   const profilesCollectionRef = useMemo(() => {
     if (!accessCode) return null;
@@ -1410,6 +1380,7 @@ export default function App() {
 
   // 프로필 실시간 구독
   useEffect(() => {
+    if (sharedMode) return; // 공유보기면 불필요
     if (!profilesCollectionRef) { setProfiles([]); return; }
     const q = query(profilesCollectionRef);
     const unsub = onSnapshot(q, (qs) => {
@@ -1417,10 +1388,11 @@ export default function App() {
       setProfiles(data);
     });
     return () => unsub();
-  }, [profilesCollectionRef]);
+  }, [profilesCollectionRef, sharedMode]);
 
   // 메타(폴더) 실시간 구독
   useEffect(() => {
+    if (sharedMode) return;
     if (!accessCode) { setFolders({ all: [] }); return; }
     const ref = getMetaDocRef(accessCode);
     let createdOnce = false;
@@ -1435,7 +1407,7 @@ export default function App() {
       }
     }, (err)=>console.error('meta onSnapshot error', err));
     return () => unsub();
-  }, [accessCode]);
+  }, [accessCode, sharedMode]);
 
   // ===== Handlers =====
   const handleLogin = (code) => {
@@ -1475,6 +1447,7 @@ export default function App() {
   };
 
   const handleUpdate = async (profileId, updatedData) => {
+    if (!profilesCollectionRef) return;
     const { id, ...dataToUpdate } = updatedData;
     await updateDoc(doc(profilesCollectionRef, profileId), dataToUpdate);
   };
@@ -1506,44 +1479,43 @@ export default function App() {
 
   // 개별 캘린더 동기화 (비공개 이벤트)
   const handleSyncOneToCalendar = async (profile) => {
-    if (!googleApiReady) { alert('Google API가 준비되지 않았습니다.'); return; }
-    try { await ensureGoogleAuth(); }
-    catch (e) { alert(e.message || 'Google 인증에 실패했습니다.'); return; }
-
-    let parsed = parseDateTimeFromRecord(profile.meetingRecord);
-    if (!parsed && profile.eventDate) {
-      parsed = { date: new Date(profile.eventDate), hadTime: true };
-    }
-    if (!parsed) { alert('미팅 날짜/시간을 인식할 수 없습니다. "미팅기록"에 날짜를 입력해주세요.'); return; }
-
-    const startDate = parsed.date;
-    let eventResource;
-    if (parsed.hadTime) {
-      const startLocal = formatRFC3339InTZ(startDate, TZ);
-      const endDate = new Date(startDate.getTime() + 90 * 60000);
-      const endLocal = formatRFC3339InTZ(endDate, TZ);
-      eventResource = {
-        summary: `(영입) ${profile.name}님 미팅`,
-        description: `${profile.name}님 프로필 보기:\n${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`,
-        start: { dateTime: startLocal, timeZone: TZ },
-        end:   { dateTime: endLocal,   timeZone: TZ },
-        reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 30 }] },
-        visibility: 'private',
-      };
-    } else {
-      const dateStr = formatDateOnlyInTZ(startDate, TZ);
-      const end = new Date(startDate); end.setDate(end.getDate() + 1);
-      const endStr = formatDateOnlyInTZ(end, TZ);
-      eventResource = {
-        summary: `(영입) ${profile.name}님 미팅`,
-        description: `${profile.name}님 프로필 보기:\n${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`,
-        start: { date: dateStr },
-        end:   { date: endStr  },
-        visibility: 'private',
-      };
-    }
-
     try {
+      const parsedInRecord = parseDateTimeFromRecord(profile.meetingRecord);
+      const parsed = parsedInRecord || (profile.eventDate ? { date: new Date(profile.eventDate), hadTime: true } : null);
+      if (!parsed) { alert('미팅 날짜/시간을 인식할 수 없습니다. "미팅기록"에 날짜를 입력해주세요.'); return; }
+      // 공유보기에서는 동기화 기능 사용 안 함
+      if (sharedMode) { alert('공유 보기에서는 캘린더 연동을 사용할 수 없습니다.'); return; }
+
+      if (!gapiClient || !tokenClient) { alert('Google API가 준비되지 않았습니다.'); return; }
+      await ensureGoogleAuth();
+
+      const startDate = parsed.date;
+      let eventResource;
+      if (parsed.hadTime) {
+        const startLocal = formatRFC3339InTZ(startDate, TZ);
+        const endDate = new Date(startDate.getTime() + 90 * 60000);
+        const endLocal = formatRFC3339InTZ(endDate, TZ);
+        eventResource = {
+          summary: `(영입) ${profile.name}님 미팅`,
+          description: `${profile.name}님 프로필 보기:\n${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`,
+          start: { dateTime: startLocal, timeZone: TZ },
+          end:   { dateTime: endLocal,   timeZone: TZ },
+          reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 30 }] },
+          visibility: 'private',
+        };
+      } else {
+        const dateStr = formatDateOnlyInTZ(startDate, TZ);
+        const end = new Date(startDate); end.setDate(end.getDate() + 1);
+        const endStr = formatDateOnlyInTZ(end, TZ);
+        eventResource = {
+          summary: `(영입) ${profile.name}님 미팅`,
+          description: `${profile.name}님 프로필 보기:\n${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`,
+          start: { date: dateStr },
+          end:   { date: endStr  },
+          visibility: 'private',
+        };
+      }
+
       let result;
       if (profile.gcalEventId) {
         result = await gapiClient.client.calendar.events.patch({ calendarId: 'primary', eventId: profile.gcalEventId, resource: eventResource });
@@ -1551,11 +1523,13 @@ export default function App() {
         result = await gapiClient.client.calendar.events.insert({ calendarId: 'primary', resource: eventResource });
       }
       const ev = result.result || {};
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', accessCode, profile.id), {
-        gcalEventId: ev.id || profile.gcalEventId || null,
-        gcalHtmlLink: ev.htmlLink || profile.gcalHtmlLink || null,
-        gcalLastSyncAt: new Date().toISOString(),
-      });
+      if (profilesCollectionRef) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', accessCode, profile.id), {
+          gcalEventId: ev.id || profile.gcalEventId || null,
+          gcalHtmlLink: ev.htmlLink || profile.gcalHtmlLink || null,
+          gcalLastSyncAt: new Date().toISOString(),
+        });
+      }
       alert(profile.gcalEventId ? '캘린더 일정이 수정되었습니다.' : '캘린더 일정이 등록되었습니다.');
     } catch (e) {
       console.error('Google Calendar 동기화 실패:', e);
@@ -1563,7 +1537,7 @@ export default function App() {
     }
   };
 
-  // 유사 프로필 모달 열기/확대 열기
+  // 유사 프로필 모달/확대
   const openSimilarModal = (base) => {
     const others = profiles.filter(p => p.id !== base.id).map(p => ({ profile: p, score: similarityScore(base, p) }));
     const sorted = others.sort((a,b) => b.score - a.score).slice(0, 20);
@@ -1571,28 +1545,18 @@ export default function App() {
     setSimilarList(sorted);
     setSimilarOpen(true);
   };
-  const openZoomFromSimilar = (p) => { setZoomProfile(p); }; // 확대용 프로필
+  const openZoomFromSimilar = (p) => { setZoomProfile(p); };
 
-  // 별표 모달 열기
+  // 별표 모달
   const openStarModal = (profile) => { setStarTarget(profile); setStarModalOpen(true); };
-
-  // 별표 모달 저장
   const saveStarFolders = async (selectedFolders) => {
     if (!starTarget || !profilesCollectionRef) return;
     const profRef = doc(profilesCollectionRef, starTarget.id);
 
-    // folders 구조 갱신
     const cur = { ...folders };
-    // 먼저 모든 폴더에서 제거
-    Object.keys(cur).forEach(k => {
-      cur[k] = cur[k].filter(id => id !== starTarget.id);
-    });
-    // 선택된 폴더에 추가
-    selectedFolders.forEach(k => {
-      cur[k] = Array.from(new Set([...(cur[k] || []), starTarget.id]));
-    });
+    Object.keys(cur).forEach(k => { cur[k] = cur[k].filter(id => id !== starTarget.id); });
+    selectedFolders.forEach(k => { cur[k] = Array.from(new Set([...(cur[k] || []), starTarget.id])); });
 
-    // profile 자체에도 플래그/폴더 저장
     await updateDoc(profRef, { starred: selectedFolders.length > 0, starFolders: selectedFolders });
     await writeMeta(accessCode, { spotlightFolders: cur });
     setFolders(cur);
@@ -1608,260 +1572,255 @@ export default function App() {
   const formState = { newName, newCareer, newAge, newOtherInfo, newExpertise, newPriority, newMeetingRecord };
   const setFormState = { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewExpertise, setNewPriority, setNewMeetingRecord };
 
-  // 인증 전 로그인화면
-  if (!accessCode) {
-    return (
-      <ErrorBoundary>
-        <LoginScreen onLogin={handleLogin} authStatus={authStatus} />
-      </ErrorBoundary>
-    );
-  }
-
+  // === 렌더 ===
   return (
     <ErrorBoundary>
-      {showDeleteConfirm.show && (
-        <ConfirmationModal
-          message={`'${showDeleteConfirm.profileName}' 프로필을 정말로 삭제하시겠습니까?`}
-          onConfirm={confirmDelete}
-          onCancel={() => setShowDeleteConfirm({ show: false, profileId: null, profileName: '' })}
-        />
-      )}
+      {/* 공유보기 모드라면 이 화면만 렌더 (훅은 위에서 모두 호출됨) */}
+      {sharedMode ? (
+        <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />
+      ) : (
+        <>
+          {(!accessCode) ? (
+            <LoginScreen onLogin={handleLogin} authStatus={authStatus} />
+          ) : (
+            <>
+              {showDeleteConfirm.show && (
+                <ConfirmationModal
+                  message={`'${showDeleteConfirm.profileName}' 프로필을 정말로 삭제하시겠습니까?`}
+                  onConfirm={confirmDelete}
+                  onCancel={() => setShowDeleteConfirm({ show: false, profileId: null, profileName: '' })}
+                />
+              )}
 
-      {/* 별표 폴더 선택 모달 */}
-      <FolderSelectModal
-        open={starModalOpen}
-        onClose={() => { setStarModalOpen(false); setStarTarget(null); }}
-        folders={folders}
-        initialSelected={starTarget?.starFolders?.length ? starTarget.starFolders : (starTarget?.starred ? ['all'] : ['all'])}
-        onSave={saveStarFolders}
-      />
+              <FolderSelectModal
+                open={starModalOpen}
+                onClose={() => { setStarModalOpen(false); setStarTarget(null); }}
+                folders={folders}
+                initialSelected={starTarget?.starFolders?.length ? starTarget.starFolders : (starTarget?.starred ? ['all'] : ['all'])}
+                onSave={saveStarFolders}
+              />
 
-      {/* 유사 프로필 모달 + 확대 뷰 */}
-      <SimilarModal
-        open={similarOpen}
-        onClose={() => setSimilarOpen(false)}
-        baseProfile={similarBase}
-        items={similarList}
-        onOpenZoom={openZoomFromSimilar}
-      />
-      {zoomProfile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setZoomProfile(null)} />
-          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] p-6 overflow-auto">
-            <button className="absolute top-3 left-3 p-1 rounded bg-gray-100 hover:bg-gray-200" onClick={() => setZoomProfile(null)}>
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <ProfileCard
-              profile={zoomProfile}
-              onUpdate={handleUpdate}
-              onDelete={handleDeleteRequest}
-              accessCode={accessCode}
-              onSyncOne={handleSyncOneToCalendar}
-              onShowSimilar={openSimilarModal}
-              onOpenStarModal={openStarModal}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* 레이아웃 */}
-      <div className="min-h-screen bg-gray-50 flex">
-        {/* 사이드바 (모바일 토글 지원) */}
-        <aside className={`bg-white border-r w-64 p-4 flex-shrink-0 ${sidebarOpen ? 'block' : 'hidden sm:block'} fixed sm:static inset-y-0 z-40`}>
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-2">
-              <Users className="text-yellow-500 w-6 h-6" />
-              <h1 className="font-bold text-gray-800">프로필 대시보드</h1>
-            </div>
-            <button className="sm:hidden p-1 rounded hover:bg-gray-100" onClick={()=>setSidebarOpen(false)}>
-              <PanelLeftClose className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* 액세스 코드 + 카운트 */}
-          <div className="space-y-3 mb-6">
-            <div className="text-xs bg-gray-100 rounded px-2 py-1 font-mono">{accessCode}</div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="bg-white p-3 rounded border">
-                <div className="text-xs text-gray-500">총 프로필</div>
-                <div className="text-xl font-bold text-yellow-600">{totalCount}</div>
-              </div>
-              <div className="bg-white p-3 rounded border">
-                <div className="text-xs text-gray-500">미팅 진행</div>
-                <div className="text-xl font-bold text-yellow-600">{meetingCount}</div>
-              </div>
-            </div>
-          </div>
-
-          {/* 네비 */}
-          <nav className="space-y-1">
-            <button onClick={()=>setActiveMain(MAIN.ALERTS)} className={`w-full flex items-center gap-2 px-3 py-2 rounded ${activeMain===MAIN.ALERTS?'bg-yellow-100 text-yellow-700':'hover:bg-gray-50'}`}>
-              <BellRing className="w-4 h-4" /> 알림
-            </button>
-            <button onClick={()=>setActiveMain(MAIN.SEARCH)} className={`w-full flex items-center gap-2 px-3 py-2 rounded ${activeMain===MAIN.SEARCH?'bg-yellow-100 text-yellow-700':'hover:bg-gray-50'}`}>
-              <Search className="w-4 h-4" /> 검색
-            </button>
-            <button onClick={()=>setActiveMain(MAIN.STARRED)} className={`w-full flex items-center gap-2 px-3 py-2 rounded ${activeMain===MAIN.STARRED?'bg-yellow-100 text-yellow-700':'hover:bg-gray-50'}`}>
-              <Star className="w-4 h-4" /> 주목 중인 프로필들
-            </button>
-
-            {/* Functions (확장 트리) */}
-            <div className="mt-1">
-              <button onClick={()=>setFunctionsOpen(o=>!o)} className={`w-full flex items-center justify-between px-3 py-2 rounded ${activeMain.startsWith('fn/')?'bg-yellow-50':'hover:bg-gray-50'}`}>
-                <span className="flex items-center gap-2"><LayoutList className="w-4 h-4" /> Functions</span>
-                <ChevronRight className={`w-4 h-4 transition ${functionsOpen ? 'rotate-90' : ''}`} />
-              </button>
-              {functionsOpen && (
-                <div className="mt-1 pl-6 space-y-1">
-                  <button onClick={()=>setActiveMain(MAIN.FN_RECO)} className={`w-full flex items-center gap-2 px-3 py-2 rounded ${activeMain===MAIN.FN_RECO?'bg-yellow-100 text-yellow-700':'hover:bg-gray-50'}`}>
-                    <Sparkles className="w-4 h-4" /> 추천
-                  </button>
-                  <button onClick={()=>setActiveMain(MAIN.FN_LONG)} className={`w-full flex items-center gap-2 px-3 py-2 rounded ${activeMain===MAIN.FN_LONG?'bg-yellow-100 text-yellow-700':'hover:bg-gray-50'}`}>
-                    <ListFilter className="w-4 h-4" /> 장기관리
-                  </button>
-                  <button onClick={()=>setActiveMain(MAIN.FN_GRAPHS)} className={`w-full flex items-center gap-2 px-3 py-2 rounded ${activeMain===MAIN.FN_GRAPHS?'bg-yellow-100 text-yellow-700':'hover:bg-gray-50'}`}>
-                    <LineChart className="w-4 h-4" /> 그래프&필터
-                  </button>
+              <SimilarModal
+                open={similarOpen}
+                onClose={() => setSimilarOpen(false)}
+                baseProfile={similarBase}
+                items={similarList}
+                onOpenZoom={openZoomFromSimilar}
+              />
+              {zoomProfile && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center">
+                  <div className="absolute inset-0 bg-black/50" onClick={() => setZoomProfile(null)} />
+                  <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] p-6 overflow-auto">
+                    <button className="absolute top-3 left-3 p-1 rounded bg-gray-100 hover:bg-gray-200" onClick={() => setZoomProfile(null)}>
+                      <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    <ProfileCard
+                      profile={zoomProfile}
+                      onUpdate={handleUpdate}
+                      onDelete={(id, name)=>setShowDeleteConfirm({show:true, profileId:id, profileName:name})}
+                      accessCode={accessCode}
+                      onSyncOne={handleSyncOneToCalendar}
+                      onShowSimilar={openSimilarModal}
+                      onOpenStarModal={openStarModal}
+                    />
+                  </div>
                 </div>
               )}
-            </div>
 
-            <button onClick={()=>setActiveMain(MAIN.MANAGE)} className={`w-full flex items-center gap-2 px-3 py-2 rounded ${activeMain===MAIN.MANAGE?'bg-yellow-100 text-yellow-700':'hover:bg-gray-50'}`}>
-              <PanelsTopLeft className="w-4 h-4" /> 프로필 관리
-            </button>
-          </nav>
+              <div className="min-h-screen bg-gray-50 flex">
+                {/* 사이드바 */}
+                <aside className={`bg-white border-r w-64 p-4 flex-shrink-0 ${sidebarOpen ? 'block' : 'hidden sm:block'} fixed sm:static inset-y-0 z-40`}>
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-2">
+                      <Users className="text-yellow-500 w-6 h-6" />
+                      <h1 className="font-bold text-gray-800">프로필 대시보드</h1>
+                    </div>
+                    <button className="sm:hidden p-1 rounded hover:bg-gray-100" onClick={()=>setSidebarOpen(false)}>
+                      <PanelLeftClose className="w-5 h-5" />
+                    </button>
+                  </div>
 
-          {/* 사이드바 하단: Google/Login/Logout */}
-          <div className="mt-8 space-y-2">
-            {googleApiReady === false && (
-              <span className="text-xs text-red-500">Google 연동 비활성화{googleError ? ` (${googleError})` : ''}</span>
-            )}
-            {googleApiReady === true && (
-              isGoogleSignedIn ? (
-                <button
-                  onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
-                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
-                >
-                  Google 로그아웃
-                </button>
-              ) : (
-                <button
-                  onClick={() => tokenClient?.requestAccessToken({ prompt: 'consent' })}
-                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
-                >
-                  Google 로그인
-                </button>
-              )
-            )}
-            <button onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }} className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center">
-              <LogOut className="w-4 h-4 mr-1.5" /> 로그아웃
-            </button>
-          </div>
-        </aside>
+                  <div className="space-y-3 mb-6">
+                    <div className="text-xs bg-gray-100 rounded px-2 py-1 font-mono">{accessCode}</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="bg-white p-3 rounded border">
+                        <div className="text-xs text-gray-500">총 프로필</div>
+                        <div className="text-xl font-bold text-yellow-600">{totalCount}</div>
+                      </div>
+                      <div className="bg-white p-3 rounded border">
+                        <div className="text-xs text-gray-500">미팅 진행</div>
+                        <div className="text-xl font-bold text-yellow-600">{meetingCount}</div>
+                      </div>
+                    </div>
+                  </div>
 
-        {/* 메인 */}
-        <main className="flex-1 p-4 sm:p-6 sm:ml-0 ml-0">
-          {/* 모바일에서 사이드바 열기 */}
-          <div className="sm:hidden mb-3">
-            <button onClick={()=>setSidebarOpen(true)} className="px-3 py-2 border rounded-md flex items-center gap-2 bg-white shadow-sm">
-              <PanelLeftOpen className="w-4 h-4" /> 메뉴
-            </button>
-          </div>
+                  <nav className="space-y-1">
+                    <button onClick={()=>setActiveMain(MAIN.ALERTS)} className={`w-full flex items-center gap-2 px-3 py-2 rounded ${activeMain===MAIN.ALERTS?'bg-yellow-100 text-yellow-700':'hover:bg-gray-50'}`}>
+                      <BellRing className="w-4 h-4" /> 알림
+                    </button>
+                    <button onClick={()=>setActiveMain(MAIN.SEARCH)} className={`w-full flex items-center gap-2 px-3 py-2 rounded ${activeMain===MAIN.SEARCH?'bg-yellow-100 text-yellow-700':'hover:bg-gray-50'}`}>
+                      <Search className="w-4 h-4" /> 검색
+                    </button>
+                    <button onClick={()=>setActiveMain(MAIN.STARRED)} className={`w-full flex items-center gap-2 px-3 py-2 rounded ${activeMain===MAIN.STARRED?'bg-yellow-100 text-yellow-700':'hover:bg-gray-50'}`}>
+                      <Star className="w-4 h-4" /> 주목 중인 프로필들
+                    </button>
 
-          {/* 실제 컨텐츠 */}
-          <div className="max-w-5xl mx-auto">
-            {activeMain === MAIN.ALERTS && (
-              <AlertsTab
-                profiles={profiles}
-                onUpdate={handleUpdate}
-                onDelete={handleDeleteRequest}
-                accessCode={accessCode}
-                onSyncOne={handleSyncOneToCalendar}
-                onShowSimilar={openSimilarModal}
-                onOpenStarModal={openStarModal}
-              />
-            )}
+                    <div className="mt-1">
+                      <button onClick={()=>setFunctionsOpen(o=>!o)} className={`w-full flex items-center justify-between px-3 py-2 rounded ${activeMain.startsWith('fn/')?'bg-yellow-50':'hover:bg-gray-50'}`}>
+                        <span className="flex items-center gap-2"><LayoutList className="w-4 h-4" /> Functions</span>
+                        <ChevronRight className={`w-4 h-4 transition ${functionsOpen ? 'rotate-90' : ''}`} />
+                      </button>
+                      {functionsOpen && (
+                        <div className="mt-1 pl-6 space-y-1">
+                          <button onClick={()=>setActiveMain(MAIN.FN_RECO)} className={`w-full flex items-center gap-2 px-3 py-2 rounded ${activeMain===MAIN.FN_RECO?'bg-yellow-100 text-yellow-700':'hover:bg-gray-50'}`}>
+                            <Sparkles className="w-4 h-4" /> 추천
+                          </button>
+                          <button onClick={()=>setActiveMain(MAIN.FN_LONG)} className={`w-full flex items-center gap-2 px-3 py-2 rounded ${activeMain===MAIN.FN_LONG?'bg-yellow-100 text-yellow-700':'hover:bg-gray-50'}`}>
+                            <ListFilter className="w-4 h-4" /> 장기관리
+                          </button>
+                          <button onClick={()=>setActiveMain(MAIN.FN_GRAPHS)} className={`w-full flex items-center gap-2 px-3 py-2 rounded ${activeMain===MAIN.FN_GRAPHS?'bg-yellow-100 text-yellow-700':'hover:bg-gray-50'}`}>
+                            <LineChart className="w-4 h-4" /> 그래프&필터
+                          </button>
+                        </div>
+                      )}
+                    </div>
 
-            {activeMain === MAIN.SEARCH && (
-              <SearchOnlyTab
-                profiles={profiles}
-                onUpdate={handleUpdate}
-                onDelete={handleDeleteRequest}
-                accessCode={accessCode}
-                onSyncOne={handleSyncOneToCalendar}
-                onShowSimilar={openSimilarModal}
-                onOpenStarModal={openStarModal}
-              />
-            )}
+                    <button onClick={()=>setActiveMain(MAIN.MANAGE)} className={`w-full flex items-center gap-2 px-3 py-2 rounded ${activeMain===MAIN.MANAGE?'bg-yellow-100 text-yellow-700':'hover:bg-gray-50'}`}>
+                      <PanelsTopLeft className="w-4 h-4" /> 프로필 관리
+                    </button>
+                  </nav>
 
-            {activeMain === MAIN.STARRED && (
-              <StarredTab
-                profiles={profiles}
-                folders={folders}
-                setFolders={setFolders}
-                accessCode={accessCode}
-                onUpdate={handleUpdate}
-                onDelete={handleDeleteRequest}
-                onSyncOne={handleSyncOneToCalendar}
-                onShowSimilar={openSimilarModal}
-                onOpenStarModal={openStarModal}
-              />
-            )}
+                  <div className="mt-8 space-y-2">
+                    {googleApiReady === false && (
+                      <span className="text-xs text-red-500">Google 연동 비활성화{googleError ? ` (${googleError})` : ''}</span>
+                    )}
+                    {googleApiReady === true && (
+                      isGoogleSignedIn ? (
+                        <button
+                          onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
+                          className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
+                        >
+                          Google 로그아웃
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => tokenClient?.requestAccessToken({ prompt: 'consent' })}
+                          className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
+                        >
+                          Google 로그인
+                        </button>
+                      )
+                    )}
+                    <button onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }} className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center">
+                      <LogOut className="w-4 h-4 mr-1.5" /> 로그아웃
+                    </button>
+                  </div>
+                </aside>
 
-            {activeMain === MAIN.FN_RECO && (
-              <RecommendSection
-                profiles={profiles}
-                onUpdate={handleUpdate}
-                onDelete={handleDeleteRequest}
-                accessCode={accessCode}
-                onSyncOne={handleSyncOneToCalendar}
-                onShowSimilar={openSimilarModal}
-                onOpenStarModal={openStarModal}
-              />
-            )}
+                <main className="flex-1 p-4 sm:p-6 sm:ml-0 ml-0">
+                  <div className="sm:hidden mb-3">
+                    <button onClick={()=>setSidebarOpen(true)} className="px-3 py-2 border rounded-md flex items-center gap-2 bg-white shadow-sm">
+                      <PanelLeftOpen className="w-4 h-4" /> 메뉴
+                    </button>
+                  </div>
 
-            {activeMain === MAIN.FN_LONG && (
-              <LongTermSection
-                profiles={profiles}
-                onUpdate={handleUpdate}
-                onDelete={handleDeleteRequest}
-                accessCode={accessCode}
-                onSyncOne={handleSyncOneToCalendar}
-                onShowSimilar={openSimilarModal}
-                onOpenStarModal={openStarModal}
-              />
-            )}
+                  <div className="max-w-5xl mx-auto">
+                    {activeMain === MAIN.ALERTS && (
+                      <AlertsTab
+                        profiles={profiles}
+                        onUpdate={handleUpdate}
+                        onDelete={(id, name)=>setShowDeleteConfirm({show:true, profileId:id, profileName:name})}
+                        accessCode={accessCode}
+                        onSyncOne={handleSyncOneToCalendar}
+                        onShowSimilar={openSimilarModal}
+                        onOpenStarModal={openStarModal}
+                      />
+                    )}
 
-            {activeMain === MAIN.FN_GRAPHS && (
-              <GraphsSection
-                profiles={profiles}
-                onUpdate={handleUpdate}
-                onDelete={handleDeleteRequest}
-                accessCode={accessCode}
-                onSyncOne={handleSyncOneToCalendar}
-                onShowSimilar={openSimilarModal}
-                onOpenStarModal={openStarModal}
-              />
-            )}
+                    {activeMain === MAIN.SEARCH && (
+                      <SearchOnlyTab
+                        profiles={profiles}
+                        onUpdate={handleUpdate}
+                        onDelete={(id, name)=>setShowDeleteConfirm({show:true, profileId:id, profileName:name})}
+                        accessCode={accessCode}
+                        onSyncOne={handleSyncOneToCalendar}
+                        onShowSimilar={openSimilarModal}
+                        onOpenStarModal={openStarModal}
+                      />
+                    )}
 
-            {activeMain === MAIN.MANAGE && (
-              <ManageTab
-                profiles={profiles}
-                onUpdate={handleUpdate}
-                onDelete={handleDeleteRequest}
-                handleFormSubmit={handleFormSubmit}
-                handleBulkAdd={handleBulkAdd}
-                formState={formState}
-                setFormState={setFormState}
-                accessCode={accessCode}
-                onSyncOne={handleSyncOneToCalendar}
-                onShowSimilar={openSimilarModal}
-                onOpenStarModal={openStarModal}
-              />
-            )}
-          </div>
-        </main>
-      </div>
+                    {activeMain === MAIN.STARRED && (
+                      <StarredTab
+                        profiles={profiles}
+                        folders={folders}
+                        setFolders={setFolders}
+                        accessCode={accessCode}
+                        onUpdate={handleUpdate}
+                        onDelete={(id, name)=>setShowDeleteConfirm({show:true, profileId:id, profileName:name})}
+                        onSyncOne={handleSyncOneToCalendar}
+                        onShowSimilar={openSimilarModal}
+                        onOpenStarModal={openStarModal}
+                      />
+                    )}
+
+                    {activeMain === MAIN.FN_RECO && (
+                      <RecommendSection
+                        profiles={profiles}
+                        onUpdate={handleUpdate}
+                        onDelete={(id, name)=>setShowDeleteConfirm({show:true, profileId:id, profileName:name})}
+                        accessCode={accessCode}
+                        onSyncOne={handleSyncOneToCalendar}
+                        onShowSimilar={openSimilarModal}
+                        onOpenStarModal={openStarModal}
+                      />
+                    )}
+
+                    {activeMain === MAIN.FN_LONG && (
+                      <LongTermSection
+                        profiles={profiles}
+                        onUpdate={handleUpdate}
+                        onDelete={(id, name)=>setShowDeleteConfirm({show:true, profileId:id, profileName:name})}
+                        accessCode={accessCode}
+                        onSyncOne={handleSyncOneToCalendar}
+                        onShowSimilar={openSimilarModal}
+                        onOpenStarModal={openStarModal}
+                      />
+                    )}
+
+                    {activeMain === MAIN.FN_GRAPHS && (
+                      <GraphsSection
+                        profiles={profiles}
+                        onUpdate={handleUpdate}
+                        onDelete={(id, name)=>setShowDeleteConfirm({show:true, profileId:id, profileName:name})}
+                        accessCode={accessCode}
+                        onSyncOne={handleSyncOneToCalendar}
+                        onShowSimilar={openSimilarModal}
+                        onOpenStarModal={openStarModal}
+                      />
+                    )}
+
+                    {activeMain === MAIN.MANAGE && (
+                      <ManageTab
+                        profiles={profiles}
+                        onUpdate={handleUpdate}
+                        onDelete={(id, name)=>setShowDeleteConfirm({show:true, profileId:id, profileName:name})}
+                        handleFormSubmit={handleFormSubmit}
+                        handleBulkAdd={handleBulkAdd}
+                        formState={formState}
+                        setFormState={setFormState}
+                        accessCode={accessCode}
+                        onSyncOne={handleSyncOneToCalendar}
+                        onShowSimilar={openSimilarModal}
+                        onOpenStarModal={openStarModal}
+                      />
+                    )}
+                  </div>
+                </main>
+              </div>
+            </>
+          )}
+        </>
+      )}
     </ErrorBoundary>
   );
 }
