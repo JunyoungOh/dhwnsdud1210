@@ -1,5 +1,5 @@
 // src/App.js
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth, signInAnonymously, onAuthStateChanged
@@ -422,32 +422,6 @@ const ProfileCard = ({
     try { await onSyncOne(profile); } finally { setSyncing(false); }
   };
 
-  if (isEditing) {
-    return (
-      <div className="bg-white rounded-xl shadow border p-4">
-        <div className="grid md:grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <input name="name" value={editedProfile.name} onChange={handleInputChange} placeholder="이름" className="w-full p-2 border rounded text-sm font-bold" />
-            <input name="expertise" value={editedProfile.expertise || ''} onChange={handleInputChange} placeholder="전문영역" className="w-full p-2 border rounded text-sm" />
-            <textarea name="career" value={editedProfile.career} onChange={handleInputChange} placeholder="경력" className="w-full p-2 border rounded text-sm h-24" />
-          </div>
-          <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-2">
-              <input name="age" type="number" value={editedProfile.age || ''} onChange={handleInputChange} placeholder="나이" className="w-full p-2 border rounded text-sm" />
-              <input name="priority" type="text" value={editedProfile.priority || ''} onChange={handleInputChange} placeholder="우선순위" className="w-full p-2 border rounded text-sm" />
-            </div>
-            <textarea name="otherInfo" value={editedProfile.otherInfo || ''} onChange={handleInputChange} placeholder="기타 정보" className="w-full p-2 border rounded text-sm h-20" />
-            <textarea name="meetingRecord" value={editedProfile.meetingRecord || ''} onChange={handleInputChange} placeholder="미팅기록 (예: (25.08.14) 오후 7:00)" className="w-full p-2 border rounded text-sm h-20" />
-          </div>
-        </div>
-        <div className="mt-3 flex justify-end gap-2">
-          <button onClick={() => setIsEditing(false)} className="p-2 text-gray-500 hover:text-gray-800"><X size={20} /></button>
-          <button onClick={handleSave} className="p-2 text-green-600 hover:text-green-800"><Save size={20} /></button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className={`bg-white rounded-xl shadow border p-4 relative ${dense ? '' : 'flex flex-col md:flex-row gap-3'}`}>
       <div className="flex-1">
@@ -550,26 +524,24 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, acc
 
 // ======== 페이지들 ========
 const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
-  const {
-    todayProfiles, upcomingProfiles
-  } = useMemo(() => {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const tomorrowStart = new Date(todayStart); tomorrowStart.setDate(tomorrowStart.getDate() + 1);
-    const threeDaysLater = new Date(todayStart); threeDaysLater.setDate(threeDaysLater.getDate() + 4);
-    const today = [], upcoming = [];
-    profiles.forEach(p => {
-      if (p.eventDate) {
-        const eventDate = new Date(p.eventDate);
-        if (eventDate >= todayStart && eventDate < tomorrowStart) today.push(p);
-        else if (eventDate > now && eventDate < threeDaysLater) upcoming.push(p);
-      }
-    });
-    return {
-      todayProfiles: today.sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate)),
-      upcomingProfiles: upcoming.sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate)),
-    };
-  }, [profiles]);
+  // 계산을 일반 변수로 처리 (useMemo 사용 안 함)
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrowStart = new Date(todayStart); tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+  const threeDaysLater = new Date(todayStart); threeDaysLater.setDate(threeDaysLater.getDate() + 4);
+
+  const today = [];
+  const upcoming = [];
+  profiles.forEach(p => {
+    if (p.eventDate) {
+      const eventDate = new Date(p.eventDate);
+      if (eventDate >= todayStart && eventDate < tomorrowStart) today.push(p);
+      else if (eventDate > now && eventDate < threeDaysLater) upcoming.push(p);
+    }
+  });
+
+  const todayProfiles = today.sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate));
+  const upcomingProfiles = upcoming.sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate));
 
   return (
     <div className="space-y-8">
@@ -602,22 +574,25 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
 
 const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const searched = useMemo(() => {
-    const term = searchTerm.trim(); if (!term) return [];
-    const orConditions = term.split(/\s+or\s+/i);
-    return profiles.filter(p => orConditions.some(cond => {
-      const andKeywords = cond.split(/\s+and\s+/i).filter(Boolean);
-      return andKeywords.every(keyword => {
-        const map = { '이름':'name','경력':'career','나이':'age','전문영역':'expertise','기타':'otherInfo','우선순위':'priority' };
-        const f = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
-        if (f) { const field = map[f[1]]; const val = f[2].toLowerCase(); const v = p[field] ? String(p[field]).toLowerCase() : ''; return v.includes(val); }
-        const ageG = keyword.match(/^(\d{1,2})대$/);
-        if (ageG) { const d = parseInt(ageG[1],10); if (d>=10) { const min=d, max=d+9; return p.age && p.age>=min && p.age<=max; } }
-        const txt = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
-        return txt.includes(keyword.toLowerCase());
-      });
-    }));
-  }, [searchTerm, profiles]);
+  // 단순 변수 계산
+  const term = searchTerm.trim();
+  const searched = term
+    ? profiles.filter(p => {
+        const orConditions = term.split(/\s+or\s+/i);
+        return orConditions.some(cond => {
+          const andKeywords = cond.split(/\s+and\s+/i).filter(Boolean);
+          return andKeywords.every(keyword => {
+            const map = { '이름':'name','경력':'career','나이':'age','전문영역':'expertise','기타':'otherInfo','우선순위':'priority' };
+            const f = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
+            if (f) { const field = map[f[1]]; const val = f[2].toLowerCase(); const v = p[field] ? String(p[field]).toLowerCase() : ''; return v.includes(val); }
+            const ageG = keyword.match(/^(\d{1,2})대$/);
+            if (ageG) { const d = parseInt(ageG[1],10); if (d>=10) { const min=d, max=d+9; return p.age && p.age>=min && p.age<=max; } }
+            const txt = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
+            return txt.includes(keyword.toLowerCase());
+          });
+        });
+      })
+    : [];
 
   return (
     <div>
@@ -631,7 +606,7 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
           className="w-full p-4 pl-12 border rounded-xl shadow-sm"
         />
       </div>
-      {searchTerm.trim() && (
+      {term && (
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
           {searched.length ? searched.map(p => (
             <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete}
@@ -644,11 +619,10 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
 };
 
 const StarredPage = ({ profiles, folders, selectedFolder, onSelectFolder, onAddFolder, onDeleteFolders, onToggleStar, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar }) => {
-  const filtered = useMemo(() => {
-    const starred = profiles.filter(p => p.starred);
-    if (!selectedFolder || selectedFolder === '전체') return starred;
-    return starred.filter(p => (p.starredFolders || []).includes(selectedFolder));
-  }, [profiles, selectedFolder]);
+  const starred = profiles.filter(p => p.starred);
+  const filtered = !selectedFolder || selectedFolder === '전체'
+    ? starred
+    : starred.filter(p => (p.starredFolders || []).includes(selectedFolder));
 
   const [delMode, setDelMode] = useState(false);
   const [delSet, setDelSet]   = useState([]);
@@ -735,35 +709,33 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
   const now = new Date();
   const threeMonthsAgo = new Date(now); threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
-  // --- 점수/추천/장기관리 계산 ---
-  const recommended = useMemo(() => {
-    const scoreOf = (p) => {
-      const last = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
-      const days = last ? Math.max(1, Math.floor((now - last) / (1000*60*60*24))) : 180;
-      let score = Math.min(100, Math.round((days / 90) * 60));
-      if (p.priority === '3') score += 20;
-      const kw = TARGET_KEYWORDS.filter(k => (p.career||'').includes(k)).length;
-      score += Math.min(kw * 5, 15);
-      if (p.expertise) score += 5;
-      const snoozeUntil = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
-      if (snoozeUntil && snoozeUntil > now) score = -1;
-      return score;
-    };
-    return profiles
-      .map(p => ({ p, s: scoreOf(p) }))
-      .filter(x => x.s >= 40)
-      .sort((a,b) => b.s - a.s)
-      .slice(0, 30)
-      .map(x => x.p);
-  }, [profiles, now]);
+  // 점수/추천
+  const scoreOf = (p) => {
+    const last = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
+    const days = last ? Math.max(1, Math.floor((now - last) / (1000*60*60*24))) : 180;
+    let score = Math.min(100, Math.round((days / 90) * 60));
+    if (p.priority === '3') score += 20;
+    const kw = TARGET_KEYWORDS.filter(k => (p.career||'').includes(k)).length;
+    score += Math.min(kw * 5, 15);
+    if (p.expertise) score += 5;
+    const snoozeUntil = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
+    if (snoozeUntil && snoozeUntil > now) score = -1;
+    return score;
+  };
+  const recommended = profiles
+    .map(p => ({ p, s: scoreOf(p) }))
+    .filter(x => x.s >= 40)
+    .sort((a,b) => b.s - a.s)
+    .slice(0, 30)
+    .map(x => x.p);
 
-  const longTerm = useMemo(() => {
-    return profiles.filter(p => {
+  const longTerm = profiles
+    .filter(p => {
       const last = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
       const snoozeUntil = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
       return last && last < threeMonthsAgo && (!snoozeUntil || snoozeUntil < now);
-    }).sort((a,b) => (new Date(a.lastReviewedDate || a.eventDate||0)) - (new Date(b.lastReviewedDate || b.eventDate||0)));
-  }, [profiles, threeMonthsAgo, now]);
+    })
+    .sort((a,b) => (new Date(a.lastReviewedDate || a.eventDate||0)) - (new Date(b.lastReviewedDate || b.eventDate||0)));
 
   const handleSnooze = async (id) => {
     const snoozeDate = new Date(); snoozeDate.setMonth(snoozeDate.getMonth() + 3);
@@ -771,61 +743,51 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
   };
   const handleConfirm = async (id) => onUpdate(id, { lastReviewedDate: new Date().toISOString() });
 
-  // --- 그래프 데이터 계산 (모두 최상위에서, 훅 호출은 조건부 금지) ---
-  const ageData = useMemo(() => {
-    const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
-    profiles.forEach(({ age }) => {
-      if (!age) return;
-      if (age < 20) groups['10대']++;
-      else if (age < 30) groups['20대']++;
-      else if (age < 40) groups['30대']++;
-      else if (age < 50) groups['40대']++;
-      else groups['50대 이상']++;
-    });
-    return Object.entries(groups).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
-  }, [profiles]);
+  // 그래프 데이터 (일반 변수)
+  const ageGroups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
+  profiles.forEach(({ age }) => {
+    if (!age) return;
+    if (age < 20) ageGroups['10대']++;
+    else if (age < 30) ageGroups['20대']++;
+    else if (age < 40) ageGroups['30대']++;
+    else if (age < 50) ageGroups['40대']++;
+    else ageGroups['50대 이상']++;
+  });
+  const ageData = Object.entries(ageGroups).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
 
-  const priorityData = useMemo(() => {
-    const p = { '3 (상)': 0, '2 (중)': 0, '1 (하)': 0 };
-    profiles.forEach(x => { if (x.priority === '3') p['3 (상)']++; else if (x.priority === '2') p['2 (중)']++; else if (x.priority === '1') p['1 (하)']++; });
-    return Object.entries(p).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
-  }, [profiles]);
+  const pCount = { '3 (상)': 0, '2 (중)': 0, '1 (하)': 0 };
+  profiles.forEach(x => { if (x.priority === '3') pCount['3 (상)']++; else if (x.priority === '2') pCount['2 (중)']++; else if (x.priority === '1') pCount['1 (하)']++; });
+  const priorityData = Object.entries(pCount).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
 
-  const companyChartData = useMemo(() => (
-    TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length }))
-  ), [profiles]);
+  const companyChartData = TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length }));
 
-  const expertiseData = useMemo(() => {
-    const c = {}; profiles.forEach(p => { if (p.expertise) c[p.expertise] = (c[p.expertise] || 0) + 1; });
-    return Object.entries(c).map(([name, count]) => ({ name, count }));
-  }, [profiles]);
+  const exMap = {};
+  profiles.forEach(p => { if (p.expertise) exMap[p.expertise] = (exMap[p.expertise] || 0) + 1; });
+  const expertiseData = Object.entries(exMap).map(([name, count]) => ({ name, count }));
 
-  // 필터 상태 + 핸들러
+  // 필터 상태
   const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
   const handlePieClick = (type, data) => { if (!data || (data.value ?? data.count) === 0) return; setActiveFilter({ type, value: data.name }); };
   const handleBarClick = (type, data) => { const count = data.count || data.value; if (count === 0) return; setActiveFilter({ type, value: data.name }); };
 
-  const filteredProfiles = useMemo(() => {
-    if (!activeFilter.type) return [];
-    switch (activeFilter.type) {
-      case 'age': {
-        const g = activeFilter.value;
-        return profiles.filter(p => p.age && (
-          (g==='10대' && p.age<20) ||
-          (g==='20대' && p.age>=20 && p.age<30) ||
-          (g==='30대' && p.age>=30 && p.age<40) ||
-          (g==='40대' && p.age>=40 && p.age<50) ||
-          (g==='50대 이상' && p.age>=50)
-        ));
-      }
-      case 'priority': {
-        const v = activeFilter.value.split(' ')[0]; return profiles.filter(p => p.priority === v);
-      }
-      case 'company': return profiles.filter(p => p.career?.includes(activeFilter.value));
-      case 'expertise': return profiles.filter(p => p.expertise === activeFilter.value);
-      default: return [];
-    }
-  }, [profiles, activeFilter]);
+  let filteredProfiles = [];
+  if (activeFilter.type === 'age') {
+    const g = activeFilter.value;
+    filteredProfiles = profiles.filter(p => p.age && (
+      (g==='10대' && p.age<20) ||
+      (g==='20대' && p.age>=20 && p.age<30) ||
+      (g==='30대' && p.age>=30 && p.age<40) ||
+      (g==='40대' && p.age>=40 && p.age<50) ||
+      (g==='50대 이상' && p.age>=50)
+    ));
+  } else if (activeFilter.type === 'priority') {
+    const v = (activeFilter.value || '').split(' ')[0];
+    filteredProfiles = profiles.filter(p => p.priority === v);
+  } else if (activeFilter.type === 'company') {
+    filteredProfiles = profiles.filter(p => p.career?.includes(activeFilter.value));
+  } else if (activeFilter.type === 'expertise') {
+    filteredProfiles = profiles.filter(p => p.expertise === activeFilter.value);
+  }
 
   return (
     <div className="space-y-8">
@@ -1095,14 +1057,12 @@ const ManagePage = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulk
 
   const [currentPage, setCurrentPage] = useState(1);
   const PER_PAGE = 10;
-  const sorted = useMemo(() => [...profiles].sort((a,b)=>a.name.localeCompare(b.name)), [profiles]);
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PER_PAGE));
-  const pageItems = useMemo(() => {
-    const end = currentPage * PER_PAGE, start = end - PER_PAGE;
-    return sorted.slice(start,end);
-  }, [sorted, currentPage]);
 
-  const pages = useMemo(() => Array.from({length: totalPages}, (_,i)=>i+1), [totalPages]);
+  const sorted = [...profiles].sort((a,b)=>a.name.localeCompare(b.name));
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PER_PAGE));
+  const end = currentPage * PER_PAGE, start = end - PER_PAGE;
+  const pageItems = sorted.slice(start, end);
+  const pages = Array.from({length: totalPages}, (_,i)=>i+1);
 
   return (
     <div className="space-y-8">
@@ -1194,13 +1154,12 @@ export default function App() {
   const [newPriority, setNewPriority] = useState('');
   const [newMeetingRecord, setNewMeetingRecord] = useState('');
 
-  const urlParams = useMemo(() => {
-    if (typeof window === 'undefined') return new URLSearchParams('');
-    return new URLSearchParams(window.location.search);
-  }, []);
+  // URL 파라미터
+  const urlParams = (typeof window !== 'undefined') ? new URLSearchParams(window.location.search) : new URLSearchParams('');
   const profileIdFromUrl = urlParams.get('profile');
   const accessCodeFromUrl = urlParams.get('code');
 
+  // 외부 스크립트 로드 (gapi, gis, sheetjs)
   useEffect(() => {
     const xlsx = document.createElement('script');
     xlsx.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
@@ -1247,6 +1206,7 @@ export default function App() {
     };
   }, []);
 
+  // Firebase 익명 로그인
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (user) setAuthStatus('authenticated');
@@ -1261,6 +1221,7 @@ export default function App() {
   const [activeColRef, setActiveColRef] = useState(null);
   const [dataReady, setDataReady] = useState(false);
 
+  // Firestore 데이터 구독
   useEffect(() => {
     let unsub = null;
     let cancelled = false;
@@ -1302,6 +1263,7 @@ export default function App() {
     return () => { cancelled = true; if (unsub) unsub(); };
   }, [accessCode]);
 
+  // 폴더 메타
   const [starredFolders, setStarredFolders] = useState(['전체']);
   const [starFolderSelected, setStarFolderSelected] = useState('전체');
 
@@ -1313,10 +1275,9 @@ export default function App() {
         const s = await getDoc(ref);
         if (s.exists()) {
           const d = s.data() || {};
-          setStarredFolders(Array.isArray(d.folders) ? d.folders : ['전체']);
-          if (!(Array.isArray(d.folders) && d.folders.includes(starFolderSelected))) {
-            setStarFolderSelected('전체');
-          }
+          const folders = Array.isArray(d.folders) ? d.folders : ['전체'];
+          setStarredFolders(folders);
+          if (!folders.includes(starFolderSelected)) setStarFolderSelected('전체');
         } else {
           setStarredFolders(['전체']);
           setStarFolderSelected('전체');
@@ -1349,6 +1310,7 @@ export default function App() {
     if (typeof window !== 'undefined') localStorage.setItem('profileDbAccessCode', code);
   };
 
+  // CRUD & 기타 핸들러
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!newName.trim() || !newCareer.trim() || !activeColRef) return;
@@ -1482,9 +1444,11 @@ export default function App() {
     }
   };
 
+  // 간단 통계
   const totalCount = profiles.length;
-  const meetingCount = useMemo(() => profiles.filter(p => !!p.eventDate).length, [profiles]);
+  const meetingCount = profiles.filter(p => !!p.eventDate).length;
 
+  // 딥링크(프로필 단독 뷰) / 로그인 화면 분기
   if (profileIdFromUrl && accessCodeFromUrl) {
     return <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />;
   }
@@ -1492,13 +1456,11 @@ export default function App() {
     return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
   }
 
-  const profilesWithFolderHelpers = useMemo(() => {
-    return profiles.map(p => ({
-      ...p,
-      _folderUniverse: starredFolders,
-      _onCreateFolder: addFolder
-    }));
-  }, [profiles, starredFolders]);
+  const profilesWithFolderHelpers = profiles.map(p => ({
+    ...p,
+    _folderUniverse: starredFolders,
+    _onCreateFolder: addFolder
+  }));
 
   const MainContent = () => {
     switch (activeMain) {
