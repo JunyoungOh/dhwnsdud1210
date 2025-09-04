@@ -735,6 +735,7 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
   const now = new Date();
   const threeMonthsAgo = new Date(now); threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
+  // --- 점수/추천/장기관리 계산 ---
   const recommended = useMemo(() => {
     const scoreOf = (p) => {
       const last = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
@@ -770,10 +771,7 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
   };
   const handleConfirm = async (id) => onUpdate(id, { lastReviewedDate: new Date().toISOString() });
 
-  const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
-  const handlePieClick = (type, data) => { if (!data || (data.value ?? data.count) === 0) return; setActiveFilter({ type, value: data.name }); };
-  const handleBarClick = (type, data) => { const count = data.count || data.value; if (count === 0) return; setActiveFilter({ type, value: data.name }); };
-
+  // --- 그래프 데이터 계산 (모두 최상위에서, 훅 호출은 조건부 금지) ---
   const ageData = useMemo(() => {
     const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
     profiles.forEach(({ age }) => {
@@ -793,11 +791,19 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
     return Object.entries(p).map(([name, value]) => ({ name, value })).filter(d => d.value > 0);
   }, [profiles]);
 
-  const companyData = useMemo(() => TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length })), [profiles]);
+  const companyChartData = useMemo(() => (
+    TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length }))
+  ), [profiles]);
+
   const expertiseData = useMemo(() => {
     const c = {}; profiles.forEach(p => { if (p.expertise) c[p.expertise] = (c[p.expertise] || 0) + 1; });
     return Object.entries(c).map(([name, count]) => ({ name, count }));
   }, [profiles]);
+
+  // 필터 상태 + 핸들러
+  const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
+  const handlePieClick = (type, data) => { if (!data || (data.value ?? data.count) === 0) return; setActiveFilter({ type, value: data.name }); };
+  const handleBarClick = (type, data) => { const count = data.count || data.value; if (count === 0) return; setActiveFilter({ type, value: data.name }); };
 
   const filteredProfiles = useMemo(() => {
     if (!activeFilter.type) return [];
@@ -903,9 +909,9 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <defs>
-                  <radialGradient id="gp-0"><stop offset="0%" stopColor="#FF4444" stopOpacity={0.7} /><stop offset="100%" stopColor="#FF4444" stopOpacity={1} /></radialGradient>
-                  <radialGradient id="gp-1"><stop offset="0%" stopColor="#FFBB28" stopOpacity={0.7} /><stop offset="100%" stopColor="#FFBB28" stopOpacity={1} /></radialGradient>
-                  <radialGradient id="gp-2"><stop offset="0%" stopColor="#00C49F" stopOpacity={0.7} /><stop offset="100%" stopColor="#00C49F" stopOpacity={1} /></radialGradient>
+                  <radialGradient id="gp-0"><stop offset="0%" stopOpacity={0.7} /><stop offset="100%" stopOpacity={1} /></radialGradient>
+                  <radialGradient id="gp-1"><stop offset="0%" stopOpacity={0.7} /><stop offset="100%" stopOpacity={1} /></radialGradient>
+                  <radialGradient id="gp-2"><stop offset="0%" stopOpacity={0.7} /><stop offset="100%" stopOpacity={1} /></radialGradient>
                 </defs>
                 <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label>
                   {priorityData.map((entry, i) => (
@@ -964,9 +970,12 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
           <section className="bg-white p-6 rounded-xl shadow-md mt-8">
             <h2 className="text-xl font-bold text-gray-800 mb-4">전문영역 분포</h2>
             <ResponsiveContainer width="100%" height={350}>
-              <BarChart data={useMemo(()=>expertiseData, [expertiseData])} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+              <BarChart data={expertiseData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
                 <defs>
-                  <linearGradient id="gradient-expertise" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00C49F" stopOpacity={0.8}/><stop offset="95%" stopColor="#82ca9d" stopOpacity={1}/></linearGradient>
+                  <linearGradient id="gradient-expertise" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#00C49F" stopOpacity={0.8}/>
+                    <stop offset="95%" stopColor="#82ca9d" stopOpacity={1}/>
+                  </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
@@ -993,16 +1002,19 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
           <section className="bg-white p-6 rounded-xl shadow-md mt-8">
             <h2 className="text-xl font-bold text-gray-800 mb-4">IT 기업 경력 분포</h2>
             <ResponsiveContainer width="100%" height={350}>
-              <BarChart data={useMemo(()=>TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length })), [profiles])} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
+              <BarChart data={companyChartData} margin={{ top: 20, right: 30, left: 0, bottom: 50 }}>
                 <defs>
-                  <linearGradient id="gradient-company" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#FFBB28" stopOpacity={0.8}/><stop offset="95%" stopColor="#FF8042" stopOpacity={1}/></linearGradient>
+                  <linearGradient id="gradient-company" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#FFBB28" stopOpacity={0.8}/>
+                    <stop offset="95%" stopColor="#FF8042" stopOpacity={1}/>
+                  </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={60} />
                 <YAxis allowDecimals={false}/><Tooltip formatter={(v)=>`${v}명`} /><Legend />
                 <Bar dataKey="count" fill="url(#gradient-company)">
-                  {TARGET_KEYWORDS.map((k, i) => (
-                    <Cell key={`co-${i}`} onClick={() => handleBarClick('company', { name: k, count: profiles.filter(p => p.career?.includes(k)).length })} style={{ cursor: 'pointer' }} />
+                  {companyChartData.map((entry, i) => (
+                    <Cell key={`co-${i}`} onClick={() => handleBarClick('company', entry)} style={{ cursor: 'pointer' }} />
                   ))}
                 </Bar>
               </BarChart>
