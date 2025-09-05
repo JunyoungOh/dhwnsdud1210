@@ -183,7 +183,8 @@ const LoginScreen = ({ onLogin, authStatus }) => {
 
 const ProfileCard = ({
   profile, onUpdate, onDelete,
-  accessCode, onSyncOne, onShowSimilar, onToggleStar
+  accessCode, onSyncOne, onShowSimilar, onToggleStar,
+  leftFooter // 추가: 카드 최하단 좌측에 넣을 요소(확인/스누즈 버튼 등)
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
@@ -307,18 +308,23 @@ const ProfileCard = ({
         </div>
       )}
 
-      {/* 캘린더 영역: 최하단 우측 */}
-      <div className="mt-2 pt-2 border-t flex items-center justify-end gap-3">
-        {profile.gcalEventId ? (
-          <a href={profile.gcalHtmlLink || '#'} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-            <ExternalLink size={14}/> Google Calendar
-          </a>
-        ) : <span className="text-xs text-gray-400">캘린더 미연동</span>}
-        <button onClick={handleSyncClick} disabled={syncing}
-          className="text-xs bg-blue-500 text-white font-semibold px-3 py-1 rounded-full hover:bg-blue-600 disabled:bg-blue-300 flex items-center">
-          {syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <CalendarPlus className="w-3 h-3 mr-1" />}
-          {profile.gcalEventId ? '캘린더 수정' : '캘린더 등록'}
-        </button>
+      {/* 최하단: 좌측 사용자 액션(옵션) / 우측 캘린더 */}
+      <div className="mt-2 pt-2 border-t flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {leftFooter /* 있을 때만 렌더 */}
+        </div>
+        <div className="flex items-center gap-3">
+          {profile.gcalEventId ? (
+            <a href={profile.gcalHtmlLink || '#'} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+              <ExternalLink size={14}/> Google Calendar
+            </a>
+          ) : <span className="text-xs text-gray-400">캘린더 미연동</span>}
+          <button onClick={handleSyncClick} disabled={syncing}
+            className="text-xs bg-blue-500 text-white font-semibold px-3 py-1 rounded-full hover:bg-blue-600 disabled:bg-blue-300 flex items-center">
+            {syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <CalendarPlus className="w-3 h-3 mr-1" />}
+            {profile.gcalEventId ? '캘린더 수정' : '캘린더 등록'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -457,7 +463,7 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
       score += Math.min(kw * 5, 15);
       if (p.expertise) score += 5;
       const snoozeUntil = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
-      if (snoozeUntil && snoozeUntil > now) score = -1;
+      if (snoozeUntil && snoozeUntil > now) score = -1; // 스누즈 중이면 제외
       return score;
     };
     return profiles
@@ -526,6 +532,15 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
     }
   }, [profiles, activeFilter]);
 
+  // 액션 핸들러: 확인/스누즈
+  const handleConfirm = async (p) => {
+    await onUpdate(p.id, { lastReviewedDate: new Date().toISOString(), snoozeUntil: null });
+  };
+  const handleSnooze3M = async (p) => {
+    const d = new Date(); d.setMonth(d.getMonth() + 3);
+    await onUpdate(p.id, { snoozeUntil: d.toISOString() });
+  };
+
   return (
     <div className="space-y-8">
       {activeSub === 'rec' && (
@@ -541,17 +556,26 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
                 </div>
               </div>
             </div>
-            <div className="text-xs text-gray-500">카드에서 ‘확인’/‘스누즈’ 가능</div>
+            <div className="text-xs text-gray-500">카드 하단 좌측에서 ‘확인’ 가능</div>
           </div>
           <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
             {recommended.length === 0 ? (
               <div className="text-gray-500 p-4 text-sm">없음</div>
             ) : recommended.map(p => (
-              <ProfileCard key={p.id}
+              <ProfileCard
+                key={p.id}
                 profile={p}
                 onUpdate={onUpdate} onDelete={onDelete}
                 accessCode={accessCode} onSyncOne={onSyncOne}
                 onShowSimilar={onShowSimilar} onToggleStar={onToggleStar}
+                leftFooter={
+                  <button
+                    onClick={() => handleConfirm(p)}
+                    className="text-xs px-3 py-1 rounded-full border border-gray-300 hover:bg-gray-50"
+                  >
+                    확인
+                  </button>
+                }
               />
             ))}
           </div>
@@ -569,11 +593,28 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
             {longTerm.length === 0 ? (
               <div className="text-gray-500 p-4 text-sm">없음</div>
             ) : longTerm.map(p => (
-              <ProfileCard key={p.id}
+              <ProfileCard
+                key={p.id}
                 profile={p}
                 onUpdate={onUpdate} onDelete={onDelete}
                 accessCode={accessCode} onSyncOne={onSyncOne}
                 onShowSimilar={onShowSimilar} onToggleStar={onToggleStar}
+                leftFooter={
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleConfirm(p)}
+                      className="text-xs px-3 py-1 rounded-full border border-gray-300 hover:bg-gray-50"
+                    >
+                      확인
+                    </button>
+                    <button
+                      onClick={() => handleSnooze3M(p)}
+                      className="text-xs px-3 py-1 rounded-full border border-yellow-300 text-yellow-700 hover:bg-yellow-50"
+                    >
+                      3개월 후 다시
+                    </button>
+                  </div>
+                }
               />
             ))}
           </div>
@@ -882,15 +923,15 @@ const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, acc
 
 // ============ App ============
 export default function App() {
-  // --- 상태들 (항상 최상단 선언: Netlify ESLint 안전) ---
+  // --- 상태들 (항상 최상단 선언) ---
   const [accessCode, setAccessCode] = useState(typeof window !== 'undefined' ? (localStorage.getItem('profileDbAccessCode') || null) : null);
   const [profiles, setProfiles]     = useState([]);
   const [authStatus, setAuthStatus] = useState('authenticating');
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeMain, setActiveMain]   = useState('alerts');
-  const [functionsOpen, setFunctionsOpen] = useState(false); // Functions 접기/펼치기
-  const [functionsSub, setFunctionsSub] = useState('rec');   // 추천/장기관리/그래프
+  const [functionsOpen, setFunctionsOpen] = useState(false);
+  const [functionsSub, setFunctionsSub]   = useState('rec');
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
 
@@ -907,7 +948,7 @@ export default function App() {
   const [activeColRef, setActiveColRef] = useState(null);
   const [dataReady, setDataReady] = useState(false);
 
-  // --- 외부 스크립트 로드 (XLSX, gapi, gis) ---
+  // --- 외부 스크립트 로드 ---
   useEffect(() => {
     const xlsx = document.createElement('script');
     xlsx.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
@@ -1004,7 +1045,16 @@ export default function App() {
     return () => { cancelled = true; if (unsub) unsub(); };
   }, [accessCode]);
 
-  // --- Handlers ---
+  // --- URL 파라미터 & 파생값 (모든 훅은 조기 return보다 위에서 호출) ---
+  const urlParams = useMemo(() => {
+    if (typeof window === 'undefined') return new URLSearchParams('');
+    return new URLSearchParams(window.location.search);
+  }, []);
+  const profileIdFromUrl = urlParams.get('profile');
+  const accessCodeFromUrl = urlParams.get('code');
+  const profilesWithHelpers = useMemo(() => profiles, [profiles]); // 조기 return 위
+
+  // --- 핸들러들 ---
   const handleLogin = (code) => {
     setAccessCode(code);
     if (typeof window !== 'undefined') localStorage.setItem('profileDbAccessCode', code);
@@ -1049,7 +1099,6 @@ export default function App() {
     await updateDoc(doc(activeColRef, profileId), updatedData);
   };
 
-  // 삭제 (재선언 제거, 올바른 setter 사용)
   const handleDeleteRequest = (profileId, profileName) =>
     setShowDeleteConfirm({ show: true, profileId, profileName });
 
@@ -1135,17 +1184,7 @@ export default function App() {
     }
   };
 
-  const totalCount = profiles.length;
-  const meetingCount = useMemo(() => profiles.filter(p => !!p.eventDate).length, [profiles]);
-
-  // URL 파라미터로 상세보기 분기
-  const urlParams = useMemo(() => {
-    if (typeof window === 'undefined') return new URLSearchParams('');
-    return new URLSearchParams(window.location.search);
-  }, []);
-  const profileIdFromUrl = urlParams.get('profile');
-  const accessCodeFromUrl = urlParams.get('code');
-
+  // 상세보기 컴포넌트(중첩 선언 가능)
   function ProfileDetailView({ profileId, accessCode }) {
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -1201,6 +1240,7 @@ export default function App() {
     );
   }
 
+  // 조기 return (모든 훅은 이미 위에서 호출됨)
   if (profileIdFromUrl && accessCodeFromUrl) {
     return <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />;
   }
@@ -1208,9 +1248,7 @@ export default function App() {
     return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
   }
 
-  const profilesWithHelpers = useMemo(() => profiles, [profiles]);
-
-  // 메인 콘텐츠 스위치
+  // 메인 콘텐츠 스위치 (훅 사용 없음)
   const MainContent = () => {
     if (activeMain === 'alerts') {
       return (
@@ -1243,6 +1281,17 @@ export default function App() {
       );
     }
     // functions
+    if (activeMain === 'manage') {
+      return (
+        <ManagePage
+          profiles={profilesWithHelpers}
+          onUpdate={handleUpdate} onDelete={handleDeleteRequest}
+          onAddOne={handleAddOne} handleBulkAdd={handleBulkAdd}
+          accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
+          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+        />
+      );
+    }
     return (
       <FunctionsPage
         activeSub={functionsSub} setActiveSub={setFunctionsSub}
@@ -1253,6 +1302,9 @@ export default function App() {
       />
     );
   };
+
+  const totalCount = profiles.length;
+  const meetingCount = useMemo(() => profiles.filter(p => !!p.eventDate).length, [profiles]);
 
   return (
     <div className="bg-gray-50 min-h-screen font-sans">
