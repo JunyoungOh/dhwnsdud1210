@@ -1,3 +1,6 @@
+// =============================================
+// [LATEST] App.js — Netlify-safe — saved Sep 5, 2025 11:35 KST
+// =============================================
 import React, { useEffect, useState, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
@@ -122,8 +125,6 @@ function similarityScore(a, b) {
   if (a.expertise && b.expertise && a.expertise === b.expertise) score += 8;
   return Math.max(0, Math.min(100, Math.round(score)));
 }
-
-// ======== 경로 자동 탐지 ========
 function buildPathCandidates(accessCode, aid) {
   return [
     ['artifacts', aid, 'public', 'data', accessCode],
@@ -132,7 +133,7 @@ function buildPathCandidates(accessCode, aid) {
   ];
 }
 
-// ============ UI 컴포넌트 ============
+// ============ 단순 컴포넌트 ============
 const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
     <div className="bg-white rounded-lg p-8 shadow-xl max-w-sm w-full mx-4">
@@ -180,6 +181,7 @@ const LoginScreen = ({ onLogin, authStatus }) => {
   );
 };
 
+// ============ 카드 ============
 const ProfileCard = ({
   profile, onUpdate, onDelete,
   accessCode, onSyncOne, onShowSimilar, onToggleStar
@@ -323,6 +325,7 @@ const ProfileCard = ({
   );
 };
 
+// ============ 페이지들 ============
 const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const now = useMemo(() => new Date(), []);
   const todayStart = useMemo(() => new Date(now.getFullYear(), now.getMonth(), now.getDate()), [now]);
@@ -347,7 +350,7 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {todayProfiles.map(p => (
               <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete}
-                accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
+                           accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
             ))}
           </div>
         )}
@@ -359,7 +362,7 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {upcomingProfiles.map(p => (
               <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete}
-                accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
+                           accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
             ))}
           </div>
         )}
@@ -403,7 +406,7 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
           {searched.length ? searched.map(p => (
             <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete}
-              accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
+                         accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
           )) : <div className="text-sm text-gray-500">검색 결과가 없습니다.</div>}
         </div>
       )}
@@ -430,10 +433,10 @@ const StarredPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSh
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {visible.length ? visible.map(p => (
           <ProfileCard key={p.id} profile={p}
-            onUpdate={onUpdate} onDelete={onDelete}
-            accessCode={accessCode} onSyncOne={onSyncOne}
-            onShowSimilar={onShowSimilar}
-            onToggleStar={(id, val) => onToggleStar(id, val)}
+                       onUpdate={onUpdate} onDelete={onDelete}
+                       accessCode={accessCode} onSyncOne={onSyncOne}
+                       onShowSimilar={onShowSimilar}
+                       onToggleStar={(id, val) => onToggleStar(id, val)}
           />
         )) : <div className="text-sm text-gray-500">표시할 프로필이 없습니다.</div>}
       </div>
@@ -445,7 +448,6 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
   const now = useMemo(() => new Date(), []);
   const threeMonthsAgo = useMemo(() => { const d = new Date(now); d.setMonth(d.getMonth() - 3); return d; }, [now]);
 
-  // 추천 목록 계산 (항상 계산해두고 필요한 섹션에서만 렌더)
   const recommended = useMemo(() => {
     const scoreOf = (p) => {
       const last = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
@@ -707,6 +709,7 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
   );
 };
 
+// ============ 공통 섹션 ============
 const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => (
   <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in mt-4">
     <div className="flex justify-between items-center mb-4">
@@ -735,6 +738,7 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, acc
   </section>
 );
 
+// ============ 업로더 ============
 const ExcelUploader = ({ onBulkAdd }) => {
   const [file, setFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -788,7 +792,7 @@ const ExcelUploader = ({ onBulkAdd }) => {
   );
 };
 
-// 관리 페이지: 입력 타이핑 문제 방지를 위해 로컬 state 사용
+// ============ 관리 페이지 (입력 로컬 state) ============
 const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const [newName, setNewName] = useState('');
   const [newCareer, setNewCareer] = useState('');
@@ -856,23 +860,23 @@ const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, acc
 
         <nav className="mt-6 flex items-center justify-center gap-1">
           <button onClick={()=>setCurrentPage(1)} disabled={currentPage===1}
-            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">≪</button>
+                  className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">≪</button>
           <button onClick={()=>setCurrentPage(p=>Math.max(1,p-1))} disabled={currentPage===1}
-            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">〈</button>
+                  className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">〈</button>
 
           <div className="flex items-center gap-1 overflow-x-auto max-w-[70vw]">
             {pages.map(n => (
               <button key={n} onClick={()=>setCurrentPage(n)}
-                className={`px-3 py-1 rounded-md border text-sm ${currentPage===n?'bg-yellow-400 text-white border-yellow-400':'bg-white hover:bg-gray-50'}`}>
+                      className={`px-3 py-1 rounded-md border text-sm ${currentPage===n?'bg-yellow-400 text-white border-yellow-400':'bg-white hover:bg-gray-50'}`}>
                 {n}
               </button>
             ))}
           </div>
 
           <button onClick={()=>setCurrentPage(p=>Math.min(totalPages,p+1))} disabled={currentPage===totalPages}
-            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">〉</button>
+                  className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">〉</button>
           <button onClick={()=>setCurrentPage(totalPages)} disabled={currentPage===totalPages}
-            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">≫</button>
+                  className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">≫</button>
         </nav>
       </section>
     </div>
@@ -888,8 +892,8 @@ export default function App() {
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeMain, setActiveMain]   = useState('alerts');
-  const [functionsOpen, setFunctionsOpen] = useState(false); // 사이드바에서 Functions 접기/펼치기
-  const [functionsSub, setFunctionsSub] = useState('rec');   // 추천/장기관리/그래프
+  const [functionsOpen, setFunctionsOpen] = useState(false);
+  const [functionsSub, setFunctionsSub] = useState('rec');
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
 
@@ -906,7 +910,7 @@ export default function App() {
   const [activeColRef, setActiveColRef] = useState(null);
   const [dataReady, setDataReady] = useState(false);
 
-  // --- 외부 스크립트 로드 (XLSX, gapi, gis) ---
+  // 외부 스크립트 로드
   useEffect(() => {
     const xlsx = document.createElement('script');
     xlsx.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
@@ -953,7 +957,7 @@ export default function App() {
     };
   }, []);
 
-  // --- Firebase Auth ---
+  // Firebase Auth
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (user) setAuthStatus('authenticated');
@@ -965,7 +969,7 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // --- 데이터 로드 ---
+  // 데이터 로드
   useEffect(() => {
     let unsub = null; let cancelled = false;
     (async () => {
@@ -1003,7 +1007,7 @@ export default function App() {
     return () => { cancelled = true; if (unsub) unsub(); };
   }, [accessCode]);
 
-  // --- Handlers ---
+  // Handlers
   const handleLogin = (code) => {
     setAccessCode(code);
     if (typeof window !== 'undefined') localStorage.setItem('profileDbAccessCode', code);
@@ -1132,7 +1136,7 @@ export default function App() {
   const totalCount = profiles.length;
   const meetingCount = useMemo(() => profiles.filter(p => !!p.eventDate).length, [profiles]);
 
-  // URL 파라미터로 상세보기 분기
+  // URL 파라미터 분기
   const urlParams = useMemo(() => {
     if (typeof window === 'undefined') return new URLSearchParams('');
     return new URLSearchParams(window.location.search);
@@ -1140,14 +1144,7 @@ export default function App() {
   const profileIdFromUrl = urlParams.get('profile');
   const accessCodeFromUrl = urlParams.get('code');
 
-  if (profileIdFromUrl && accessCodeFromUrl) {
-    return <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />;
-  }
-  if (!accessCode) {
-    return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
-  }
-
-  // 헬퍼: 유사도 모달 내부에서 상세 카드 렌더용
+  // 내부 컴포넌트 (상세)
   function ProfileDetailView({ profileId, accessCode }) {
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -1203,9 +1200,15 @@ export default function App() {
     );
   }
 
+  if (profileIdFromUrl && accessCodeFromUrl) {
+    return <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />;
+  }
+  if (!accessCode) {
+    return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
+  }
+
   const profilesWithHelpers = useMemo(() => profiles, [profiles]);
 
-  // 메인 콘텐츠 스위치
   const MainContent = () => {
     if (activeMain === 'alerts') {
       return (
@@ -1237,7 +1240,6 @@ export default function App() {
         />
       );
     }
-    // functions
     return (
       <FunctionsPage
         activeSub={functionsSub} setActiveSub={setFunctionsSub}
@@ -1273,18 +1275,18 @@ export default function App() {
             {googleApiReady === true && (
               isGoogleSignedIn ? (
                 <button onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
-                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
+                        className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
                   Google 로그아웃
                 </button>
               ) : (
                 <button onClick={() => tokenClient?.requestAccessToken({ prompt: 'consent' })}
-                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
+                        className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
                   Google 로그인
                 </button>
               )
             )}
             <button onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }}
-              className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center"><LogOut className="w-4 h-4 mr-1.5" /> 로그아웃</button>
+                    className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center"><LogOut className="w-4 h-4 mr-1.5" /> 로그아웃</button>
           </div>
         </div>
 
@@ -1306,44 +1308,44 @@ export default function App() {
         <aside className={`fixed md:static top-[180px] z-30 md:z-auto left-0 h-[calc(100vh-180px)] md:h-auto w-64 bg-white border-r transform transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
           <nav className="p-3 space-y-1 overflow-y-auto h-full">
             <button onClick={()=>{ setActiveMain('alerts'); setFunctionsOpen(false); }}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='alerts'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='alerts'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <BellRing size={16}/> 알림
             </button>
             <button onClick={()=>{ setActiveMain('search'); setFunctionsOpen(false); }}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='search'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='search'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <SearchIcon size={16}/> 검색
             </button>
             <button onClick={()=>{ setActiveMain('starred'); setFunctionsOpen(false); }}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='starred'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='starred'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <Star size={16}/> 주목 중인 프로필들
             </button>
 
             {/* Functions 토글 버튼 */}
             <button onClick={()=>{ setActiveMain('functions'); setFunctionsOpen(v=>!v); }}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm ${activeMain==='functions'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm ${activeMain==='functions'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <span className="flex items-center gap-2"><Sparkles size={16}/> Functions</span>
               <ChevronDown className={`w-4 h-4 transition-transform ${functionsOpen ? 'rotate-180' : ''}`} />
             </button>
-            {/* 하위 탭: 열렸을 때만 노출, 동일 폰트/사이즈, 아이콘 포함 */}
+            {/* 하위 탭 */}
             {functionsOpen && (
               <div className="pl-4 space-y-1">
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('rec'); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
+                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
                   <Sparkles size={16}/> 추천
                 </button>
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('long'); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='long'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
+                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='long'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
                   <Clock size={16}/> 장기관리
                 </button>
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('graphs'); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='graphs'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
+                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='graphs'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
                   <LineChartIcon size={16}/> 그래프&필터
                 </button>
               </div>
             )}
 
             <button onClick={()=>{ setActiveMain('manage'); setFunctionsOpen(false); }}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='manage'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='manage'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <Users size={16}/> 프로필 관리
             </button>
           </nav>
