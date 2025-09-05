@@ -1,14 +1,10 @@
-// =============================================
-// [LATEST] App.js — Netlify-safe — saved Sep 5, 2025 11:35 KST
-// =============================================
+/* App.js (Netlify-safe, no conditional hook calls) */
 import React, { useEffect, useState, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
-import {
-  getAuth, signInAnonymously, onAuthStateChanged
-} from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query,
-  updateDoc, writeBatch, getDoc, getDocs, setDoc, setLogLevel, limit
+  updateDoc, writeBatch, getDoc, getDocs, setLogLevel, limit
 } from 'firebase/firestore';
 
 import {
@@ -24,13 +20,13 @@ import {
   ChevronDown
 } from 'lucide-react';
 
-// ============ 환경 변수 ============
+/* ========= ENV ========= */
 const GOOGLE_API_KEY   = process.env.REACT_APP_GOOGLE_API_KEY;
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
 const DISCOVERY_DOCS   = ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"];
 const SCOPES           = "https://www.googleapis.com/auth/calendar.events";
 
-// ============ Firebase ============
+/* ========= Firebase ========= */
 const firebaseConfig = {
   apiKey:            process.env.REACT_APP_FIREBASE_API_KEY,
   authDomain:        process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
@@ -51,7 +47,7 @@ const TZ = 'Asia/Seoul';
 const COLORS = ['#FFBB28', '#FF8042', '#00C49F', '#8884D8', '#FF4444', '#82ca9d'];
 const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아한형제들', '당근', '토스'];
 
-// ============ 유틸 ============
+/* ========= utils ========= */
 function formatRFC3339InTZ(date, timeZone = TZ) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone, year:'numeric', month:'2-digit', day:'2-digit',
@@ -133,7 +129,7 @@ function buildPathCandidates(accessCode, aid) {
   ];
 }
 
-// ============ 단순 컴포넌트 ============
+/* ========= simple components ========= */
 const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
     <div className="bg-white rounded-lg p-8 shadow-xl max-w-sm w-full mx-4">
@@ -181,22 +177,15 @@ const LoginScreen = ({ onLogin, authStatus }) => {
   );
 };
 
-// ============ 카드 ============
-const ProfileCard = ({
-  profile, onUpdate, onDelete,
-  accessCode, onSyncOne, onShowSimilar, onToggleStar
-}) => {
+/* ========= ProfileCard ========= */
+const ProfileCard = ({ profile, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
   const [syncing, setSyncing] = useState(false);
 
   useEffect(() => { setEditedProfile(profile); }, [profile]);
 
-  const priorityColors = {
-    '3': 'bg-red-100 text-red-800',
-    '2': 'bg-yellow-100 text-yellow-800',
-    '1': 'bg-green-100 text-green-800',
-  };
+  const priorityColors = { '3':'bg-red-100 text-red-800','2':'bg-yellow-100 text-yellow-800','1':'bg-green-100 text-green-800' };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -325,7 +314,7 @@ const ProfileCard = ({
   );
 };
 
-// ============ 페이지들 ============
+/* ========= Pages ========= */
 const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const now = useMemo(() => new Date(), []);
   const todayStart = useMemo(() => new Date(now.getFullYear(), now.getMonth(), now.getDate()), [now]);
@@ -350,7 +339,7 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {todayProfiles.map(p => (
               <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete}
-                           accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
+                accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
             ))}
           </div>
         )}
@@ -362,7 +351,7 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {upcomingProfiles.map(p => (
               <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete}
-                           accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
+                accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
             ))}
           </div>
         )}
@@ -406,7 +395,7 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
           {searched.length ? searched.map(p => (
             <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete}
-                         accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
+              accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
           )) : <div className="text-sm text-gray-500">검색 결과가 없습니다.</div>}
         </div>
       )}
@@ -433,10 +422,10 @@ const StarredPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSh
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {visible.length ? visible.map(p => (
           <ProfileCard key={p.id} profile={p}
-                       onUpdate={onUpdate} onDelete={onDelete}
-                       accessCode={accessCode} onSyncOne={onSyncOne}
-                       onShowSimilar={onShowSimilar}
-                       onToggleStar={(id, val) => onToggleStar(id, val)}
+            onUpdate={onUpdate} onDelete={onDelete}
+            accessCode={accessCode} onSyncOne={onSyncOne}
+            onShowSimilar={onShowSimilar}
+            onToggleStar={(id, val) => onToggleStar(id, val)}
           />
         )) : <div className="text-sm text-gray-500">표시할 프로필이 없습니다.</div>}
       </div>
@@ -709,7 +698,6 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
   );
 };
 
-// ============ 공통 섹션 ============
 const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => (
   <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in mt-4">
     <div className="flex justify-between items-center mb-4">
@@ -738,7 +726,7 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, acc
   </section>
 );
 
-// ============ 업로더 ============
+/* ========= Excel Uploader ========= */
 const ExcelUploader = ({ onBulkAdd }) => {
   const [file, setFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -792,7 +780,7 @@ const ExcelUploader = ({ onBulkAdd }) => {
   );
 };
 
-// ============ 관리 페이지 (입력 로컬 state) ============
+/* ========= Manage Page ========= */
 const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const [newName, setNewName] = useState('');
   const [newCareer, setNewCareer] = useState('');
@@ -860,32 +848,88 @@ const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, acc
 
         <nav className="mt-6 flex items-center justify-center gap-1">
           <button onClick={()=>setCurrentPage(1)} disabled={currentPage===1}
-                  className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">≪</button>
+            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">≪</button>
           <button onClick={()=>setCurrentPage(p=>Math.max(1,p-1))} disabled={currentPage===1}
-                  className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">〈</button>
+            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">〈</button>
 
           <div className="flex items-center gap-1 overflow-x-auto max-w-[70vw]">
             {pages.map(n => (
               <button key={n} onClick={()=>setCurrentPage(n)}
-                      className={`px-3 py-1 rounded-md border text-sm ${currentPage===n?'bg-yellow-400 text-white border-yellow-400':'bg-white hover:bg-gray-50'}`}>
+                className={`px-3 py-1 rounded-md border text-sm ${currentPage===n?'bg-yellow-400 text-white border-yellow-400':'bg-white hover:bg-gray-50'}`}>
                 {n}
               </button>
             ))}
           </div>
 
           <button onClick={()=>setCurrentPage(p=>Math.min(totalPages,p+1))} disabled={currentPage===totalPages}
-                  className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">〉</button>
+            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">〉</button>
           <button onClick={()=>setCurrentPage(totalPages)} disabled={currentPage===totalPages}
-                  className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">≫</button>
+            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">≫</button>
         </nav>
       </section>
     </div>
   );
 };
 
-// ============ App ============
+/* ========= Detail page moved OUTSIDE App (important!) ========= */
+function ProfileDetailView({ profileId, accessCode }) {
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const ref = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
+        const snap = await getDoc(ref);
+        if (snap.exists()) setProfile({ ...snap.data(), id: snap.id });
+        else setError('프로필을 찾을 수 없습니다.');
+      } catch (e) {
+        console.error('Error fetching profile:', e);
+        setError('프로필을 불러오는 중 오류가 발생했습니다.');
+      } finally { setLoading(false); }
+    })();
+  }, [profileId, accessCode]);
+
+  if (loading) return <div className="flex justify-center items-center min-h-screen"><Loader2 className="animate-spin h-10 w-10 text-yellow-500" /></div>;
+  if (error)   return <div className="flex justify-center items-center min-h-screen text-red-500">{error}</div>;
+  if (!profile) return null;
+  return (
+    <div className="bg-gray-100 min-h-screen p-4 sm:p-8 flex items-center justify-center">
+      <div className="w-full max-w-2xl bg-white rounded-xl shadow-2xl p-8">
+        <div className="flex items-center justify-between border-b pb-4 mb-4">
+          <div className="flex items-baseline space-x-3">
+            <h1 className="text-3xl font-bold text-yellow-600">{profile.name}</h1>
+            <span className="text-xl text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
+          </div>
+        </div>
+        {profile.expertise && <p className="text-lg font-semibold text-gray-700 mt-4">{profile.expertise}</p>}
+        <div className="mt-6 space-y-4">
+          <div>
+            <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">경력</h2>
+            <p className="text-base text-gray-800 mt-1 whitespace-pre-wrap">{profile.career}</p>
+          </div>
+          {profile.otherInfo && (
+            <div>
+              <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">기타 정보</h2>
+              <p className="text-base text-gray-600 mt-1 whitespace-pre-wrap">{profile.otherInfo}</p>
+            </div>
+          )}
+          {profile.meetingRecord && (
+            <div>
+              <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">미팅 기록</h2>
+              <p className="text-base text-gray-600 mt-1 whitespace-pre-wrap">{profile.meetingRecord}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ========= App ========= */
 export default function App() {
-  // --- 상태들 (항상 최상단 선언: Netlify ESLint 안전) ---
+  /* --- hooks at top (no conditional calls) --- */
   const [accessCode, setAccessCode] = useState(typeof window !== 'undefined' ? (localStorage.getItem('profileDbAccessCode') || null) : null);
   const [profiles, setProfiles]     = useState([]);
   const [authStatus, setAuthStatus] = useState('authenticating');
@@ -893,7 +937,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeMain, setActiveMain]   = useState('alerts');
   const [functionsOpen, setFunctionsOpen] = useState(false);
-  const [functionsSub, setFunctionsSub] = useState('rec');
+  const [functionsSub, setFunctionsSub]   = useState('rec');
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
 
@@ -910,7 +954,7 @@ export default function App() {
   const [activeColRef, setActiveColRef] = useState(null);
   const [dataReady, setDataReady] = useState(false);
 
-  // 외부 스크립트 로드
+  /* external scripts */
   useEffect(() => {
     const xlsx = document.createElement('script');
     xlsx.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
@@ -957,7 +1001,7 @@ export default function App() {
     };
   }, []);
 
-  // Firebase Auth
+  /* auth */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (user) setAuthStatus('authenticated');
@@ -969,7 +1013,7 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // 데이터 로드
+  /* data load */
   useEffect(() => {
     let unsub = null; let cancelled = false;
     (async () => {
@@ -1007,7 +1051,7 @@ export default function App() {
     return () => { cancelled = true; if (unsub) unsub(); };
   }, [accessCode]);
 
-  // Handlers
+  /* handlers */
   const handleLogin = (code) => {
     setAccessCode(code);
     if (typeof window !== 'undefined') localStorage.setItem('profileDbAccessCode', code);
@@ -1064,13 +1108,14 @@ export default function App() {
     setSimilarBase(base); setSimilarList(sorted); setSimilarOpen(true);
   };
 
+  const [tokenReady, setTokenReady] = useState(false); // just status, not a hook order risk
   const ensureGoogleAuth = () => {
     return new Promise((resolve, reject) => {
       const token = gapiClient?.client?.getToken?.();
-      if (token?.access_token) { setIsGoogleSignedIn(true); resolve(true); return; }
+      if (token?.access_token) { setIsGoogleSignedIn(true); setTokenReady(true); resolve(true); return; }
       if (!tokenClient) { reject(new Error('Google API 초기화 전입니다. 잠시 후 다시 시도해주세요.')); return; }
       tokenClient.callback = (resp) => {
-        if (resp && resp.access_token) { gapiClient.client.setToken({ access_token: resp.access_token }); setIsGoogleSignedIn(true); resolve(true); }
+        if (resp && resp.access_token) { gapiClient.client.setToken({ access_token: resp.access_token }); setIsGoogleSignedIn(true); setTokenReady(true); resolve(true); }
         else { reject(new Error('Google 토큰을 발급받지 못했습니다.')); }
       };
       tokenClient.requestAccessToken({ prompt: 'consent' });
@@ -1133,73 +1178,18 @@ export default function App() {
     }
   };
 
-  const totalCount = profiles.length;
+  const totalCount   = profiles.length;
   const meetingCount = useMemo(() => profiles.filter(p => !!p.eventDate).length, [profiles]);
 
-  // URL 파라미터 분기
+  /* URL params (hook OK here, no early returns yet) */
   const urlParams = useMemo(() => {
     if (typeof window === 'undefined') return new URLSearchParams('');
     return new URLSearchParams(window.location.search);
   }, []);
-  const profileIdFromUrl = urlParams.get('profile');
+  const profileIdFromUrl  = urlParams.get('profile');
   const accessCodeFromUrl = urlParams.get('code');
 
-  // 내부 컴포넌트 (상세)
-  function ProfileDetailView({ profileId, accessCode }) {
-    const [profile, setProfile] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError]     = useState('');
-
-    useEffect(() => {
-      (async () => {
-        try {
-          const ref = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
-          const snap = await getDoc(ref);
-          if (snap.exists()) setProfile({ ...snap.data(), id: snap.id });
-          else setError('프로필을 찾을 수 없습니다.');
-        } catch (e) {
-          console.error('Error fetching profile:', e);
-          setError('프로필을 불러오는 중 오류가 발생했습니다.');
-        } finally { setLoading(false); }
-      })();
-    }, [profileId, accessCode]);
-
-    if (loading) return <div className="flex justify-center items-center min-h-screen"><Loader2 className="animate-spin h-10 w-10 text-yellow-500" /></div>;
-    if (error)   return <div className="flex justify-center items-center min-h-screen text-red-500">{error}</div>;
-    if (!profile) return null;
-    return (
-      <div className="bg-gray-100 min-h-screen p-4 sm:p-8 flex items-center justify-center">
-        <div className="w-full max-w-2xl bg-white rounded-xl shadow-2xl p-8">
-          <div className="flex items-center justify-between border-b pb-4 mb-4">
-            <div className="flex items-baseline space-x-3">
-              <h1 className="text-3xl font-bold text-yellow-600">{profile.name}</h1>
-              <span className="text-xl text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
-            </div>
-          </div>
-          {profile.expertise && <p className="text-lg font-semibold text-gray-700 mt-4">{profile.expertise}</p>}
-          <div className="mt-6 space-y-4">
-            <div>
-              <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">경력</h2>
-              <p className="text-base text-gray-800 mt-1 whitespace-pre-wrap">{profile.career}</p>
-            </div>
-            {profile.otherInfo && (
-              <div>
-                <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">기타 정보</h2>
-                <p className="text-base text-gray-600 mt-1 whitespace-pre-wrap">{profile.otherInfo}</p>
-              </div>
-            )}
-            {profile.meetingRecord && (
-              <div>
-                <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">미팅 기록</h2>
-                <p className="text-base text-gray-600 mt-1 whitespace-pre-wrap">{profile.meetingRecord}</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+  /* ---- NO hooks below these conditional returns ---- */
   if (profileIdFromUrl && accessCodeFromUrl) {
     return <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />;
   }
@@ -1207,46 +1197,46 @@ export default function App() {
     return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
   }
 
-  const profilesWithHelpers = useMemo(() => profiles, [profiles]);
+  const onToggleStar = (id, val) => handleUpdate(id, { starred: !!val });
 
   const MainContent = () => {
     if (activeMain === 'alerts') {
       return (
         <AlertsPage
-          profiles={profilesWithHelpers}
+          profiles={profiles}
           onUpdate={handleUpdate} onDelete={handleDeleteRequest}
           accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+          onShowSimilar={openSimilarModal} onToggleStar={onToggleStar}
         />
       );
     }
     if (activeMain === 'search') {
       return (
         <SearchPage
-          profiles={profilesWithHelpers}
+          profiles={profiles}
           onUpdate={handleUpdate} onDelete={handleDeleteRequest}
           accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+          onShowSimilar={openSimilarModal} onToggleStar={onToggleStar}
         />
       );
     }
     if (activeMain === 'starred') {
       return (
         <StarredPage
-          profiles={profilesWithHelpers}
+          profiles={profiles}
           onUpdate={handleUpdate} onDelete={handleDeleteRequest}
           accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+          onShowSimilar={openSimilarModal} onToggleStar={onToggleStar}
         />
       );
     }
     return (
       <FunctionsPage
         activeSub={functionsSub} setActiveSub={setFunctionsSub}
-        profiles={profilesWithHelpers}
+        profiles={profiles}
         onUpdate={handleUpdate} onDelete={handleDeleteRequest}
         accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-        onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+        onShowSimilar={openSimilarModal} onToggleStar={onToggleStar}
       />
     );
   };
@@ -1261,7 +1251,7 @@ export default function App() {
         />
       )}
 
-      {/* 상단 헤더: 타이틀 + 카운트 박스 포함 */}
+      {/* 헤더 + 카운트 박스 */}
       <header className="px-4 sm:px-6 py-3 border-b bg-white sticky top-0 z-20">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -1275,22 +1265,21 @@ export default function App() {
             {googleApiReady === true && (
               isGoogleSignedIn ? (
                 <button onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
-                        className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
+                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
                   Google 로그아웃
                 </button>
               ) : (
                 <button onClick={() => tokenClient?.requestAccessToken({ prompt: 'consent' })}
-                        className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
+                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
                   Google 로그인
                 </button>
               )
             )}
             <button onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }}
-                    className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center"><LogOut className="w-4 h-4 mr-1.5" /> 로그아웃</button>
+              className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center"><LogOut className="w-4 h-4 mr-1.5" /> 로그아웃</button>
           </div>
         </div>
 
-        {/* 카운트 박스 (헤더 안) */}
         <div className="mt-3 flex items-center gap-4">
           <div className="bg-white p-4 rounded-xl shadow-sm border">
             <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
@@ -1308,44 +1297,43 @@ export default function App() {
         <aside className={`fixed md:static top-[180px] z-30 md:z-auto left-0 h-[calc(100vh-180px)] md:h-auto w-64 bg-white border-r transform transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
           <nav className="p-3 space-y-1 overflow-y-auto h-full">
             <button onClick={()=>{ setActiveMain('alerts'); setFunctionsOpen(false); }}
-                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='alerts'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='alerts'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <BellRing size={16}/> 알림
             </button>
             <button onClick={()=>{ setActiveMain('search'); setFunctionsOpen(false); }}
-                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='search'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='search'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <SearchIcon size={16}/> 검색
             </button>
             <button onClick={()=>{ setActiveMain('starred'); setFunctionsOpen(false); }}
-                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='starred'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='starred'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <Star size={16}/> 주목 중인 프로필들
             </button>
 
-            {/* Functions 토글 버튼 */}
+            {/* Functions 토글 */}
             <button onClick={()=>{ setActiveMain('functions'); setFunctionsOpen(v=>!v); }}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm ${activeMain==='functions'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm ${activeMain==='functions'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <span className="flex items-center gap-2"><Sparkles size={16}/> Functions</span>
               <ChevronDown className={`w-4 h-4 transition-transform ${functionsOpen ? 'rotate-180' : ''}`} />
             </button>
-            {/* 하위 탭 */}
             {functionsOpen && (
               <div className="pl-4 space-y-1">
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('rec'); }}
-                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
                   <Sparkles size={16}/> 추천
                 </button>
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('long'); }}
-                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='long'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='long'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
                   <Clock size={16}/> 장기관리
                 </button>
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('graphs'); }}
-                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='graphs'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='graphs'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
                   <LineChartIcon size={16}/> 그래프&필터
                 </button>
               </div>
             )}
 
             <button onClick={()=>{ setActiveMain('manage'); setFunctionsOpen(false); }}
-                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='manage'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='manage'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <Users size={16}/> 프로필 관리
             </button>
           </nav>
