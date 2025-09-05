@@ -1,10 +1,12 @@
-/* App.js (Netlify-safe, no conditional hook calls) */
+// src/App.js
 import React, { useEffect, useState, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import {
+  getAuth, signInAnonymously, onAuthStateChanged
+} from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query,
-  updateDoc, writeBatch, getDoc, getDocs, setLogLevel, limit
+  updateDoc, writeBatch, getDoc, getDocs, setDoc, setLogLevel, limit
 } from 'firebase/firestore';
 
 import {
@@ -20,13 +22,13 @@ import {
   ChevronDown
 } from 'lucide-react';
 
-/* ========= ENV ========= */
+// ============ 환경 변수 ============
 const GOOGLE_API_KEY   = process.env.REACT_APP_GOOGLE_API_KEY;
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
 const DISCOVERY_DOCS   = ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"];
 const SCOPES           = "https://www.googleapis.com/auth/calendar.events";
 
-/* ========= Firebase ========= */
+// ============ Firebase ============
 const firebaseConfig = {
   apiKey:            process.env.REACT_APP_FIREBASE_API_KEY,
   authDomain:        process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
@@ -47,7 +49,7 @@ const TZ = 'Asia/Seoul';
 const COLORS = ['#FFBB28', '#FF8042', '#00C49F', '#8884D8', '#FF4444', '#82ca9d'];
 const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아한형제들', '당근', '토스'];
 
-/* ========= utils ========= */
+// ============ 유틸 ============
 function formatRFC3339InTZ(date, timeZone = TZ) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone, year:'numeric', month:'2-digit', day:'2-digit',
@@ -121,6 +123,8 @@ function similarityScore(a, b) {
   if (a.expertise && b.expertise && a.expertise === b.expertise) score += 8;
   return Math.max(0, Math.min(100, Math.round(score)));
 }
+
+// ======== 경로 자동 탐지 ========
 function buildPathCandidates(accessCode, aid) {
   return [
     ['artifacts', aid, 'public', 'data', accessCode],
@@ -129,7 +133,7 @@ function buildPathCandidates(accessCode, aid) {
   ];
 }
 
-/* ========= simple components ========= */
+// ============ 공용 컴포넌트 ============
 const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
     <div className="bg-white rounded-lg p-8 shadow-xl max-w-sm w-full mx-4">
@@ -177,15 +181,79 @@ const LoginScreen = ({ onLogin, authStatus }) => {
   );
 };
 
-/* ========= ProfileCard ========= */
-const ProfileCard = ({ profile, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
+// 상세 보기 (URL로 직접 진입 시)
+function ProfileDetailView({ profileId, accessCode }) {
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const ref = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
+        const snap = await getDoc(ref);
+        if (snap.exists()) setProfile({ ...snap.data(), id: snap.id });
+        else setError('프로필을 찾을 수 없습니다.');
+      } catch (e) {
+        console.error('Error fetching profile:', e);
+        setError('프로필을 불러오는 중 오류가 발생했습니다.');
+      } finally { setLoading(false); }
+    })();
+  }, [profileId, accessCode]);
+
+  if (loading) return <div className="flex justify-center items-center min-h-screen"><Loader2 className="animate-spin h-10 w-10 text-yellow-500" /></div>;
+  if (error)   return <div className="flex justify-center items-center min-h-screen text-red-500">{error}</div>;
+  if (!profile) return null;
+
+  return (
+    <div className="bg-gray-100 min-h-screen p-4 sm:p-8 flex items-center justify-center">
+      <div className="w-full max-w-2xl bg-white rounded-xl shadow-2xl p-8">
+        <div className="flex items-center justify-between border-b pb-4 mb-4">
+          <div className="flex items-baseline space-x-3">
+            <h1 className="text-3xl font-bold text-yellow-600">{profile.name}</h1>
+            <span className="text-xl text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
+          </div>
+        </div>
+        {profile.expertise && <p className="text-lg font-semibold text-gray-700 mt-4">{profile.expertise}</p>}
+        <div className="mt-6 space-y-4">
+          <div>
+            <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">경력</h2>
+            <p className="text-base text-gray-800 mt-1 whitespace-pre-wrap">{profile.career}</p>
+          </div>
+          {profile.otherInfo && (
+            <div>
+              <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">기타 정보</h2>
+              <p className="text-base text-gray-600 mt-1 whitespace-pre-wrap">{profile.otherInfo}</p>
+            </div>
+          )}
+          {profile.meetingRecord && (
+            <div>
+              <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">미팅 기록</h2>
+              <p className="text-base text-gray-600 mt-1 whitespace-pre-wrap">{profile.meetingRecord}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 프로필 카드
+const ProfileCard = ({
+  profile, onUpdate, onDelete,
+  accessCode, onSyncOne, onShowSimilar, onToggleStar
+}) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
   const [syncing, setSyncing] = useState(false);
 
   useEffect(() => { setEditedProfile(profile); }, [profile]);
 
-  const priorityColors = { '3':'bg-red-100 text-red-800','2':'bg-yellow-100 text-yellow-800','1':'bg-green-100 text-green-800' };
+  const priorityColors = {
+    '3': 'bg-red-100 text-red-800',
+    '2': 'bg-yellow-100 text-yellow-800',
+    '1': 'bg-green-100 text-green-800',
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -314,7 +382,7 @@ const ProfileCard = ({ profile, onUpdate, onDelete, accessCode, onSyncOne, onSho
   );
 };
 
-/* ========= Pages ========= */
+// 알림 페이지
 const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const now = useMemo(() => new Date(), []);
   const todayStart = useMemo(() => new Date(now.getFullYear(), now.getMonth(), now.getDate()), [now]);
@@ -360,6 +428,7 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
   );
 };
 
+// 검색 페이지
 const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const searched = useMemo(() => {
@@ -403,6 +472,7 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
   );
 };
 
+// 주목(Starred) 페이지 — 전문영역 필터
 const StarredPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const starred = useMemo(() => profiles.filter(p => p.starred), [profiles]);
   const expertiseOptions = useMemo(() => Array.from(new Set(starred.map(p => p.expertise).filter(Boolean))), [starred]);
@@ -433,6 +503,7 @@ const StarredPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSh
   );
 };
 
+// Functions 페이지(추천/장기관리/그래프)
 const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const now = useMemo(() => new Date(), []);
   const threeMonthsAgo = useMemo(() => { const d = new Date(now); d.setMonth(d.getMonth() - 3); return d; }, [now]);
@@ -698,6 +769,7 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
   );
 };
 
+// 필터 결과 섹션
 const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => (
   <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in mt-4">
     <div className="flex justify-between items-center mb-4">
@@ -726,7 +798,7 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, acc
   </section>
 );
 
-/* ========= Excel Uploader ========= */
+// 엑셀 업로더
 const ExcelUploader = ({ onBulkAdd }) => {
   const [file, setFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -780,7 +852,7 @@ const ExcelUploader = ({ onBulkAdd }) => {
   );
 };
 
-/* ========= Manage Page ========= */
+// 관리 페이지
 const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const [newName, setNewName] = useState('');
   const [newCareer, setNewCareer] = useState('');
@@ -871,73 +943,17 @@ const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, acc
   );
 };
 
-/* ========= Detail page moved OUTSIDE App (important!) ========= */
-function ProfileDetailView({ profileId, accessCode }) {
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState('');
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const ref = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
-        const snap = await getDoc(ref);
-        if (snap.exists()) setProfile({ ...snap.data(), id: snap.id });
-        else setError('프로필을 찾을 수 없습니다.');
-      } catch (e) {
-        console.error('Error fetching profile:', e);
-        setError('프로필을 불러오는 중 오류가 발생했습니다.');
-      } finally { setLoading(false); }
-    })();
-  }, [profileId, accessCode]);
-
-  if (loading) return <div className="flex justify-center items-center min-h-screen"><Loader2 className="animate-spin h-10 w-10 text-yellow-500" /></div>;
-  if (error)   return <div className="flex justify-center items-center min-h-screen text-red-500">{error}</div>;
-  if (!profile) return null;
-  return (
-    <div className="bg-gray-100 min-h-screen p-4 sm:p-8 flex items-center justify-center">
-      <div className="w-full max-w-2xl bg-white rounded-xl shadow-2xl p-8">
-        <div className="flex items-center justify-between border-b pb-4 mb-4">
-          <div className="flex items-baseline space-x-3">
-            <h1 className="text-3xl font-bold text-yellow-600">{profile.name}</h1>
-            <span className="text-xl text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
-          </div>
-        </div>
-        {profile.expertise && <p className="text-lg font-semibold text-gray-700 mt-4">{profile.expertise}</p>}
-        <div className="mt-6 space-y-4">
-          <div>
-            <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">경력</h2>
-            <p className="text-base text-gray-800 mt-1 whitespace-pre-wrap">{profile.career}</p>
-          </div>
-          {profile.otherInfo && (
-            <div>
-              <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">기타 정보</h2>
-              <p className="text-base text-gray-600 mt-1 whitespace-pre-wrap">{profile.otherInfo}</p>
-            </div>
-          )}
-          {profile.meetingRecord && (
-            <div>
-              <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">미팅 기록</h2>
-              <p className="text-base text-gray-600 mt-1 whitespace-pre-wrap">{profile.meetingRecord}</p>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ========= App ========= */
+// ============ App ============
 export default function App() {
-  /* --- hooks at top (no conditional calls) --- */
+  // --- 상태들 (항상 최상단 선언: Netlify ESLint 안전) ---
   const [accessCode, setAccessCode] = useState(typeof window !== 'undefined' ? (localStorage.getItem('profileDbAccessCode') || null) : null);
   const [profiles, setProfiles]     = useState([]);
   const [authStatus, setAuthStatus] = useState('authenticating');
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeMain, setActiveMain]   = useState('alerts');
-  const [functionsOpen, setFunctionsOpen] = useState(false);
-  const [functionsSub, setFunctionsSub]   = useState('rec');
+  const [functionsOpen, setFunctionsOpen] = useState(false); // 사이드바에서 Functions 접기/펼치기
+  const [functionsSub, setFunctionsSub] = useState('rec');   // 추천/장기관리/그래프
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
 
@@ -954,7 +970,7 @@ export default function App() {
   const [activeColRef, setActiveColRef] = useState(null);
   const [dataReady, setDataReady] = useState(false);
 
-  /* external scripts */
+  // 외부 스크립트 로드
   useEffect(() => {
     const xlsx = document.createElement('script');
     xlsx.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
@@ -1001,7 +1017,7 @@ export default function App() {
     };
   }, []);
 
-  /* auth */
+  // Firebase Auth
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (user) setAuthStatus('authenticated');
@@ -1013,7 +1029,7 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  /* data load */
+  // 데이터 로드
   useEffect(() => {
     let unsub = null; let cancelled = false;
     (async () => {
@@ -1051,7 +1067,15 @@ export default function App() {
     return () => { cancelled = true; if (unsub) unsub(); };
   }, [accessCode]);
 
-  /* handlers */
+  // URL 파라미터(상세 보기)
+  const urlParams = useMemo(() => {
+    if (typeof window === 'undefined') return new URLSearchParams('');
+    return new URLSearchParams(window.location.search);
+  }, []);
+  const profileIdFromUrl = urlParams.get('profile');
+  const accessCodeFromUrl = urlParams.get('code');
+
+  // Handlers
   const handleLogin = (code) => {
     setAccessCode(code);
     if (typeof window !== 'undefined') localStorage.setItem('profileDbAccessCode', code);
@@ -1108,14 +1132,13 @@ export default function App() {
     setSimilarBase(base); setSimilarList(sorted); setSimilarOpen(true);
   };
 
-  const [tokenReady, setTokenReady] = useState(false); // just status, not a hook order risk
   const ensureGoogleAuth = () => {
     return new Promise((resolve, reject) => {
       const token = gapiClient?.client?.getToken?.();
-      if (token?.access_token) { setIsGoogleSignedIn(true); setTokenReady(true); resolve(true); return; }
+      if (token?.access_token) { setIsGoogleSignedIn(true); resolve(true); return; }
       if (!tokenClient) { reject(new Error('Google API 초기화 전입니다. 잠시 후 다시 시도해주세요.')); return; }
       tokenClient.callback = (resp) => {
-        if (resp && resp.access_token) { gapiClient.client.setToken({ access_token: resp.access_token }); setIsGoogleSignedIn(true); setTokenReady(true); resolve(true); }
+        if (resp && resp.access_token) { gapiClient.client.setToken({ access_token: resp.access_token }); setIsGoogleSignedIn(true); resolve(true); }
         else { reject(new Error('Google 토큰을 발급받지 못했습니다.')); }
       };
       tokenClient.requestAccessToken({ prompt: 'consent' });
@@ -1178,27 +1201,17 @@ export default function App() {
     }
   };
 
-  const totalCount   = profiles.length;
+  const totalCount = profiles.length;
   const meetingCount = useMemo(() => profiles.filter(p => !!p.eventDate).length, [profiles]);
 
-  /* URL params (hook OK here, no early returns yet) */
-  const urlParams = useMemo(() => {
-    if (typeof window === 'undefined') return new URLSearchParams('');
-    return new URLSearchParams(window.location.search);
-  }, []);
-  const profileIdFromUrl  = urlParams.get('profile');
-  const accessCodeFromUrl = urlParams.get('code');
+  // 상세 보기 / 로그인 분기 (주의: 이 아래에는 **어떤 Hook도 호출하지 않음**)
+  const urlProfile = profileIdFromUrl && accessCodeFromUrl
+    ? <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />
+    : null;
+  if (urlProfile) return urlProfile;
+  if (!accessCode) return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
 
-  /* ---- NO hooks below these conditional returns ---- */
-  if (profileIdFromUrl && accessCodeFromUrl) {
-    return <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />;
-  }
-  if (!accessCode) {
-    return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
-  }
-
-  const onToggleStar = (id, val) => handleUpdate(id, { starred: !!val });
-
+  // 메인 콘텐츠 스위치 (Hook 사용 없음)
   const MainContent = () => {
     if (activeMain === 'alerts') {
       return (
@@ -1206,7 +1219,7 @@ export default function App() {
           profiles={profiles}
           onUpdate={handleUpdate} onDelete={handleDeleteRequest}
           accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-          onShowSimilar={openSimilarModal} onToggleStar={onToggleStar}
+          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
         />
       );
     }
@@ -1216,7 +1229,7 @@ export default function App() {
           profiles={profiles}
           onUpdate={handleUpdate} onDelete={handleDeleteRequest}
           accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-          onShowSimilar={openSimilarModal} onToggleStar={onToggleStar}
+          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
         />
       );
     }
@@ -1226,7 +1239,22 @@ export default function App() {
           profiles={profiles}
           onUpdate={handleUpdate} onDelete={handleDeleteRequest}
           accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-          onShowSimilar={openSimilarModal} onToggleStar={onToggleStar}
+          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+        />
+      );
+    }
+    if (activeMain === 'manage') {
+      return (
+        <ManagePage
+          profiles={profiles}
+          onUpdate={handleUpdate}
+          onDelete={handleDeleteRequest}
+          onAddOne={handleAddOne}
+          handleBulkAdd={handleBulkAdd}
+          accessCode={accessCode}
+          onSyncOne={handleSyncOneToCalendar}
+          onShowSimilar={openSimilarModal}
+          onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
         />
       );
     }
@@ -1236,7 +1264,7 @@ export default function App() {
         profiles={profiles}
         onUpdate={handleUpdate} onDelete={handleDeleteRequest}
         accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-        onShowSimilar={openSimilarModal} onToggleStar={onToggleStar}
+        onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
       />
     );
   };
@@ -1251,7 +1279,7 @@ export default function App() {
         />
       )}
 
-      {/* 헤더 + 카운트 박스 */}
+      {/* 상단 헤더: 타이틀 + 카운트 박스 포함 */}
       <header className="px-4 sm:px-6 py-3 border-b bg-white sticky top-0 z-20">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -1280,6 +1308,7 @@ export default function App() {
           </div>
         </div>
 
+        {/* 카운트 박스 (헤더 안) */}
         <div className="mt-3 flex items-center gap-4">
           <div className="bg-white p-4 rounded-xl shadow-sm border">
             <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
@@ -1309,12 +1338,13 @@ export default function App() {
               <Star size={16}/> 주목 중인 프로필들
             </button>
 
-            {/* Functions 토글 */}
+            {/* Functions 토글 버튼 */}
             <button onClick={()=>{ setActiveMain('functions'); setFunctionsOpen(v=>!v); }}
               className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm ${activeMain==='functions'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <span className="flex items-center gap-2"><Sparkles size={16}/> Functions</span>
               <ChevronDown className={`w-4 h-4 transition-transform ${functionsOpen ? 'rotate-180' : ''}`} />
             </button>
+            {/* 하위 탭 */}
             {functionsOpen && (
               <div className="pl-4 space-y-1">
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('rec'); }}
