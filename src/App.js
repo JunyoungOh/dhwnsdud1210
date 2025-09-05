@@ -1,12 +1,11 @@
-// src/App.js
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth, signInAnonymously, onAuthStateChanged
 } from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query,
-  updateDoc, writeBatch, getDoc, getDocs, setLogLevel, limit
+  updateDoc, writeBatch, getDoc, getDocs, setDoc, setLogLevel, limit
 } from 'firebase/firestore';
 
 import {
@@ -15,10 +14,11 @@ import {
 } from 'recharts';
 
 import {
-  Users, LogOut, Search, Calendar, Zap, UserPlus, KeyRound, Loader2,
+  Users, LogOut, Search as SearchIcon, Calendar, Zap, UserPlus, KeyRound, Loader2,
   Edit, Trash2, ShieldAlert, X, Save, UploadCloud, BellRing, Share2,
-  CalendarPlus, AlertCircle, Star, StarOff, Menu, Layers, LineChart, Clock,
-  Sparkles, ExternalLink
+  CalendarPlus, AlertCircle, Star, StarOff, Menu,
+  Layers, LineChart as LineChartIcon, Clock, Sparkles, ExternalLink,
+  ChevronDown
 } from 'lucide-react';
 
 // ============ 환경 변수 ============
@@ -65,8 +65,7 @@ function formatDateOnlyInTZ(date, timeZone = TZ) {
 function parseDateTimeFromRecord(recordText) {
   if (!recordText) return null;
   const text = typeof recordText === 'string' ? recordText : String(recordText || '');
-  let best = null;
-  let m;
+  let best = null; let m;
   const reA = /\((\d{2})\.(\d{2})\.(\d{2})\)\s*(?:(AM|PM|오전|오후)?\s*(\d{1,2})(?::(\d{2}))?(?:\s*시)?(?:\s*(\d{1,2})\s*분?)?)?/gi;
   while ((m = reA.exec(text)) !== null) {
     const year  = 2000 + parseInt(m[1], 10);
@@ -97,11 +96,8 @@ function parseDateTimeFromRecord(recordText) {
   return best ? best : null;
 }
 function tokenizeProfile(p) {
-  const base = [
-    p.name || '', p.expertise || '', p.career || '', p.otherInfo || ''
-  ].join(' ').toLowerCase();
-  const words = base.replace(/[()\[\],./\\\-:~!@#$%^&*?'"`|]/g, ' ')
-    .split(/\s+/).filter(Boolean);
+  const base = [p.name||'', p.expertise||'', p.career||'', p.otherInfo||''].join(' ').toLowerCase();
+  const words = base.replace(/[()\[\],./\\\-:~!@#$%^&*?'"`|]/g, ' ').split(/\s+/).filter(Boolean);
   const extra = [];
   TARGET_KEYWORDS.forEach(k => { if ((p.career||'').includes(k)) extra.push(k); });
   if (p.priority) extra.push(`priority:${p.priority}`);
@@ -117,8 +113,7 @@ function jaccard(aSet, bSet) {
   return uni.size === 0 ? 0 : inter.size / uni.size;
 }
 function similarityScore(a, b) {
-  const ta = tokenizeProfile(a);
-  const tb = tokenizeProfile(b);
+  const ta = tokenizeProfile(a); const tb = tokenizeProfile(b);
   let score = jaccard(ta, tb) * 100;
   if (a.priority && b.priority && a.priority === b.priority) score += 6;
   const ak = TARGET_KEYWORDS.filter(k => (a.career||'').includes(k));
@@ -137,75 +132,26 @@ function buildPathCandidates(accessCode, aid) {
   ];
 }
 
-// ======== 공통 헬퍼 ========
-const ALLOWED_FIELDS = ['name','career','age','expertise','priority','otherInfo','meetingRecord','eventDate','gcalEventId','gcalHtmlLink','gcalLastSyncAt','lastReviewedDate','snoozeUntil','starred'];
-function sanitizeForSave(obj) {
-  const out = {};
-  ALLOWED_FIELDS.forEach(k => { if (obj[k] !== undefined) out[k] = obj[k]; });
-  return out;
-}
-
 // ============ UI 컴포넌트 ============
-const ProfileDetailView = ({ profileId, accessCode }) => {
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState('');
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const ref = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
-        const snap = await getDoc(ref);
-        if (snap.exists()) setProfile({ ...snap.data(), id: snap.id });
-        else setError('프로필을 찾을 수 없습니다.');
-      } catch (e) {
-        console.error('Error fetching profile:', e);
-        setError('프로필을 불러오는 중 오류가 발생했습니다.');
-      } finally { setLoading(false); }
-    })();
-  }, [profileId, accessCode]);
-
-  if (loading) return <div className="flex justify-center items-center min-h-screen"><Loader2 className="animate-spin h-10 w-10 text-yellow-500" /></div>;
-  if (error)   return <div className="flex justify-center items-center min-h-screen text-red-500">{error}</div>;
-  if (!profile) return null;
-
-  return (
-    <div className="bg-gray-100 min-h-screen p-4 sm:p-8 flex items-center justify-center">
-      <div className="w-full max-w-2xl bg-white rounded-xl shadow-2xl p-8">
-        <div className="flex items-center justify-between border-b pb-4 mb-4">
-          <div className="flex items-baseline space-x-3">
-            <h1 className="text-3xl font-bold text-yellow-600">{profile.name}</h1>
-            <span className="text-xl text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
-          </div>
-        </div>
-        {profile.expertise && <p className="text-lg font-semibold text-gray-700 mt-4">{profile.expertise}</p>}
-        <div className="mt-6 space-y-4">
-          <div>
-            <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">경력</h2>
-            <p className="text-base text-gray-800 mt-1 whitespace-pre-wrap">{profile.career}</p>
-          </div>
-          {profile.otherInfo && (
-            <div>
-              <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">기타 정보</h2>
-              <p className="text-base text-gray-600 mt-1 whitespace-pre-wrap">{profile.otherInfo}</p>
-            </div>
-          )}
-          {profile.meetingRecord && (
-            <div>
-              <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">미팅 기록</h2>
-              <p className="text-base text-gray-600 mt-1 whitespace-pre-wrap">{profile.meetingRecord}</p>
-            </div>
-          )}
-        </div>
+const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
+    <div className="bg-white rounded-lg p-8 shadow-xl max-w-sm w-full mx-4">
+      <div className="text-center">
+        <ShieldAlert className="mx-auto h-12 w-12 text-red-500" />
+        <h3 className="mt-4 text-lg font-medium text-gray-900">확인</h3>
+        <div className="mt-2 text-sm text-gray-500"><p>{message}</p></div>
+      </div>
+      <div className="mt-6 flex justify-center gap-4">
+        <button onClick={onCancel} className="px-6 py-2 rounded-md text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300">취소</button>
+        <button onClick={onConfirm} className="px-6 py-2 rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700">확인</button>
       </div>
     </div>
-  );
-};
+  </div>
+);
 
 const LoginScreen = ({ onLogin, authStatus }) => {
   const [codeInput, setCodeInput] = useState('');
   const handleSubmit = (e) => { e.preventDefault(); if (codeInput.trim()) onLogin(codeInput.trim()); };
-
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
       <div className="w-full max-w-md bg-white p-8 rounded-xl shadow-lg">
@@ -234,91 +180,9 @@ const LoginScreen = ({ onLogin, authStatus }) => {
   );
 };
 
-const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
-  <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
-    <div className="bg-white rounded-lg p-8 shadow-xl max-w-sm w-full mx-4">
-      <div className="text-center">
-        <ShieldAlert className="mx-auto h-12 w-12 text-red-500" />
-        <h3 className="mt-4 text-lg font-medium text-gray-900">확인</h3>
-        <div className="mt-2 text-sm text-gray-500"><p>{message}</p></div>
-      </div>
-      <div className="mt-6 flex justify-center gap-4">
-        <button onClick={onCancel} className="px-6 py-2 rounded-md text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300">취소</button>
-        <button onClick={onConfirm} className="px-6 py-2 rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700">확인</button>
-      </div>
-    </div>
-  </div>
-);
-
-const SimilarModal = ({ open, onClose, baseProfile, items, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
-  const [focus, setFocus] = useState(null);
-  useEffect(() => { if (!open) setFocus(null); }, [open]);
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black bg-opacity-40" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] p-6 overflow-hidden">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-bold text-gray-800">
-            유사 프로필 — <span className="text-yellow-600">{baseProfile?.name}</span>
-          </h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-800"><X size={20} /></button>
-        </div>
-
-        {!focus && (
-          <>
-            <div className="text-sm text-gray-500 mb-3">유사도는 경력/전문영역/키워드/우선순위 등 텍스트 기반으로 계산돼요.</div>
-            <div className="overflow-y-auto pr-3" style={{ maxHeight: '70vh' }}>
-              {items.length === 0 ? (
-                <div className="text-center text-gray-500 py-8">표시할 유사 프로필이 없습니다.</div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {items.map(({ profile, score }) => (
-                    <button
-                      key={profile.id}
-                      className="text-left border rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition"
-                      onClick={() => setFocus(profile)}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="font-semibold text-yellow-700">{profile.name}</div>
-                        <div className="text-xs font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">{score}%</div>
-                      </div>
-                      {profile.expertise && <div className="text-xs text-gray-600 mt-1">{profile.expertise}</div>}
-                      <div className="text-xs text-gray-700 mt-2 whitespace-pre-wrap line-clamp-5">{profile.career}</div>
-                      {profile.otherInfo && <div className="text-[11px] text-gray-500 mt-2 whitespace-pre-wrap line-clamp-4">{profile.otherInfo}</div>}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {!!focus && (
-          <div className="relative bg-gray-50 rounded-lg p-4 border">
-            <button onClick={() => setFocus(null)} className="absolute top-3 left-3 text-gray-600 hover:text-gray-900 text-sm">← 목록으로</button>
-            <div className="pl-20">
-              <ProfileCard
-                profile={focus}
-                onUpdate={onUpdate}
-                onDelete={onDelete}
-                accessCode={accessCode}
-                onSyncOne={onSyncOne}
-                onShowSimilar={onShowSimilar}
-                onToggleStar={onToggleStar}
-                dense={false}
-              />
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
 const ProfileCard = ({
-  profile, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar, dense = false
+  profile, onUpdate, onDelete,
+  accessCode, onSyncOne, onShowSimilar, onToggleStar
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
@@ -339,9 +203,18 @@ const ProfileCard = ({
 
   const handleSave = async () => {
     const parsed = parseDateTimeFromRecord(editedProfile.meetingRecord);
-    const eventDate = parsed ? new Date(parsed.date).toISOString() : (editedProfile.eventDate || null);
+    const eventDate = parsed ? new Date(parsed.date).toISOString() : null;
+    const payload = {
+      name: editedProfile.name || '',
+      career: editedProfile.career || '',
+      age: editedProfile.age ? Number(editedProfile.age) : null,
+      otherInfo: editedProfile.otherInfo || '',
+      expertise: editedProfile.expertise || '',
+      priority: editedProfile.priority || '',
+      meetingRecord: editedProfile.meetingRecord || '',
+      eventDate,
+    };
     try {
-      const payload = sanitizeForSave({ ...editedProfile, eventDate });
       await onUpdate(profile.id, payload);
       setIsEditing(false);
     } catch (e) {
@@ -369,7 +242,7 @@ const ProfileCard = ({
       <div className="bg-white rounded-xl shadow border p-4">
         <div className="grid md:grid-cols-2 gap-3">
           <div className="space-y-2">
-            <input name="name" value={editedProfile.name} onChange={handleInputChange} placeholder="이름" className="w-full p-2 border rounded text-sm font-bold" />
+            <input name="name" value={editedProfile.name || ''} onChange={handleInputChange} placeholder="이름" className="w-full p-2 border rounded text-sm font-bold" />
             <input name="expertise" value={editedProfile.expertise || ''} onChange={handleInputChange} placeholder="전문영역" className="w-full p-2 border rounded text-sm" />
             <textarea name="career" value={editedProfile.career || ''} onChange={handleInputChange} placeholder="경력" className="w-full p-2 border rounded text-sm h-24" />
           </div>
@@ -391,7 +264,7 @@ const ProfileCard = ({
   }
 
   return (
-    <div className={`bg-white rounded-xl shadow border p-4 relative ${dense ? '' : 'flex flex-col gap-3'}`}>
+    <div className="bg-white rounded-xl shadow border p-4 relative flex flex-col gap-3">
       <div className="flex items-start justify-between">
         <div className="flex items-baseline gap-2">
           <h3 className="font-bold text-yellow-600 text-lg">{profile.name}</h3>
@@ -402,11 +275,9 @@ const ProfileCard = ({
             </span>
           )}
         </div>
-
-        {/* 우측 기능 버튼들 */}
         <div className="flex items-center gap-1">
-          <button title={profile.starred ? '주목 해제' : '주목하기'}
-            onClick={() => onToggleStar?.(profile.id)}
+          <button title={profile.starred ? '주목중' : '모아보기'}
+            onClick={() => onToggleStar?.(profile.id, !profile.starred)}
             className={`p-1.5 rounded-full ${profile.starred ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
             {profile.starred ? <Star size={14}/> : <StarOff size={14}/>}
           </button>
@@ -426,23 +297,22 @@ const ProfileCard = ({
       </div>
 
       {profile.expertise && <p className="text-sm font-semibold text-gray-600 mt-1">{profile.expertise}</p>}
-      <p className="text-sm text-gray-800 mt-2 whitespace-pre-wrap">{profile.career}</p>
-      {profile.otherInfo && <p className="text-xs text-gray-500 mt-2 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
+      <p className="text-sm text-gray-800 whitespace-pre-wrap">{profile.career}</p>
+      {profile.otherInfo && <p className="text-xs text-gray-500 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
       {profile.meetingRecord && (
-        <div className="mt-2 pt-2 border-t">
+        <div className="pt-2 border-t">
           <p className="text-xs font-semibold text-gray-500">미팅기록:</p>
           <p className="text-xs text-gray-600 whitespace-pre-wrap">{profile.meetingRecord}</p>
         </div>
       )}
 
-      {/* 카드 하단 우측: 캘린더 상태 & 버튼 */}
-      <div className="flex justify-end items-center gap-3 pt-3 mt-3 border-t">
+      {/* 캘린더 영역: 최하단 우측 */}
+      <div className="mt-2 pt-2 border-t flex items-center justify-end gap-3">
         {profile.gcalEventId ? (
           <a href={profile.gcalHtmlLink || '#'} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
             <ExternalLink size={14}/> Google Calendar
           </a>
         ) : <span className="text-xs text-gray-400">캘린더 미연동</span>}
-
         <button onClick={handleSyncClick} disabled={syncing}
           className="text-xs bg-blue-500 text-white font-semibold px-3 py-1 rounded-full hover:bg-blue-600 disabled:bg-blue-300 flex items-center">
           {syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <CalendarPlus className="w-3 h-3 mr-1" />}
@@ -453,56 +323,21 @@ const ProfileCard = ({
   );
 };
 
-const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => (
-  <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in mt-4">
-    <div className="flex justify-between items-center mb-4">
-      <h3 className="text-lg font-bold text-gray-800">{title}</h3>
-      <button onClick={onClear} className="text-sm text-gray-500 hover:text-gray-800">필터 해제</button>
-    </div>
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {profiles.length > 0 ? (
-        profiles.map((profile, index) => (
-          <div key={profile.id} className="animate-cascade" style={{ animationDelay: `${index * 50}ms` }}>
-            <ProfileCard
-              profile={profile}
-              onUpdate={onUpdate}
-              onDelete={onDelete}
-              accessCode={accessCode}
-              onSyncOne={onSyncOne}
-              onShowSimilar={onShowSimilar}
-              onToggleStar={onToggleStar}
-            />
-          </div>
-        ))
-      ) : (
-        <p className="text-gray-500 text-center col-span-full">해당 조건의 프로필이 없습니다.</p>
-      )}
-    </div>
-  </section>
-);
-
-// ======== 페이지들 ========
 const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
-  const computed = useMemo(() => {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const tomorrowStart = new Date(todayStart); tomorrowStart.setDate(tomorrowStart.getDate() + 1);
-    const threeDaysLater = new Date(todayStart); threeDaysLater.setDate(threeDaysLater.getDate() + 4);
-    const today = [], upcoming = [];
-    profiles.forEach(p => {
-      if (p.eventDate) {
-        const eventDate = new Date(p.eventDate);
-        if (eventDate >= todayStart && eventDate < tomorrowStart) today.push(p);
-        else if (eventDate > now && eventDate < threeDaysLater) upcoming.push(p);
-      }
-    });
-    return {
-      todayProfiles: today.sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate)),
-      upcomingProfiles: upcoming.sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate)),
-    };
-  }, [profiles]);
+  const now = useMemo(() => new Date(), []);
+  const todayStart = useMemo(() => new Date(now.getFullYear(), now.getMonth(), now.getDate()), [now]);
+  const tomorrowStart = useMemo(() => { const d = new Date(todayStart); d.setDate(d.getDate() + 1); return d; }, [todayStart]);
+  const threeDaysLater = useMemo(() => { const d = new Date(todayStart); d.setDate(d.getDate() + 4); return d; }, [todayStart]);
 
-  const { todayProfiles, upcomingProfiles } = computed;
+  const todayProfiles = useMemo(() => (
+    profiles.filter(p => p.eventDate && new Date(p.eventDate) >= todayStart && new Date(p.eventDate) < tomorrowStart)
+            .sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate))
+  ), [profiles, todayStart, tomorrowStart]);
+
+  const upcomingProfiles = useMemo(() => (
+    profiles.filter(p => p.eventDate && new Date(p.eventDate) > now && new Date(p.eventDate) < threeDaysLater)
+            .sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate))
+  ), [profiles, now, threeDaysLater]);
 
   return (
     <div className="space-y-8">
@@ -555,7 +390,7 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
   return (
     <div>
       <div className="relative">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+        <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
         <input
           type="text"
           placeholder="검색... (예: 경력:네이버 AND 20대)"
@@ -576,36 +411,29 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
   );
 };
 
-const StarredPage = ({ profiles, onUpdate, onDelete, onToggleStar, accessCode, onSyncOne, onShowSimilar }) => {
-  // 주목(★)만 보기 + 전문영역으로 필터링
+const StarredPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const starred = useMemo(() => profiles.filter(p => p.starred), [profiles]);
-  const expertiseOptions = useMemo(() => {
-    const set = new Set();
-    starred.forEach(p => { if (p.expertise) set.add(p.expertise); });
-    return ['전체', ...Array.from(set)];
-  }, [starred]);
-  const [selectedExpertise, setSelectedExpertise] = useState('전체');
-  const filtered = useMemo(() => selectedExpertise === '전체' ? starred : starred.filter(p => p.expertise === selectedExpertise), [starred, selectedExpertise]);
+  const expertiseOptions = useMemo(() => Array.from(new Set(starred.map(p => p.expertise).filter(Boolean))), [starred]);
+  const [selectedExp, setSelectedExp] = useState('전체');
+  const visible = useMemo(() => selectedExp === '전체' ? starred : starred.filter(p => p.expertise === selectedExp), [starred, selectedExp]);
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-600">전문영역</span>
-          <select value={selectedExpertise} onChange={(e)=>setSelectedExpertise(e.target.value)} className="border rounded-md px-2 py-1 text-sm">
-            {expertiseOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-          </select>
-        </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="text-sm text-gray-600">전문영역 필터:</label>
+        <select value={selectedExp} onChange={(e)=>setSelectedExp(e.target.value)} className="border rounded-md text-sm px-2 py-1">
+          <option value="전체">전체</option>
+          {expertiseOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+        </select>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {filtered.length ? filtered.map(p => (
-          <ProfileCard key={p.id}
-            profile={p}
+        {visible.length ? visible.map(p => (
+          <ProfileCard key={p.id} profile={p}
             onUpdate={onUpdate} onDelete={onDelete}
             accessCode={accessCode} onSyncOne={onSyncOne}
             onShowSimilar={onShowSimilar}
-            onToggleStar={onToggleStar}
+            onToggleStar={(id, val) => onToggleStar(id, val)}
           />
         )) : <div className="text-sm text-gray-500">표시할 프로필이 없습니다.</div>}
       </div>
@@ -614,10 +442,10 @@ const StarredPage = ({ profiles, onUpdate, onDelete, onToggleStar, accessCode, o
 };
 
 const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
-  const now = new Date();
-  const threeMonthsAgo = new Date(now); threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  const now = useMemo(() => new Date(), []);
+  const threeMonthsAgo = useMemo(() => { const d = new Date(now); d.setMonth(d.getMonth() - 3); return d; }, [now]);
 
-  // 추천 목록 계산
+  // 추천 목록 계산 (항상 계산해두고 필요한 섹션에서만 렌더)
   const recommended = useMemo(() => {
     const scoreOf = (p) => {
       const last = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
@@ -639,20 +467,20 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
       .map(x => x.p);
   }, [profiles, now]);
 
-  // 장기미접촉
-  const longTerm = useMemo(() => {
-    return profiles.filter(p => {
+  const longTerm = useMemo(() => (
+    profiles.filter(p => {
       const last = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
       const snoozeUntil = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
       return last && last < threeMonthsAgo && (!snoozeUntil || snoozeUntil < now);
-    }).sort((a,b) => (new Date(a.lastReviewedDate || a.eventDate||0)) - (new Date(b.lastReviewedDate || b.eventDate||0)));
-  }, [profiles, threeMonthsAgo, now]);
+    }).sort((a,b) => (new Date(a.lastReviewedDate || a.eventDate||0)) - (new Date(b.lastReviewedDate || b.eventDate||0)))
+  ), [profiles, threeMonthsAgo, now]);
 
-  // 그래프 데이터 (항상 미리 계산해서 훅 순서 보장)
+  const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
+
   const ageData = useMemo(() => {
     const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
     profiles.forEach(({ age }) => {
-      if (!age && age !== 0) return;
+      if (!age) return;
       if (age < 20) groups['10대']++;
       else if (age < 30) groups['20대']++;
       else if (age < 40) groups['30대']++;
@@ -669,12 +497,12 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
   }, [profiles]);
 
   const companyData = useMemo(() => TARGET_KEYWORDS.map(k => ({ name: k, count: profiles.filter(p => p.career?.includes(k)).length })), [profiles]);
+
   const expertiseData = useMemo(() => {
     const c = {}; profiles.forEach(p => { if (p.expertise) c[p.expertise] = (c[p.expertise] || 0) + 1; });
     return Object.entries(c).map(([name, count]) => ({ name, count }));
   }, [profiles]);
 
-  const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
   const filteredProfiles = useMemo(() => {
     if (!activeFilter.type) return [];
     switch (activeFilter.type) {
@@ -697,33 +525,8 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
     }
   }, [profiles, activeFilter]);
 
-  const handlePieClick = (type, data) => { if (!data || (data.value ?? data.count) === 0) return; setActiveFilter({ type, value: data.name }); };
-  const handleBarClick = (type, data) => { const count = data.count || data.value; if (count === 0) return; setActiveFilter({ type, value: data.name }); };
-
-  const handleSnooze = async (id) => {
-    const snoozeDate = new Date(); snoozeDate.setMonth(snoozeDate.getMonth() + 3);
-    await onUpdate(id, { snoozeUntil: snoozeDate.toISOString() });
-  };
-  const handleConfirm = async (id) => onUpdate(id, { lastReviewedDate: new Date().toISOString() });
-
   return (
     <div className="space-y-8">
-      {/* 상단 탭 */}
-      <div className="flex items-center gap-2">
-        <button onClick={()=>setActiveSub('rec')}
-          className={`px-3 py-1.5 rounded-md text-sm flex items-center gap-1 ${activeSub==='rec'?'bg-yellow-400 text-white':'bg-white border hover:bg-gray-50'}`}>
-          <Sparkles size={16}/> 추천
-        </button>
-        <button onClick={()=>setActiveSub('long')}
-          className={`px-3 py-1.5 rounded-md text-sm flex items-center gap-1 ${activeSub==='long'?'bg-yellow-400 text-white':'bg-white border hover:bg-gray-50'}`}>
-          <Clock size={16}/> 장기관리
-        </button>
-        <button onClick={()=>setActiveSub('graphs')}
-          className={`px-3 py-1.5 rounded-md text-sm flex items-center gap-1 ${activeSub==='graphs'?'bg-yellow-400 text-white':'bg-white border hover:bg-gray-50'}`}>
-          <LineChart size={16}/> 그래프&필터
-        </button>
-      </div>
-
       {activeSub === 'rec' && (
         <section className="bg-white rounded-xl shadow-md p-4">
           <div className="flex items-center justify-between">
@@ -790,7 +593,7 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
                 <Pie data={priorityData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label>
                   {priorityData.map((entry, i) => (
                     <Cell key={`cell-pr-${i}`} fill={`url(#gp-${i})`} stroke="#fff"
-                      onClick={() => handlePieClick('priority', entry)} style={{ cursor: 'pointer' }}/>
+                      onClick={() => setActiveFilter({ type:'priority', value: entry.name })} style={{ cursor: 'pointer' }}/>
                   ))}
                 </Pie>
                 <Tooltip formatter={(v) => `${v}명`} /><Legend />
@@ -823,7 +626,7 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
                 <Pie data={ageData} cx="50%" cy="50%" outerRadius={100} dataKey="value" label>
                   {ageData.map((entry, i) => (
                     <Cell key={`cell-age-${i}`} fill={`url(#g-age-${i})`} stroke="#fff"
-                      onClick={() => handlePieClick('age', entry)} style={{ cursor: 'pointer' }}/>
+                      onClick={() => setActiveFilter({ type:'age', value: entry.name })} style={{ cursor: 'pointer' }}/>
                   ))}
                 </Pie>
                 <Tooltip formatter={(v) => `${v}명`} /><Legend />
@@ -853,7 +656,7 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
                 <YAxis allowDecimals={false}/><Tooltip formatter={(v)=>`${v}명`} /><Legend />
                 <Bar dataKey="count" fill="url(#gradient-expertise)">
                   {expertiseData.map((entry, i) => (
-                    <Cell key={`ex-${i}`} onClick={() => handleBarClick('expertise', entry)} style={{ cursor: 'pointer' }} />
+                    <Cell key={`ex-${i}`} onClick={() => setActiveFilter({ type:'expertise', value: entry.name })} style={{ cursor: 'pointer' }} />
                   ))}
                 </Bar>
               </BarChart>
@@ -882,7 +685,7 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
                 <YAxis allowDecimals={false}/><Tooltip formatter={(v)=>`${v}명`} /><Legend />
                 <Bar dataKey="count" fill="url(#gradient-company)">
                   {companyData.map((entry, i) => (
-                    <Cell key={`co-${i}`} onClick={() => handleBarClick('company', entry)} style={{ cursor: 'pointer' }} />
+                    <Cell key={`co-${i}`} onClick={() => setActiveFilter({ type:'company', value: entry.name })} style={{ cursor: 'pointer' }} />
                   ))}
                 </Bar>
               </BarChart>
@@ -903,6 +706,34 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
     </div>
   );
 };
+
+const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => (
+  <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in mt-4">
+    <div className="flex justify-between items-center mb-4">
+      <h3 className="text-lg font-bold text-gray-800">{title}</h3>
+      <button onClick={onClear} className="text-sm text-gray-500 hover:text-gray-800">필터 해제</button>
+    </div>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {profiles.length > 0 ? (
+        profiles.map((profile) => (
+          <div key={profile.id}>
+            <ProfileCard
+              profile={profile}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
+              accessCode={accessCode}
+              onSyncOne={onSyncOne}
+              onShowSimilar={onShowSimilar}
+              onToggleStar={onToggleStar}
+            />
+          </div>
+        ))
+      ) : (
+        <p className="text-gray-500 text-center col-span-full">해당 조건의 프로필이 없습니다.</p>
+      )}
+    </div>
+  </section>
+);
 
 const ExcelUploader = ({ onBulkAdd }) => {
   const [file, setFile] = useState(null);
@@ -957,9 +788,15 @@ const ExcelUploader = ({ onBulkAdd }) => {
   );
 };
 
-const ManagePage = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulkAdd, formState, setFormState, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
-  const { newName, newCareer, newAge, newOtherInfo, newExpertise, newPriority, newMeetingRecord } = formState;
-  const { setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewExpertise, setNewPriority, setNewMeetingRecord } = setFormState;
+// 관리 페이지: 입력 타이핑 문제 방지를 위해 로컬 state 사용
+const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
+  const [newName, setNewName] = useState('');
+  const [newCareer, setNewCareer] = useState('');
+  const [newAge, setNewAge] = useState('');
+  const [newOtherInfo, setNewOtherInfo] = useState('');
+  const [newExpertise, setNewExpertise] = useState('');
+  const [newPriority, setNewPriority] = useState('');
+  const [newMeetingRecord, setNewMeetingRecord] = useState('');
 
   const [currentPage, setCurrentPage] = useState(1);
   const PER_PAGE = 10;
@@ -969,8 +806,18 @@ const ManagePage = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulk
     const end = currentPage * PER_PAGE, start = end - PER_PAGE;
     return sorted.slice(start,end);
   }, [sorted, currentPage]);
-
   const pages = useMemo(() => Array.from({length: totalPages}, (_,i)=>i+1), [totalPages]);
+
+  const handleFormSubmit = async (e) => {
+    e.preventDefault();
+    if (!newName.trim() || !newCareer.trim()) return;
+    await onAddOne({
+      name: newName, career: newCareer, age: newAge ? Number(newAge) : null,
+      otherInfo: newOtherInfo || '', expertise: newExpertise || '', priority: newPriority || '',
+      meetingRecord: newMeetingRecord || ''
+    });
+    setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewExpertise(''); setNewPriority(''); setNewMeetingRecord('');
+  };
 
   return (
     <div className="space-y-8">
@@ -1009,9 +856,9 @@ const ManagePage = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulk
 
         <nav className="mt-6 flex items-center justify-center gap-1">
           <button onClick={()=>setCurrentPage(1)} disabled={currentPage===1}
-            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">«</button>
+            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">≪</button>
           <button onClick={()=>setCurrentPage(p=>Math.max(1,p-1))} disabled={currentPage===1}
-            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">‹</button>
+            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">〈</button>
 
           <div className="flex items-center gap-1 overflow-x-auto max-w-[70vw]">
             {pages.map(n => (
@@ -1023,9 +870,9 @@ const ManagePage = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulk
           </div>
 
           <button onClick={()=>setCurrentPage(p=>Math.min(totalPages,p+1))} disabled={currentPage===totalPages}
-            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">›</button>
+            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">〉</button>
           <button onClick={()=>setCurrentPage(totalPages)} disabled={currentPage===totalPages}
-            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">»</button>
+            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">≫</button>
         </nav>
       </section>
     </div>
@@ -1034,13 +881,15 @@ const ManagePage = ({ profiles, onUpdate, onDelete, handleFormSubmit, handleBulk
 
 // ============ App ============
 export default function App() {
+  // --- 상태들 (항상 최상단 선언: Netlify ESLint 안전) ---
   const [accessCode, setAccessCode] = useState(typeof window !== 'undefined' ? (localStorage.getItem('profileDbAccessCode') || null) : null);
   const [profiles, setProfiles]     = useState([]);
   const [authStatus, setAuthStatus] = useState('authenticating');
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeMain, setActiveMain]   = useState('alerts');
-  const [functionsSub, setFunctionsSub] = useState('rec');
+  const [functionsOpen, setFunctionsOpen] = useState(false); // 사이드바에서 Functions 접기/펼치기
+  const [functionsSub, setFunctionsSub] = useState('rec');   // 추천/장기관리/그래프
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
 
@@ -1054,22 +903,10 @@ export default function App() {
   const [googleApiReady, setGoogleApiReady]     = useState(null);
   const [googleError, setGoogleError]           = useState('');
 
-  const [newName, setNewName] = useState('');
-  const [newCareer, setNewCareer] = useState('');
-  const [newAge, setNewAge] = useState('');
-  const [newOtherInfo, setNewOtherInfo] = useState('');
-  const [newExpertise, setNewExpertise] = useState('');
-  const [newPriority, setNewPriority] = useState('');
-  const [newMeetingRecord, setNewMeetingRecord] = useState('');
+  const [activeColRef, setActiveColRef] = useState(null);
+  const [dataReady, setDataReady] = useState(false);
 
-  const urlParams = useMemo(() => {
-    if (typeof window === 'undefined') return new URLSearchParams('');
-    return new URLSearchParams(window.location.search);
-  }, []);
-  const profileIdFromUrl = urlParams.get('profile');
-  const accessCodeFromUrl = urlParams.get('code');
-
-  // 외부 스크립트 로딩 (client 전용)
+  // --- 외부 스크립트 로드 (XLSX, gapi, gis) ---
   useEffect(() => {
     const xlsx = document.createElement('script');
     xlsx.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
@@ -1116,7 +953,7 @@ export default function App() {
     };
   }, []);
 
-  // Firebase Auth
+  // --- Firebase Auth ---
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (user) setAuthStatus('authenticated');
@@ -1128,29 +965,22 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  const [activeColRef, setActiveColRef] = useState(null);
-  const [dataReady, setDataReady] = useState(false);
-
-  // Firestore 경로 탐색 + 구독
+  // --- 데이터 로드 ---
   useEffect(() => {
-    let unsub = null;
-    let cancelled = false;
+    let unsub = null; let cancelled = false;
     (async () => {
-      setDataReady(false);
-      setActiveColRef(null);
+      setDataReady(false); setActiveColRef(null);
       if (!accessCode) { setProfiles([]); setDataReady(true); return; }
 
       try {
         const candidates = buildPathCandidates(accessCode, appId);
         let chosen = null;
-
         for (const path of candidates) {
           const colRef = collection(db, ...path);
           const snap = await getDocs(query(colRef, limit(1)));
           if (!snap.empty) { chosen = colRef; break; }
         }
         if (!chosen) { chosen = collection(db, ...candidates[0]); }
-
         if (cancelled) return;
         setActiveColRef(chosen);
 
@@ -1173,26 +1003,28 @@ export default function App() {
     return () => { cancelled = true; if (unsub) unsub(); };
   }, [accessCode]);
 
+  // --- Handlers ---
   const handleLogin = (code) => {
     setAccessCode(code);
     if (typeof window !== 'undefined') localStorage.setItem('profileDbAccessCode', code);
   };
 
-  const handleFormSubmit = async (e) => {
-    e.preventDefault();
-    if (!newName.trim() || !newCareer.trim() || !activeColRef) return;
-    const parsed = parseDateTimeFromRecord(newMeetingRecord);
+  const handleAddOne = async (payload) => {
+    if (!activeColRef) return;
+    const parsed = parseDateTimeFromRecord(payload.meetingRecord);
     const eventDate = parsed ? parsed.date.toISOString() : null;
-    const profileData = sanitizeForSave({
-      name: newName, career: newCareer, age: newAge ? Number(newAge) : null,
-      otherInfo: newOtherInfo || null, eventDate,
-      expertise: newExpertise || null, priority: newPriority || null,
-      meetingRecord: newMeetingRecord || null,
+    const profileData = {
+      name: payload.name,
+      career: payload.career,
+      age: payload.age ?? null,
+      otherInfo: payload.otherInfo || '',
+      expertise: payload.expertise || '',
+      priority: payload.priority || '',
+      meetingRecord: payload.meetingRecord || '',
+      eventDate,
       starred: false
-    });
+    };
     await addDoc(activeColRef, profileData);
-    setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo('');
-    setNewExpertise(''); setNewPriority(''); setNewMeetingRecord('');
   };
 
   const handleBulkAdd = async (newProfiles) => {
@@ -1203,7 +1035,7 @@ export default function App() {
     let updated=0, added=0;
     newProfiles.forEach(p => {
       const id = nameToId.get(p.name);
-      const payload = sanitizeForSave({ starred:false, ...p });
+      const payload = { starred:false, ...p };
       if (id) { batch.set(doc(activeColRef, id), payload, { merge: true }); updated++; }
       else { batch.set(doc(activeColRef), payload); added++; }
     });
@@ -1213,8 +1045,7 @@ export default function App() {
 
   const handleUpdate = async (profileId, updatedData) => {
     if (!activeColRef) return;
-    const data = sanitizeForSave(updatedData || {});
-    await updateDoc(doc(activeColRef, profileId), data);
+    await updateDoc(doc(activeColRef, profileId), updatedData);
   };
 
   const handleDeleteRequest = (profileId, profileName) => setShowDeleteConfirm({ show: true, profileId, profileName });
@@ -1226,9 +1057,7 @@ export default function App() {
   const openSimilarModal = (base) => {
     const others = profiles.filter(p => p.id !== base.id).map(p => ({ profile: p, score: similarityScore(base, p) }));
     const sorted = others.sort((a,b) => b.score - a.score).slice(0, 20);
-    setSimilarBase(base);
-    setSimilarList(sorted);
-    setSimilarOpen(true);
+    setSimilarBase(base); setSimilarList(sorted); setSimilarOpen(true);
   };
 
   const ensureGoogleAuth = () => {
@@ -1237,11 +1066,8 @@ export default function App() {
       if (token?.access_token) { setIsGoogleSignedIn(true); resolve(true); return; }
       if (!tokenClient) { reject(new Error('Google API 초기화 전입니다. 잠시 후 다시 시도해주세요.')); return; }
       tokenClient.callback = (resp) => {
-        if (resp && resp.access_token) {
-          gapiClient.client.setToken({ access_token: resp.access_token });
-          setIsGoogleSignedIn(true);
-          resolve(true);
-        } else { reject(new Error('Google 토큰을 발급받지 못했습니다.')); }
+        if (resp && resp.access_token) { gapiClient.client.setToken({ access_token: resp.access_token }); setIsGoogleSignedIn(true); resolve(true); }
+        else { reject(new Error('Google 토큰을 발급받지 못했습니다.')); }
       };
       tokenClient.requestAccessToken({ prompt: 'consent' });
     });
@@ -1303,14 +1129,16 @@ export default function App() {
     }
   };
 
-  const handleToggleStar = async (profileId) => {
-    const p = profiles.find(x => x.id === profileId);
-    if (!p) return;
-    await handleUpdate(profileId, { starred: !p.starred });
-  };
-
   const totalCount = profiles.length;
   const meetingCount = useMemo(() => profiles.filter(p => !!p.eventDate).length, [profiles]);
+
+  // URL 파라미터로 상세보기 분기
+  const urlParams = useMemo(() => {
+    if (typeof window === 'undefined') return new URLSearchParams('');
+    return new URLSearchParams(window.location.search);
+  }, []);
+  const profileIdFromUrl = urlParams.get('profile');
+  const accessCodeFromUrl = urlParams.get('code');
 
   if (profileIdFromUrl && accessCodeFromUrl) {
     return <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />;
@@ -1319,54 +1147,106 @@ export default function App() {
     return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
   }
 
+  // 헬퍼: 유사도 모달 내부에서 상세 카드 렌더용
+  function ProfileDetailView({ profileId, accessCode }) {
+    const [profile, setProfile] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError]     = useState('');
+
+    useEffect(() => {
+      (async () => {
+        try {
+          const ref = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
+          const snap = await getDoc(ref);
+          if (snap.exists()) setProfile({ ...snap.data(), id: snap.id });
+          else setError('프로필을 찾을 수 없습니다.');
+        } catch (e) {
+          console.error('Error fetching profile:', e);
+          setError('프로필을 불러오는 중 오류가 발생했습니다.');
+        } finally { setLoading(false); }
+      })();
+    }, [profileId, accessCode]);
+
+    if (loading) return <div className="flex justify-center items-center min-h-screen"><Loader2 className="animate-spin h-10 w-10 text-yellow-500" /></div>;
+    if (error)   return <div className="flex justify-center items-center min-h-screen text-red-500">{error}</div>;
+    if (!profile) return null;
+    return (
+      <div className="bg-gray-100 min-h-screen p-4 sm:p-8 flex items-center justify-center">
+        <div className="w-full max-w-2xl bg-white rounded-xl shadow-2xl p-8">
+          <div className="flex items-center justify-between border-b pb-4 mb-4">
+            <div className="flex items-baseline space-x-3">
+              <h1 className="text-3xl font-bold text-yellow-600">{profile.name}</h1>
+              <span className="text-xl text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
+            </div>
+          </div>
+          {profile.expertise && <p className="text-lg font-semibold text-gray-700 mt-4">{profile.expertise}</p>}
+          <div className="mt-6 space-y-4">
+            <div>
+              <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">경력</h2>
+              <p className="text-base text-gray-800 mt-1 whitespace-pre-wrap">{profile.career}</p>
+            </div>
+            {profile.otherInfo && (
+              <div>
+                <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">기타 정보</h2>
+                <p className="text-base text-gray-600 mt-1 whitespace-pre-wrap">{profile.otherInfo}</p>
+              </div>
+            )}
+            {profile.meetingRecord && (
+              <div>
+                <h2 className="font-bold text-gray-500 text-sm uppercase tracking-wider">미팅 기록</h2>
+                <p className="text-base text-gray-600 mt-1 whitespace-pre-wrap">{profile.meetingRecord}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const profilesWithHelpers = useMemo(() => profiles, [profiles]);
+
+  // 메인 콘텐츠 스위치
   const MainContent = () => {
-    switch (activeMain) {
-      case 'alerts': return (
+    if (activeMain === 'alerts') {
+      return (
         <AlertsPage
-          profiles={profiles}
+          profiles={profilesWithHelpers}
           onUpdate={handleUpdate} onDelete={handleDeleteRequest}
           accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-          onShowSimilar={openSimilarModal} onToggleStar={handleToggleStar}
-        />
-      );
-      case 'search': return (
-        <SearchPage
-          profiles={profiles}
-          onUpdate={handleUpdate} onDelete={handleDeleteRequest}
-          accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-          onShowSimilar={openSimilarModal} onToggleStar={handleToggleStar}
-        />
-      );
-      case 'starred': return (
-        <StarredPage
-          profiles={profiles}
-          onUpdate={handleUpdate} onDelete={handleDeleteRequest}
-          accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-          onShowSimilar={openSimilarModal}
-          onToggleStar={handleToggleStar}
-        />
-      );
-      case 'functions': return (
-        <FunctionsPage
-          activeSub={functionsSub} setActiveSub={setFunctionsSub}
-          profiles={profiles}
-          onUpdate={handleUpdate} onDelete={handleDeleteRequest}
-          accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-          onShowSimilar={openSimilarModal} onToggleStar={handleToggleStar}
-        />
-      );
-      case 'manage': default: return (
-        <ManagePage
-          profiles={profiles}
-          onUpdate={handleUpdate} onDelete={handleDeleteRequest}
-          handleFormSubmit={handleFormSubmit} handleBulkAdd={handleBulkAdd}
-          formState={{ newName, newCareer, newAge, newOtherInfo, newExpertise, newPriority, newMeetingRecord }}
-          setFormState={{ setNewName, setNewCareer, setNewAge, setNewOtherInfo, setNewExpertise, setNewPriority, setNewMeetingRecord }}
-          accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-          onShowSimilar={openSimilarModal} onToggleStar={handleToggleStar}
+          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
         />
       );
     }
+    if (activeMain === 'search') {
+      return (
+        <SearchPage
+          profiles={profilesWithHelpers}
+          onUpdate={handleUpdate} onDelete={handleDeleteRequest}
+          accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
+          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+        />
+      );
+    }
+    if (activeMain === 'starred') {
+      return (
+        <StarredPage
+          profiles={profilesWithHelpers}
+          onUpdate={handleUpdate} onDelete={handleDeleteRequest}
+          accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
+          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+        />
+      );
+    }
+    // functions
+    return (
+      <FunctionsPage
+        activeSub={functionsSub} setActiveSub={setFunctionsSub}
+        profiles={profilesWithHelpers}
+        onUpdate={handleUpdate} onDelete={handleDeleteRequest}
+        accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
+        onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+      />
+    );
   };
 
   return (
@@ -1379,88 +1259,97 @@ export default function App() {
         />
       )}
 
-      {/* 상단 바 */}
-      <header className="flex items-center justify-between px-4 sm:px-6 py-3 border-b bg-white sticky top-0 z-20">
-        <div className="flex items-center gap-3">
-          <button className="md:hidden p-2 rounded-md border bg-white" onClick={()=>setSidebarOpen(s=>!s)}><Menu size={18}/></button>
-          <Users className="text-yellow-500 w-7 h-7" />
-          <h1 className="text-xl font-bold text-gray-800">프로필 대시보드</h1>
-          <span className="text-xs sm:text-sm bg-gray-200 px-2 sm:px-3 py-1 rounded-full font-mono">{accessCode}</span>
+      {/* 상단 헤더: 타이틀 + 카운트 박스 포함 */}
+      <header className="px-4 sm:px-6 py-3 border-b bg-white sticky top-0 z-20">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button className="md:hidden p-2 rounded-md border bg-white" onClick={()=>setSidebarOpen(s=>!s)}><Menu size={18}/></button>
+            <Users className="text-yellow-500 w-7 h-7" />
+            <h1 className="text-xl font-bold text-gray-800">프로필 대시보드</h1>
+            <span className="text-xs sm:text-sm bg-gray-200 px-2 sm:px-3 py-1 rounded-full font-mono">{accessCode}</span>
+          </div>
+          <div className="hidden md:flex items-center gap-4">
+            {googleApiReady === false && (<span className="text-xs text-red-500">Google Calendar 연동 비활성화됨{googleError ? ` (${googleError})` : ' (초기화 실패)'}</span>)}
+            {googleApiReady === true && (
+              isGoogleSignedIn ? (
+                <button onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
+                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
+                  Google 로그아웃
+                </button>
+              ) : (
+                <button onClick={() => tokenClient?.requestAccessToken({ prompt: 'consent' })}
+                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
+                  Google 로그인
+                </button>
+              )
+            )}
+            <button onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }}
+              className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center"><LogOut className="w-4 h-4 mr-1.5" /> 로그아웃</button>
+          </div>
         </div>
 
-        {/* 헤더 우측: 카운트 + 구글 버튼들 */}
-        <div className="flex items-center gap-4">
-          <div className="hidden sm:flex items-center gap-3">
-            <div className="bg-white p-2 rounded-lg shadow-sm border min-w-[110px] text-center">
-              <div className="text-[11px] font-medium text-gray-500">총 등록된 프로필</div>
-              <div className="text-xl font-bold text-yellow-500">{totalCount}</div>
-            </div>
-            <div className="bg-white p-2 rounded-lg shadow-sm border min-w-[110px] text-center">
-              <div className="text-[11px] font-medium text-gray-500">미팅 진행 프로필</div>
-              <div className="text-xl font-bold text-yellow-500">{meetingCount}</div>
-            </div>
+        {/* 카운트 박스 (헤더 안) */}
+        <div className="mt-3 flex items-center gap-4">
+          <div className="bg-white p-4 rounded-xl shadow-sm border">
+            <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
+            <p className="text-3xl font-bold text-yellow-500 mt-1">{totalCount}</p>
           </div>
-
-          {googleApiReady === false && (<span className="text-xs text-red-500">Google Calendar 비활성{googleError ? ` (${googleError})` : ''}</span>)}
-          {googleApiReady === true && (
-            isGoogleSignedIn ? (
-              <button onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
-                className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
-                Google 로그아웃
-              </button>
-            ) : (
-              <button onClick={() => tokenClient?.requestAccessToken({ prompt: 'consent' })}
-                className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
-                Google 로그인
-              </button>
-            )
-          )}
-          <button onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }}
-            className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center"><LogOut className="w-4 h-4 mr-1.5" /> 로그아웃</button>
+          <div className="bg-white p-4 rounded-xl shadow-sm border">
+            <h3 className="text-base font-medium text-gray-500">미팅 진행 프로필</h3>
+            <p className="text-3xl font-bold text-yellow-500 mt-1">{meetingCount}</p>
+          </div>
         </div>
       </header>
 
       <div className="flex">
-        <aside className={`fixed md:static top-[68px] z-30 md:z-auto left-0 h-[calc(100vh-68px)] md:h-auto w-64 bg-white border-r transform transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+        {/* 사이드바 */}
+        <aside className={`fixed md:static top-[180px] z-30 md:z-auto left-0 h-[calc(100vh-180px)] md:h-auto w-64 bg-white border-r transform transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
           <nav className="p-3 space-y-1 overflow-y-auto h-full">
-            <button onClick={()=>setActiveMain('alerts')}
+            <button onClick={()=>{ setActiveMain('alerts'); setFunctionsOpen(false); }}
               className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='alerts'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <BellRing size={16}/> 알림
             </button>
-            <button onClick={()=>setActiveMain('search')}
+            <button onClick={()=>{ setActiveMain('search'); setFunctionsOpen(false); }}
               className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='search'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-              <Search size={16}/> 검색
+              <SearchIcon size={16}/> 검색
             </button>
-            <button onClick={()=>setActiveMain('starred')}
+            <button onClick={()=>{ setActiveMain('starred'); setFunctionsOpen(false); }}
               className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='starred'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <Star size={16}/> 주목 중인 프로필들
             </button>
 
-            <div className="pt-2">
-              <div className="text-xs font-semibold text-gray-500 px-2 pb-1">Functions</div>
-              <div className="space-y-1">
+            {/* Functions 토글 버튼 */}
+            <button onClick={()=>{ setActiveMain('functions'); setFunctionsOpen(v=>!v); }}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm ${activeMain==='functions'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+              <span className="flex items-center gap-2"><Sparkles size={16}/> Functions</span>
+              <ChevronDown className={`w-4 h-4 transition-transform ${functionsOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {/* 하위 탭: 열렸을 때만 노출, 동일 폰트/사이즈, 아이콘 포함 */}
+            {functionsOpen && (
+              <div className="pl-4 space-y-1">
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('rec'); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
                   <Sparkles size={16}/> 추천
                 </button>
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('long'); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='long'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='long'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
                   <Clock size={16}/> 장기관리
                 </button>
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('graphs'); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='graphs'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-                  <LineChart size={16}/> 그래프&필터
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='graphs'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
+                  <LineChartIcon size={16}/> 그래프&필터
                 </button>
               </div>
-            </div>
+            )}
 
-            <button onClick={()=>setActiveMain('manage')}
+            <button onClick={()=>{ setActiveMain('manage'); setFunctionsOpen(false); }}
               className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='manage'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <Users size={16}/> 프로필 관리
             </button>
           </nav>
         </aside>
 
+        {/* 본문 */}
         <main className="flex-1 p-4 sm:p-6 md:ml-0 ml-0 mt-3 md:mt-4">
           {!dataReady ? (
             <div className="flex items-center justify-center py-24 text-gray-400">
@@ -1474,18 +1363,40 @@ export default function App() {
         </main>
       </div>
 
-      <SimilarModal
-        open={similarOpen}
-        onClose={() => setSimilarOpen(false)}
-        baseProfile={similarBase}
-        items={similarList}
-        onUpdate={handleUpdate}
-        onDelete={handleDeleteRequest}
-        accessCode={accessCode}
-        onSyncOne={handleSyncOneToCalendar}
-        onShowSimilar={openSimilarModal}
-        onToggleStar={handleToggleStar}
-      />
+      {/* 유사도 모달 */}
+      {similarOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black bg-opacity-40" onClick={()=>setSimilarOpen(false)} />
+          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] p-6 overflow-hidden">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-bold text-gray-800">
+                유사 프로필 — <span className="text-yellow-600">{similarBase?.name}</span>
+              </h3>
+              <button onClick={()=>setSimilarOpen(false)} className="text-gray-500 hover:text-gray-800"><X size={20} /></button>
+            </div>
+            <div className="overflow-y-auto pr-3" style={{ maxHeight: '70vh' }}>
+              {similarList.length === 0 ? (
+                <div className="text-center text-gray-500 py-8">표시할 유사 프로필이 없습니다.</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {similarList.map(({ profile }) => (
+                    <ProfileCard
+                      key={profile.id}
+                      profile={profile}
+                      onUpdate={handleUpdate}
+                      onDelete={handleDeleteRequest}
+                      accessCode={accessCode}
+                      onSyncOne={handleSyncOneToCalendar}
+                      onShowSimilar={openSimilarModal}
+                      onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
