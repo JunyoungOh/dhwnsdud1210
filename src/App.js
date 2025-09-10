@@ -1,4 +1,3 @@
-// src/App.js
 import React, { useEffect, useState, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
@@ -184,7 +183,7 @@ const LoginScreen = ({ onLogin, authStatus }) => {
 const ProfileCard = ({
   profile, onUpdate, onDelete,
   accessCode, onSyncOne, onShowSimilar, onToggleStar,
-  leftFooter // 추가: 카드 최하단 좌측에 넣을 요소(확인/스누즈 버튼 등)
+  renderFooterLeft // ✅ 추천/장기관리에서만 좌하단 버튼 렌더
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
@@ -308,10 +307,10 @@ const ProfileCard = ({
         </div>
       )}
 
-      {/* 최하단: 좌측 사용자 액션(옵션) / 우측 캘린더 */}
+      {/* 하단 바: 좌측(옵션 버튼들) + 우측(캘린더) */}
       <div className="mt-2 pt-2 border-t flex items-center justify-between">
         <div className="flex items-center gap-2">
-          {leftFooter /* 있을 때만 렌더 */}
+          {typeof renderFooterLeft === 'function' ? renderFooterLeft() : null}
         </div>
         <div className="flex items-center gap-3">
           {profile.gcalEventId ? (
@@ -463,7 +462,7 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
       score += Math.min(kw * 5, 15);
       if (p.expertise) score += 5;
       const snoozeUntil = p.snoozeUntil ? new Date(p.snoozeUntil) : null;
-      if (snoozeUntil && snoozeUntil > now) score = -1; // 스누즈 중이면 제외
+      if (snoozeUntil && snoozeUntil > now) score = -1;
       return score;
     };
     return profiles
@@ -532,13 +531,13 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
     }
   }, [profiles, activeFilter]);
 
-  // 액션 핸들러: 확인/스누즈
+  // ✅ 액션 핸들러 (카드 좌하단 버튼용)
   const handleConfirm = async (p) => {
     await onUpdate(p.id, { lastReviewedDate: new Date().toISOString(), snoozeUntil: null });
   };
   const handleSnooze3M = async (p) => {
-    const d = new Date(); d.setMonth(d.getMonth() + 3);
-    await onUpdate(p.id, { snoozeUntil: d.toISOString() });
+    const dt = new Date(); dt.setMonth(dt.getMonth() + 3);
+    await onUpdate(p.id, { snoozeUntil: dt.toISOString() });
   };
 
   return (
@@ -556,26 +555,25 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
                 </div>
               </div>
             </div>
-            <div className="text-xs text-gray-500">카드 하단 좌측에서 ‘확인’ 가능</div>
+            <div className="text-xs text-gray-500">카드에서 ‘확인’/‘스누즈’ 가능</div>
           </div>
           <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
             {recommended.length === 0 ? (
               <div className="text-gray-500 p-4 text-sm">없음</div>
             ) : recommended.map(p => (
-              <ProfileCard
-                key={p.id}
+              <ProfileCard key={p.id}
                 profile={p}
                 onUpdate={onUpdate} onDelete={onDelete}
                 accessCode={accessCode} onSyncOne={onSyncOne}
                 onShowSimilar={onShowSimilar} onToggleStar={onToggleStar}
-                leftFooter={
+                renderFooterLeft={() => (
                   <button
                     onClick={() => handleConfirm(p)}
-                    className="text-xs px-3 py-1 rounded-full border border-gray-300 hover:bg-gray-50"
+                    className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded-full border"
                   >
                     확인
                   </button>
-                }
+                )}
               />
             ))}
           </div>
@@ -593,28 +591,27 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
             {longTerm.length === 0 ? (
               <div className="text-gray-500 p-4 text-sm">없음</div>
             ) : longTerm.map(p => (
-              <ProfileCard
-                key={p.id}
+              <ProfileCard key={p.id}
                 profile={p}
                 onUpdate={onUpdate} onDelete={onDelete}
                 accessCode={accessCode} onSyncOne={onSyncOne}
                 onShowSimilar={onShowSimilar} onToggleStar={onToggleStar}
-                leftFooter={
+                renderFooterLeft={() => (
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleConfirm(p)}
-                      className="text-xs px-3 py-1 rounded-full border border-gray-300 hover:bg-gray-50"
+                      className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded-full border"
                     >
                       확인
                     </button>
                     <button
                       onClick={() => handleSnooze3M(p)}
-                      className="text-xs px-3 py-1 rounded-full border border-yellow-300 text-yellow-700 hover:bg-yellow-50"
+                      className="text-xs bg-yellow-100 hover:bg-yellow-200 text-yellow-800 px-3 py-1 rounded-full border border-yellow-300"
                     >
                       3개월 후 다시
                     </button>
                   </div>
-                }
+                )}
               />
             ))}
           </div>
@@ -830,7 +827,7 @@ const ExcelUploader = ({ onBulkAdd }) => {
   );
 };
 
-// 관리 페이지(로컬 state로 입력 문제 방지)
+// 관리 페이지
 const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const [newName, setNewName] = useState('');
   const [newCareer, setNewCareer] = useState('');
@@ -930,8 +927,8 @@ export default function App() {
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeMain, setActiveMain]   = useState('alerts');
-  const [functionsOpen, setFunctionsOpen] = useState(false);
-  const [functionsSub, setFunctionsSub]   = useState('rec');
+  const [functionsOpen, setFunctionsOpen] = useState(false); // 사이드바에서 Functions 접기/펼치기
+  const [functionsSub, setFunctionsSub] = useState('rec');   // 추천/장기관리/그래프
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
 
@@ -948,7 +945,7 @@ export default function App() {
   const [activeColRef, setActiveColRef] = useState(null);
   const [dataReady, setDataReady] = useState(false);
 
-  // --- 외부 스크립트 로드 ---
+  // --- 외부 스크립트 로드 (XLSX, gapi, gis) ---
   useEffect(() => {
     const xlsx = document.createElement('script');
     xlsx.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
@@ -1045,16 +1042,7 @@ export default function App() {
     return () => { cancelled = true; if (unsub) unsub(); };
   }, [accessCode]);
 
-  // --- URL 파라미터 & 파생값 (모든 훅은 조기 return보다 위에서 호출) ---
-  const urlParams = useMemo(() => {
-    if (typeof window === 'undefined') return new URLSearchParams('');
-    return new URLSearchParams(window.location.search);
-  }, []);
-  const profileIdFromUrl = urlParams.get('profile');
-  const accessCodeFromUrl = urlParams.get('code');
-  const profilesWithHelpers = useMemo(() => profiles, [profiles]); // 조기 return 위
-
-  // --- 핸들러들 ---
+  // --- Handlers ---
   const handleLogin = (code) => {
     setAccessCode(code);
     if (typeof window !== 'undefined') localStorage.setItem('profileDbAccessCode', code);
@@ -1099,13 +1087,10 @@ export default function App() {
     await updateDoc(doc(activeColRef, profileId), updatedData);
   };
 
-  const handleDeleteRequest = (profileId, profileName) =>
-    setShowDeleteConfirm({ show: true, profileId, profileName });
-
+  // 삭제
+  const handleDeleteRequest = (profileId, profileName) => setShowDeleteConfirm({ show: true, profileId, profileName });
   const confirmDelete = async () => {
-    if (showDeleteConfirm.profileId && activeColRef) {
-      await deleteDoc(doc(activeColRef, showDeleteConfirm.profileId));
-    }
+    if (showDeleteConfirm.profileId && activeColRef) await deleteDoc(doc(activeColRef, showDeleteConfirm.profileId));
     setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
   };
 
@@ -1184,7 +1169,24 @@ export default function App() {
     }
   };
 
-  // 상세보기 컴포넌트(중첩 선언 가능)
+  // --- URL 파라미터 & 파생값 (모든 훅은 조기 return보다 위에서 호출) ---
+  const urlParams = useMemo(() => {
+    if (typeof window === 'undefined') return new URLSearchParams('');
+    return new URLSearchParams(window.location.search);
+  }, []);
+  const profileIdFromUrl = urlParams.get('profile');
+  const accessCodeFromUrl = urlParams.get('code');
+
+  const profilesWithHelpers = useMemo(() => profiles, [profiles]);
+
+  // ✅ 조기 return보다 위에서 파생값 선언 (useMemo 포함)
+  const totalCount = profiles.length;
+  const meetingCount = useMemo(
+    () => profiles.filter(p => !!p.eventDate).length,
+    [profiles]
+  );
+
+  // URL 파라미터로 상세보기 분기
   function ProfileDetailView({ profileId, accessCode }) {
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -1240,7 +1242,6 @@ export default function App() {
     );
   }
 
-  // 조기 return (모든 훅은 이미 위에서 호출됨)
   if (profileIdFromUrl && accessCodeFromUrl) {
     return <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />;
   }
@@ -1248,7 +1249,7 @@ export default function App() {
     return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
   }
 
-  // 메인 콘텐츠 스위치 (훅 사용 없음)
+  // 메인 콘텐츠 스위치
   const MainContent = () => {
     if (activeMain === 'alerts') {
       return (
@@ -1280,7 +1281,6 @@ export default function App() {
         />
       );
     }
-    // functions
     if (activeMain === 'manage') {
       return (
         <ManagePage
@@ -1292,6 +1292,7 @@ export default function App() {
         />
       );
     }
+    // functions
     return (
       <FunctionsPage
         activeSub={functionsSub} setActiveSub={setFunctionsSub}
@@ -1302,9 +1303,6 @@ export default function App() {
       />
     );
   };
-
-  const totalCount = profiles.length;
-  const meetingCount = useMemo(() => profiles.filter(p => !!p.eventDate).length, [profiles]);
 
   return (
     <div className="bg-gray-50 min-h-screen font-sans">
@@ -1381,11 +1379,11 @@ export default function App() {
               <span className="flex items-center gap-2"><Sparkles size={16}/> Functions</span>
               <ChevronDown className={`w-4 h-4 transition-transform ${functionsOpen ? 'rotate-180' : ''}`} />
             </button>
-            {/* 하위 탭 */}
+            {/* 하위 탭: 열렸을 때만 노출, 동일 폰트/사이즈, 아이콘 포함 */}
             {functionsOpen && (
               <div className="pl-4 space-y-1">
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('rec'); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
+                  className={`w-full flex items녀-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
                   <Sparkles size={16}/> 추천
                 </button>
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('long'); }}
