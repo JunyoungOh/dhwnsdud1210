@@ -379,7 +379,7 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
 const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const [searchTerm, setSearchTerm] = useState('');
 
-  // 기존 고급(필드/AND/OR) 검색 로직 — 항상 준비만 해 둠
+  // 기존 고급(필드/AND/OR/부분 일치) 검색
   const advancedResults = useMemo(() => {
     const term = searchTerm.trim();
     if (!term) return [];
@@ -408,28 +408,29 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
     }));
   }, [searchTerm, profiles]);
 
-  // 자연어 파싱 결과 — 항상 계산만 해 둠
+  // 자연어 파싱 + 매칭 (항상 계산만 해 둠)
   const parsedNL = useMemo(() => parseNaturalQuery(searchTerm), [searchTerm]);
+  const hasNL = useMemo(() => !!parsedNL && !parsedNL.__isEmpty, [parsedNL]);
 
-  // 자연어 매칭 — 항상 계산만 해 둠
   const nlResults = useMemo(() => {
-    if (!searchTerm.trim()) return [];
+    if (!hasNL) return [];
     try {
       return profiles.filter(p => matchProfileWithNL(p, parsedNL));
     } catch {
       return [];
     }
-  }, [profiles, parsedNL, searchTerm]);
+  }, [profiles, parsedNL, hasNL]);
 
-  // 어떤 결과를 보여줄지 선택: 
-  //  - 콜론/AND/OR 패턴이 보이면 기존 고급 검색 우선
-  //  - 아니면 자연어 결과 우선, 없으면 고급 검색 결과로 폴백
-  const showAdvancedFirst = useMemo(() => /:|\sAND\s|\sOR\s/i.test(searchTerm), [searchTerm]);
+  // 보여줄 결과 선택
+  const looksLikeAdvanced = useMemo(() => /:|\sAND\s|\sOR\s/i.test(searchTerm), [searchTerm]);
   const visible = useMemo(() => {
     if (!searchTerm.trim()) return [];
-    if (showAdvancedFirst) return advancedResults;
-    return nlResults.length ? nlResults : advancedResults;
-  }, [searchTerm, showAdvancedFirst, nlResults, advancedResults]);
+    if (looksLikeAdvanced) return advancedResults;
+    // 자연어에 '의미 있는 제약'이 있으면 NL 우선
+    if (hasNL && nlResults.length) return nlResults;
+    // 그 외에는 기존 고급/부분일치로 폴백
+    return advancedResults;
+  }, [searchTerm, looksLikeAdvanced, hasNL, nlResults, advancedResults]);
 
   return (
     <div>
