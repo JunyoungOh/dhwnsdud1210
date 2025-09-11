@@ -23,7 +23,7 @@ import {
 
 import { parseNaturalQuery, matchProfileWithNL } from './utils/nlp';
 
-import MeetingsPage from './components/MeetingsPage';
+import { MeetingsPage } from './utils/meetings';
 
 // ============ 환경 변수 ============
 const GOOGLE_API_KEY   = process.env.REACT_APP_GOOGLE_API_KEY;
