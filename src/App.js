@@ -378,22 +378,58 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
 
 const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const searched = useMemo(() => {
-    const term = searchTerm.trim(); if (!term) return [];
+
+  // 기존 고급(필드/AND/OR) 검색 로직 — 항상 준비만 해 둠
+  const advancedResults = useMemo(() => {
+    const term = searchTerm.trim();
+    if (!term) return [];
     const orConditions = term.split(/\s+or\s+/i);
+
     return profiles.filter(p => orConditions.some(cond => {
       const andKeywords = cond.split(/\s+and\s+/i).filter(Boolean);
+
       return andKeywords.every(keyword => {
         const map = { '이름':'name','경력':'career','나이':'age','전문영역':'expertise','기타':'otherInfo','우선순위':'priority' };
         const f = keyword.match(/^(이름|경력|나이|전문영역|기타|우선순위):(.+)$/);
-        if (f) { const field = map[f[1]]; const val = f[2].toLowerCase(); const v = p[field] ? String(p[field]).toLowerCase() : ''; return v.includes(val); }
+        if (f) {
+          const field = map[f[1]];
+          const val = f[2].toLowerCase();
+          const v = p[field] ? String(p[field]).toLowerCase() : '';
+          return v.includes(val);
+        }
         const ageG = keyword.match(/^(\d{1,2})대$/);
-        if (ageG) { const d = parseInt(ageG[1],10); if (d>=10) { const min=d, max=d+9; return p.age && p.age>=min && p.age<=max; } }
+        if (ageG) {
+          const d = parseInt(ageG[1],10);
+          if (d>=10) { const min=d, max=d+9; return p.age && p.age>=min && p.age<=max; }
+        }
         const txt = [p.name, p.career, p.expertise, p.otherInfo, p.age ? `${p.age}세` : ''].join(' ').toLowerCase();
         return txt.includes(keyword.toLowerCase());
       });
     }));
   }, [searchTerm, profiles]);
+
+  // 자연어 파싱 결과 — 항상 계산만 해 둠
+  const parsedNL = useMemo(() => parseNaturalQuery(searchTerm), [searchTerm]);
+
+  // 자연어 매칭 — 항상 계산만 해 둠
+  const nlResults = useMemo(() => {
+    if (!searchTerm.trim()) return [];
+    try {
+      return profiles.filter(p => matchProfileWithNL(p, parsedNL));
+    } catch {
+      return [];
+    }
+  }, [profiles, parsedNL, searchTerm]);
+
+  // 어떤 결과를 보여줄지 선택: 
+  //  - 콜론/AND/OR 패턴이 보이면 기존 고급 검색 우선
+  //  - 아니면 자연어 결과 우선, 없으면 고급 검색 결과로 폴백
+  const showAdvancedFirst = useMemo(() => /:|\sAND\s|\sOR\s/i.test(searchTerm), [searchTerm]);
+  const visible = useMemo(() => {
+    if (!searchTerm.trim()) return [];
+    if (showAdvancedFirst) return advancedResults;
+    return nlResults.length ? nlResults : advancedResults;
+  }, [searchTerm, showAdvancedFirst, nlResults, advancedResults]);
 
   return (
     <div>
@@ -401,18 +437,31 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
         <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
         <input
           type="text"
-          placeholder="검색... (예: 경력:네이버 AND 20대)"
+          placeholder="자연어로도 검색 가능: 예) 네이버 경력 백엔드 30대 리더"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full p-4 pl-12 border rounded-xl shadow-sm"
         />
       </div>
+
       {searchTerm.trim() && (
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {searched.length ? searched.map(p => (
-            <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete}
-              accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
-          )) : <div className="text-sm text-gray-500">검색 결과가 없습니다.</div>}
+          {visible.length ? (
+            visible.map(p => (
+              <ProfileCard
+                key={p.id}
+                profile={p}
+                onUpdate={onUpdate}
+                onDelete={onDelete}
+                accessCode={accessCode}
+                onSyncOne={onSyncOne}
+                onShowSimilar={onShowSimilar}
+                onToggleStar={onToggleStar}
+              />
+            ))
+          ) : (
+            <div className="text-sm text-gray-500">검색 결과가 없습니다.</div>
+          )}
         </div>
       )}
     </div>
