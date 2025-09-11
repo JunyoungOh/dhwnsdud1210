@@ -23,6 +23,8 @@ import {
 
 import { parseNaturalQuery, matchProfileWithNL } from './utils/nlp';
 
+import MeetingsPage from './components/MeetingsPage';
+
 // ============ 환경 변수 ============
 const GOOGLE_API_KEY   = process.env.REACT_APP_GOOGLE_API_KEY;
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
@@ -1333,6 +1335,9 @@ export default function App() {
         />
       );
     }
+    if (activeMain === 'meetings') {
+      return <MeetingsPage profiles={profilesWithHelpers} />;
+    }
     if (activeMain === 'manage') {
       return (
         <ManagePage
@@ -1423,6 +1428,11 @@ export default function App() {
             <button onClick={()=>{ setActiveMain('starred'); setFunctionsOpen(false); }}
               className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='starred'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <Star size={16}/> 주목 중인 프로필들
+            </button>
+            <button onClick={()=>{ setActiveMain('meetings'); setFunctionsOpen(false); }}
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='meetings'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+              {/* lucide-react의 Calendar 아이콘을 이미 상단에서 import하고 있다면 재사용됩니다 */}
+              <Calendar size={16}/> 미팅 데이터
             </button>
 
             {/* Functions 토글 버튼 */}
