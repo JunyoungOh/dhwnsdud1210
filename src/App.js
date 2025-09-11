@@ -21,6 +21,8 @@ import {
   ChevronDown
 } from 'lucide-react';
 
+import { parseNaturalQuery, matchProfileWithNL } from './utils/nlp';
+
 // ============ 환경 변수 ============
 const GOOGLE_API_KEY   = process.env.REACT_APP_GOOGLE_API_KEY;
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
