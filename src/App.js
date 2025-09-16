@@ -974,6 +974,21 @@ const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, acc
   );
 };
 
+function AdminOnlyButton({ activeMain, setActiveMain, setFunctionsOpen }) {
+  const ctx = useUserCtx?.();            // AuthGate가 넣어준 사용자 컨텍스트
+  if (!ctx?.isAdmin) return null;        // 관리자가 아니면 버튼 자체를 숨김
+  return (
+    <button
+      onClick={() => { setActiveMain('admin'); setFunctionsOpen(false); }}
+      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${
+        activeMain === 'admin' ? 'bg-yellow-400 text-white' : 'hover:bg-gray-100'
+      }`}
+    >
+      <Users size={16}/> 사용자 관리
+    </button>
+  );
+}
+
 // ============ App ============
 export default function App() {
   // --- 상태들 (항상 최상단 선언) ---
@@ -1377,208 +1392,209 @@ export default function App() {
     );
   };
 
-  return (
+   return (
     <AuthGate>
       {profileIdFromUrl && accessCodeFromUrl ? (
         <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />
       ) : !accessCode ? (
         <LoginScreen onLogin={handleLogin} authStatus={authStatus} />
       ) : (
+        <div className="bg-gray-50 min-h-screen font-sans">
+          {showDeleteConfirm.show && (
+            <ConfirmationModal
+              message={`'${showDeleteConfirm.profileName}' 프로필을 정말로 삭제하시겠습니까?`}
+              onConfirm={confirmDelete}
+              onCancel={() => setShowDeleteConfirm({ show: false, profileId: null, profileName: '' })}
+            />
+          )}
 
-    <div className="bg-gray-50 min-h-screen font-sans">
-      {showDeleteConfirm.show && (
-        <ConfirmationModal
-          message={`'${showDeleteConfirm.profileName}' 프로필을 정말로 삭제하시겠습니까?`}
-          onConfirm={confirmDelete}
-          onCancel={() => setShowDeleteConfirm({ show: false, profileId: null, profileName: '' })}
-        />
-      )}
-
-      {/* 상단 헤더 */}
-      <header className="px-4 sm:px-6 py-3 border-b bg-white sticky top-0 z-20">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button className="md:hidden p-2 rounded-md border bg-white" onClick={()=>setSidebarOpen(s=>!s)}><Menu size={18}/></button>
-            <Users className="text-yellow-500 w-7 h-7" />
-            <h1 className="text-xl font-bold text-gray-800">프로필 대시보드</h1>
-            <span className="text-xs sm:text-sm bg-gray-200 px-2 sm:px-3 py-1 rounded-full font-mono">{accessCode}</span>
-          </div>
-          <div className="hidden md:flex items-center gap-4">
-            {googleApiReady === false && (<span className="text-xs text-red-500">Google Calendar 연동 비활성화됨{googleError ? ` (${googleError})` : ' (초기화 실패)'}</span>)}
-            {googleApiReady === true && (
-              isGoogleSignedIn ? (
-                <button onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
-                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
-                  Google 로그아웃
+          {/* 상단 헤더 */}
+          <header className="px-4 sm:px-6 py-3 border-b bg-white sticky top-0 z-20">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <button className="md:hidden p-2 rounded-md border bg-white" onClick={()=>setSidebarOpen(s=>!s)}>
+                  <Menu size={18}/>
                 </button>
-              ) : (
-                <button onClick={() => tokenClient?.requestAccessToken({ prompt: 'consent' })}
-                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600">
-                  Google 로그인
-                </button>
-              )
-            )}
-            <button onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }}
-              className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center"><LogOut className="w-4 h-4 mr-1.5" /> 로그아웃</button>
-          </div>
-        </div>
-     )}
-   </AuthGate
- );
-
-        {/* 카운트 박스 */}
-        <div className="mt-3 flex items-center gap-4">
-          <div className="bg-white p-4 rounded-xl shadow-sm border">
-            <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
-            <p className="text-3xl font-bold text-yellow-500 mt-1">{totalCount}</p>
-          </div>
-          <div className="bg-white p-4 rounded-xl shadow-sm border">
-            <h3 className="text-base font-medium text-gray-500">미팅 진행 프로필</h3>
-            <p className="text-3xl font-bold text-yellow-500 mt-1">{meetingCount}</p>
-          </div>
-        </div>
-      </header>
-
-      <div className="flex">
-        {/* 사이드바 */}
-        <aside className={`fixed md:static top-[180px] z-30 md:z-auto left-0 h-[calc(100vh-180px)] md:h-auto w-64 bg-white border-r transform transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
-          <nav className="p-3 space-y-1 overflow-y-auto h-full">
-            <button onClick={()=>{ setActiveMain('alerts'); setFunctionsOpen(false); }}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='alerts'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-              <BellRing size={16}/> 알림
-            </button>
-            <button onClick={()=>{ setActiveMain('search'); setFunctionsOpen(false); }}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='search'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-              <SearchIcon size={16}/> 검색
-            </button>
-            <button onClick={()=>{ setActiveMain('starred'); setFunctionsOpen(false); }}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='starred'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-              <Star size={16}/> 주목 중인 프로필들
-            </button>
-            <button onClick={()=>{ setActiveMain('meetings'); setFunctionsOpen(false); }}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='meetings'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-              <Calendar size={16}/> 미팅 데이터
-            </button>
-
-            {/* Functions 토글 버튼 */}
-            <button onClick={()=>{ setActiveMain('functions'); setFunctionsOpen(v=>!v); }}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm ${activeMain==='functions'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-              <span className="flex items-center gap-2"><Sparkles size={16}/> Functions</span>
-              <ChevronDown className={`w-4 h-4 transition-transform ${functionsOpen ? 'rotate-180' : ''}`} />
-            </button>
-
-            {functionsOpen && (
-              <div className="pl-4 space-y-1">
-                <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('rec'); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
-                  <Sparkles size={16}/> 추천
-                </button>
-                <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('long'); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='long'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
-                  <Clock size={16}/> 장기관리
-                </button>
-                <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('graphs'); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='graphs'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
-                  <LineChartIcon size={16}/> 그래프&필터
+                <Users className="text-yellow-500 w-7 h-7" />
+                <h1 className="text-xl font-bold text-gray-800">프로필 대시보드</h1>
+                <span className="text-xs sm:text-sm bg-gray-200 px-2 sm:px-3 py-1 rounded-full font-mono">{accessCode}</span>
+              </div>
+              <div className="hidden md:flex items-center gap-4">
+                {googleApiReady === false && (
+                  <span className="text-xs text-red-500">
+                    Google Calendar 연동 비활성화됨{googleError ? ` (${googleError})` : ' (초기화 실패)'}
+                  </span>
+                )}
+                {googleApiReady === true && (
+                  isGoogleSignedIn ? (
+                    <button
+                      onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
+                      className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
+                    >
+                      Google 로그아웃
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => tokenClient?.requestAccessToken({ prompt: 'consent' })}
+                      className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
+                    >
+                      Google 로그인
+                    </button>
+                  )
+                )}
+                <button
+                  onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }}
+                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center"
+                >
+                  <LogOut className="w-4 h-4 mr-1.5" /> 로그아웃
                 </button>
               </div>
-            )}
+            </div>
 
-            <button onClick={()=>{ setActiveMain('manage'); setFunctionsOpen(false); }}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='manage'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-              <Users size={16}/> 프로필 관리
-            </button>
+            {/* 카운트 박스 (헤더 안) */}
+            <div className="mt-3 flex items-center gap-4">
+              <div className="bg-white p-4 rounded-xl shadow-sm border">
+                <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
+                <p className="text-3xl font-bold text-yellow-500 mt-1">{totalCount}</p>
+              </div>
+              <div className="bg-white p-4 rounded-xl shadow-sm border">
+                <h3 className="text-base font-medium text-gray-500">미팅 진행 프로필</h3>
+                <p className="text-3xl font-bold text-yellow-500 mt-1">{meetingCount}</p>
+              </div>
+            </div>
+          </header>
 
-            {/* 관리자 전용: 사용자 관리 */}
-            {(() => {
-              const ctx = useUserCtx?.();
-              if (!ctx?.isAdmin) return null;
-              return (
-                <button onClick={()=>{ setActiveMain('admin'); setFunctionsOpen(false); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='admin'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-                  <Users size={16}/> 사용자 관리
+          <div className="flex">
+            {/* 사이드바 */}
+            <aside className={`fixed md:static top-[180px] z-30 md:z-auto left-0 h-[calc(100vh-180px)] md:h-auto w-64 bg-white border-r transform transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+              <nav className="p-3 space-y-1 overflow-y-auto h-full">
+                <button onClick={()=>{ setActiveMain('alerts'); setFunctionsOpen(false); }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='alerts'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+                  <BellRing size={16}/> 알림
                 </button>
-              );
-            })()}
-          </nav>
-        </aside>
+                <button onClick={()=>{ setActiveMain('search'); setFunctionsOpen(false); }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='search'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+                  <SearchIcon size={16}/> 검색
+                </button>
+                <button onClick={()=>{ setActiveMain('starred'); setFunctionsOpen(false); }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='starred'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+                  <Star size={16}/> 주목 중인 프로필들
+                </button>
+                <button onClick={()=>{ setActiveMain('meetings'); setFunctionsOpen(false); }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='meetings'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+                  <Calendar size={16}/> 미팅 데이터
+                </button>
 
-        {/* 본문 */}
-        <main className="flex-1 p-4 sm:p-6 md:ml-0 ml-0 mt-3 md:mt-4">
-          {!dataReady ? (
-            <div className="flex items-center justify-center py-24 text-gray-400">
-              <Loader2 className="animate-spin mr-2" /> 데이터를 불러오는 중...
-            </div>
-          ) : (
-            <div className="max-w-[1200px] mx-auto">
-              <MainContent />
-            </div>
-          )}
-        </main>
-      </div>
+                {/* Functions 토글 */}
+                <button onClick={()=>{ setActiveMain('functions'); setFunctionsOpen(v=>!v); }}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm ${activeMain==='functions'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+                  <span className="flex items-center gap-2"><Sparkles size={16}/> Functions</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${functionsOpen ? 'rotate-180' : ''}`} />
+                </button>
 
-      {/* 상세 모달 */}
-      {detailOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setDetailOpen(false)} />
-          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-auto p-6">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-lg font-bold text-gray-800">
-                {detailProfile?.name || '프로필'}
-              </h3>
-              <button onClick={() => setDetailOpen(false)} className="text-gray-500 hover:text-gray-800">
-                <X size={20} />
-              </button>
-            </div>
-            {detailProfile && (
-              <ProfileCard
-                profile={detailProfile}
-                onUpdate={handleUpdate}
-                onDelete={handleDeleteRequest}
-                accessCode={accessCode}
-                onSyncOne={handleSyncOneToCalendar}
-                onShowSimilar={openSimilarModal}
-                onToggleStar={(id, val) => handleUpdate(id, { starred: !!val })}
-              />
-            )}
-          </div>
-        </div>
-      )}
+                {functionsOpen && (
+                  <div className="pl-4 space-y-1">
+                    <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('rec'); }}
+                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
+                      <Sparkles size={16}/> 추천
+                    </button>
+                    <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('long'); }}
+                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='long'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
+                      <Clock size={16}/> 장기관리
+                    </button>
+                    <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('graphs'); }}
+                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='graphs'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
+                      <LineChartIcon size={16}/> 그래프&필터
+                    </button>
+                  </div>
+                )}
 
-      {/* 유사도 모달 */}
-      {similarOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black bg-opacity-40" onClick={()=>setSimilarOpen(false)} />
-          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] p-6 overflow-hidden">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-lg font-bold text-gray-800">
-                유사 프로필 — <span className="text-yellow-600">{similarBase?.name}</span>
-              </h3>
-              <button onClick={()=>setSimilarOpen(false)} className="text-gray-500 hover:text-gray-800"><X size={20} /></button>
-            </div>
-            <div className="overflow-y-auto pr-3" style={{ maxHeight: '70vh' }}>
-              {similarList.length === 0 ? (
-                <div className="text-center text-gray-500 py-8">표시할 유사 프로필이 없습니다.</div>
+                {/* 관리자 전용: 사용자 관리 버튼 (아래 보조 컴포넌트로 대체) */}
+                <AdminOnlyButton
+                  activeMain={activeMain}
+                  setActiveMain={setActiveMain}
+                  setFunctionsOpen={setFunctionsOpen}
+                />
+              </nav>
+            </aside>
+
+            {/* 본문 */}
+            <main className="flex-1 p-4 sm:p-6 md:ml-0 ml-0 mt-3 md:mt-4">
+              {!dataReady ? (
+                <div className="flex items-center justify-center py-24 text-gray-400">
+                  <Loader2 className="animate-spin mr-2" /> 데이터를 불러오는 중...
+                </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {similarList.map(({ profile }) => (
-                    <ProfileCard
-                      key={profile.id}
-                      profile={profile}
-                      onUpdate={handleUpdate}
-                      onDelete={handleDeleteRequest}
-                      accessCode={accessCode}
-                      onSyncOne={handleSyncOneToCalendar}
-                      onShowSimilar={openSimilarModal}
-                      onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
-                    />
-                  ))}
+                <div className="max-w-[1200px] mx-auto">
+                  <MainContent />
                 </div>
               )}
-            </div>
+            </main>
           </div>
+
+          {/* 상세 모달 */}
+          {detailOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center">
+              <div className="absolute inset-0 bg-black/40" onClick={() => setDetailOpen(false)} />
+              <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-auto p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-bold text-gray-800">
+                    {detailProfile?.name || '프로필'}
+                  </h3>
+                  <button onClick={() => setDetailOpen(false)} className="text-gray-500 hover:text-gray-800">
+                    <X size={20} />
+                  </button>
+                </div>
+                {detailProfile && (
+                  <ProfileCard
+                    profile={detailProfile}
+                    onUpdate={handleUpdate}
+                    onDelete={handleDeleteRequest}
+                    accessCode={accessCode}
+                    onSyncOne={handleSyncOneToCalendar}
+                    onShowSimilar={openSimilarModal}
+                    onToggleStar={(id, val) => handleUpdate(id, { starred: !!val })}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 유사도 모달 */}
+          {similarOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center">
+              <div className="absolute inset-0 bg-black bg-opacity-40" onClick={()=>setSimilarOpen(false)} />
+              <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] p-6 overflow-hidden">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-bold text-gray-800">
+                    유사 프로필 — <span className="text-yellow-600">{similarBase?.name}</span>
+                  </h3>
+                  <button onClick={()=>setSimilarOpen(false)} className="text-gray-500 hover:text-gray-800"><X size={20} /></button>
+                </div>
+                <div className="overflow-y-auto pr-3" style={{ maxHeight: '70vh' }}>
+                  {similarList.length === 0 ? (
+                    <div className="text-center text-gray-500 py-8">표시할 유사 프로필이 없습니다.</div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {similarList.map(({ profile }) => (
+                        <ProfileCard
+                          key={profile.id}
+                          profile={profile}
+                          onUpdate={handleUpdate}
+                          onDelete={handleDeleteRequest}
+                          accessCode={accessCode}
+                          onSyncOne={handleSyncOneToCalendar}
+                          onShowSimilar={openSimilarModal}
+                          onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
-    </div>
+    </AuthGate>
   );
-}
