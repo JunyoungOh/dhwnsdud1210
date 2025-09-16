@@ -1165,11 +1165,6 @@ export default function App() {
     setSimilarBase(base); setSimilarList(sorted); setSimilarOpen(true);
   };
 
-  const openProfileDetailById = (id) => {
-  const p = profiles.find(x => x.id === id);
-  if (p) { setDetailProfile(p); setDetailOpen(true); }
-  };
-
   const ensureGoogleAuth = () => {
     return new Promise((resolve, reject) => {
       const token = gapiClient?.client?.getToken?.();
