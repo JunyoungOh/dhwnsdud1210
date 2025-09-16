@@ -999,6 +999,13 @@ export default function App() {
   const [activeColRef, setActiveColRef] = useState(null);
   const [dataReady, setDataReady] = useState(false);
 
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailProfile, setDetailProfile] = useState(null);
+
+  const openProfileDetailById = (id) => {
+  const p = profiles.find(x => x.id === id);
+  if (p) { setDetailProfile(p); setDetailOpen(true); }
+  };
   // --- 외부 스크립트 로드 (XLSX, gapi, gis) ---
   useEffect(() => {
     const xlsx = document.createElement('script');
@@ -1152,6 +1159,11 @@ export default function App() {
     const others = profiles.filter(p => p.id !== base.id).map(p => ({ profile: p, score: similarityScore(base, p) }));
     const sorted = others.sort((a,b) => b.score - a.score).slice(0, 20);
     setSimilarBase(base); setSimilarList(sorted); setSimilarOpen(true);
+  };
+
+  const openProfileDetailById = (id) => {
+  const p = profiles.find(x => x.id === id);
+  if (p) { setDetailProfile(p); setDetailOpen(true); }
   };
 
   const ensureGoogleAuth = () => {
@@ -1479,6 +1491,33 @@ export default function App() {
           )}
         </main>
       </div>
+
+    {detailOpen && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/40" onClick={() => setDetailOpen(false)} />
+        <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-auto p-6">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-lg font-bold text-gray-800">
+              {detailProfile?.name || '프로필'}
+            </h3>
+            <button onClick={() => setDetailOpen(false)} className="text-gray-500 hover:text-gray-800">
+              <X size={20} />
+            </button>
+          </div>
+          {detailProfile && (
+            <ProfileCard
+              profile={detailProfile}
+              onUpdate={handleUpdate}
+              onDelete={handleDeleteRequest}
+              accessCode={accessCode}
+              onSyncOne={handleSyncOneToCalendar}
+              onShowSimilar={openSimilarModal}
+              onToggleStar={(id, val) => handleUpdate(id, { starred: !!val })}
+            />
+          )}
+        </div>
+      </div>
+    )}
 
       {/* 유사도 모달 */}
       {similarOpen && (
