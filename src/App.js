@@ -1,3 +1,4 @@
+/* ===== App.js (전체) ===== */
 import React, { useEffect, useState, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
@@ -22,7 +23,6 @@ import {
 } from 'lucide-react';
 
 import { parseNaturalQuery, matchProfileWithNL } from './utils/nlp';
-
 import { MeetingsPage } from './utils/meetings';
 
 // ============ 환경 변수 ============
@@ -187,7 +187,7 @@ const LoginScreen = ({ onLogin, authStatus }) => {
 const ProfileCard = ({
   profile, onUpdate, onDelete,
   accessCode, onSyncOne, onShowSimilar, onToggleStar,
-  renderFooterLeft // ✅ 추천/장기관리에서만 좌하단 버튼 렌더
+  renderFooterLeft
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
@@ -410,7 +410,7 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
     }));
   }, [searchTerm, profiles]);
 
-  // 자연어 파싱 + 매칭 (항상 계산만 해 둠)
+  // 자연어 파싱 + 매칭
   const parsedNL = useMemo(() => parseNaturalQuery(searchTerm), [searchTerm]);
   const hasNL = useMemo(() => !!parsedNL && !parsedNL.__isEmpty, [parsedNL]);
 
@@ -428,9 +428,7 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
   const visible = useMemo(() => {
     if (!searchTerm.trim()) return [];
     if (looksLikeAdvanced) return advancedResults;
-    // 자연어에 '의미 있는 제약'이 있으면 NL 우선
     if (hasNL && nlResults.length) return nlResults;
-    // 그 외에는 기존 고급/부분일치로 폴백
     return advancedResults;
   }, [searchTerm, looksLikeAdvanced, hasNL, nlResults, advancedResults]);
 
@@ -505,7 +503,7 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
   const now = useMemo(() => new Date(), []);
   const threeMonthsAgo = useMemo(() => { const d = new Date(now); d.setMonth(d.getMonth() - 3); return d; }, [now]);
 
-  // 추천 목록 계산
+  // 추천 목록
   const recommended = useMemo(() => {
     const scoreOf = (p) => {
       const last = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
@@ -585,7 +583,7 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
     }
   }, [profiles, activeFilter]);
 
-  // ✅ 액션 핸들러 (카드 좌하단 버튼용)
+  // 액션 (카드 좌하단 버튼)
   const handleConfirm = async (p) => {
     await onUpdate(p.id, { lastReviewedDate: new Date().toISOString(), snoozeUntil: null });
   };
@@ -674,6 +672,7 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
 
       {activeSub === 'graphs' && (
         <>
+          {/* 그래프 섹션들 (생략 없이 그대로 유지) */}
           <section className="bg-white p-6 rounded-xl shadow-md">
             <h2 className="text-xl font-bold text-gray-800 mb-4">우선순위별 분포</h2>
             <ResponsiveContainer width="100%" height={300}>
@@ -999,9 +998,11 @@ export default function App() {
   const [activeColRef, setActiveColRef] = useState(null);
   const [dataReady, setDataReady] = useState(false);
 
+  // ✅ 모달 상태
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailProfile, setDetailProfile] = useState(null);
 
+  // ✅ 모달 열기 콜백 (MeetingsPage에 넘겨줍니다)
   const openProfileDetailById = (id) => {
     const p = profiles.find((x) => x.id === id);
     if (p) {
@@ -1244,14 +1245,14 @@ export default function App() {
 
   const profilesWithHelpers = useMemo(() => profiles, [profiles]);
 
-  // ✅ 조기 return보다 위에서 파생값 선언 (useMemo 포함)
+  // 파생값
   const totalCount = profiles.length;
   const meetingCount = useMemo(
     () => profiles.filter(p => !!p.eventDate).length,
     [profiles]
   );
 
-  // URL 파라미터로 상세보기 분기
+  // URL 파라미터 상세보기
   function ProfileDetailView({ profileId, accessCode }) {
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -1347,7 +1348,8 @@ export default function App() {
       );
     }
     if (activeMain === 'meetings') {
-      return <MeetingsPage profiles={profilesWithHelpers} />;
+      // ✅ 모달 열기 콜백 연결!
+      return <MeetingsPage profiles={profilesWithHelpers} onOpenDetail={openProfileDetailById} />;
     }
     if (activeMain === 'manage') {
       return (
@@ -1382,7 +1384,7 @@ export default function App() {
         />
       )}
 
-      {/* 상단 헤더: 타이틀 + 카운트 박스 포함 */}
+      {/* 상단 헤더 */}
       <header className="px-4 sm:px-6 py-3 border-b bg-white sticky top-0 z-20">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -1411,7 +1413,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* 카운트 박스 (헤더 안) */}
+        {/* 카운트 박스 */}
         <div className="mt-3 flex items-center gap-4">
           <div className="bg-white p-4 rounded-xl shadow-sm border">
             <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
@@ -1442,7 +1444,6 @@ export default function App() {
             </button>
             <button onClick={()=>{ setActiveMain('meetings'); setFunctionsOpen(false); }}
               className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='meetings'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-              {/* lucide-react의 Calendar 아이콘을 이미 상단에서 import하고 있다면 재사용됩니다 */}
               <Calendar size={16}/> 미팅 데이터
             </button>
 
@@ -1452,11 +1453,11 @@ export default function App() {
               <span className="flex items-center gap-2"><Sparkles size={16}/> Functions</span>
               <ChevronDown className={`w-4 h-4 transition-transform ${functionsOpen ? 'rotate-180' : ''}`} />
             </button>
-            {/* 하위 탭: 열렸을 때만 노출, 동일 폰트/사이즈, 아이콘 포함 */}
+
             {functionsOpen && (
               <div className="pl-4 space-y-1">
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('rec'); }}
-                  className={`w-full flex items녀-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
                   <Sparkles size={16}/> 추천
                 </button>
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('long'); }}
@@ -1491,32 +1492,33 @@ export default function App() {
         </main>
       </div>
 
-    {detailOpen && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center">
-        <div className="absolute inset-0 bg-black/40" onClick={() => setDetailOpen(false)} />
-        <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-auto p-6">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-lg font-bold text-gray-800">
-              {detailProfile?.name || '프로필'}
-            </h3>
-            <button onClick={() => setDetailOpen(false)} className="text-gray-500 hover:text-gray-800">
-              <X size={20} />
-            </button>
+      {/* 상세 모달 */}
+      {detailOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setDetailOpen(false)} />
+          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-auto p-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-bold text-gray-800">
+                {detailProfile?.name || '프로필'}
+              </h3>
+              <button onClick={() => setDetailOpen(false)} className="text-gray-500 hover:text-gray-800">
+                <X size={20} />
+              </button>
+            </div>
+            {detailProfile && (
+              <ProfileCard
+                profile={detailProfile}
+                onUpdate={handleUpdate}
+                onDelete={handleDeleteRequest}
+                accessCode={accessCode}
+                onSyncOne={handleSyncOneToCalendar}
+                onShowSimilar={openSimilarModal}
+                onToggleStar={(id, val) => handleUpdate(id, { starred: !!val })}
+              />
+            )}
           </div>
-          {detailProfile && (
-            <ProfileCard
-              profile={detailProfile}
-              onUpdate={handleUpdate}
-              onDelete={handleDeleteRequest}
-              accessCode={accessCode}
-              onSyncOne={handleSyncOneToCalendar}
-              onShowSimilar={openSimilarModal}
-              onToggleStar={(id, val) => handleUpdate(id, { starred: !!val })}
-            />
-          )}
         </div>
-      </div>
-    )}
+      )}
 
       {/* 유사도 모달 */}
       {similarOpen && (
