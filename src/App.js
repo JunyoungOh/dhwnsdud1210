@@ -25,6 +25,9 @@ import {
 import { parseNaturalQuery, matchProfileWithNL } from './utils/nlp';
 import { MeetingsPage } from './utils/meetings';
 
+import AuthGate, { useUserCtx } from './auth/AuthGate';
+import UserAdmin from './admin/UserAdmin';
+
 // ============ 환경 변수 ============
 const GOOGLE_API_KEY   = process.env.REACT_APP_GOOGLE_API_KEY;
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
@@ -1058,14 +1061,10 @@ export default function App() {
     };
   }, []);
 
-  // --- Firebase Auth ---
+  // --- Firebase Auth (이메일/비번 기반, 익명 로그인 제거) ---
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
-      if (user) setAuthStatus('authenticated');
-      else {
-        try { await signInAnonymously(auth); setAuthStatus('authenticated'); }
-        catch (e) { console.error("Firebase 익명 로그인 오류:", e); setAuthStatus('error'); }
-      }
+      setAuthStatus(user ? 'authenticated' : 'unauthenticated');
     });
     return () => unsub();
   }, []);
@@ -1362,6 +1361,10 @@ export default function App() {
         />
       );
     }
+    if (activeMain === 'admin') {
+      return <UserAdmin />;
+    }
+
     // functions
     return (
       <FunctionsPage
@@ -1375,6 +1378,13 @@ export default function App() {
   };
 
   return (
+    <AuthGate>
+      {profileIdFromUrl && accessCodeFromUrl ? (
+        <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />
+      ) : !accessCode ? (
+        <LoginScreen onLogin={handleLogin} authStatus={authStatus} />
+      ) : (
+
     <div className="bg-gray-50 min-h-screen font-sans">
       {showDeleteConfirm.show && (
         <ConfirmationModal
@@ -1412,6 +1422,9 @@ export default function App() {
               className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center"><LogOut className="w-4 h-4 mr-1.5" /> 로그아웃</button>
           </div>
         </div>
+     )}
+   </AuthGate
+ );
 
         {/* 카운트 박스 */}
         <div className="mt-3 flex items-center gap-4">
@@ -1475,6 +1488,18 @@ export default function App() {
               className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='manage'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
               <Users size={16}/> 프로필 관리
             </button>
+
+            {/* 관리자 전용: 사용자 관리 */}
+            {(() => {
+              const ctx = useUserCtx?.();
+              if (!ctx?.isAdmin) return null;
+              return (
+                <button onClick={()=>{ setActiveMain('admin'); setFunctionsOpen(false); }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='admin'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+                  <Users size={16}/> 사용자 관리
+                </button>
+              );
+            })()}
           </nav>
         </aside>
 
