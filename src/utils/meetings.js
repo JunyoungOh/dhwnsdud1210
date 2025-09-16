@@ -1,187 +1,180 @@
-// utils/meetings.js
-// 회의(미팅) 기록 파싱 & "미팅 데이터" 표 구성 유틸 + (선택) MeetingsPage 컴포넌트
+// src/utils/meetings.js
+import React, { useMemo } from 'react';
 
-import React from 'react';
-
-/** 날짜 포맷: Date -> 'YYYY-MM-DD' */
-export function formatYMD(d) {
-  if (!d || isNaN(d.getTime())) return '';
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-/**
- * 괄호 안 날짜 파싱
- * 허용 예: (25.08.14), (25.12), (2024.7.3), (2024.12)
- * - YY면 2000 + YY 로 가정
- * - 일이 없으면 1일로 보정
- */
-export function parseParenthesizedDate(str) {
-  if (!str) return null;
-  // 괄호 안 마지막 패턴만 사용 (우측의 시일)
-  const matches = [...str.matchAll(/\(([^)]*)\)/g)];
-  if (!matches.length) return null;
-
-  const last = matches[matches.length - 1][1]; // 괄호 안 내용
-  const m = last.match(/^\s*(\d{2}|\d{4})\.(\d{1,2})(?:\.(\d{1,2}))?\s*$/);
-  if (!m) return null;
-
-  let year = Number(m[1]);
-  const month = Number(m[2]);
-  const day = m[3] ? Number(m[3]) : 1;
-
-  if (year < 100) year = 2000 + year; // 2자리 연도 보정
-  if (month < 1 || month > 12) return null;
-  if (day < 1 || day > 31) return null;
-
-  const d = new Date(year, month - 1, day);
-  if (isNaN(d.getTime())) return null;
-  return d;
-}
-
-/** 한 줄 문자열이 '팀' 키워드 포함 여부 */
-function hasTeamKeyword(line) {
-  if (!line) return false;
-  // '팀', '팀황', '팀 미팅', '팀 디너' 등 모두 포함
-  return /팀/.test(line);
-}
-
-/** 한 줄 문자열이 '케이' 키워드 포함 여부 */
-function hasKKeyword(line) {
-  if (!line) return false;
-  // '케이', '케이 미팅', '케이 콜' 등 모두 포함
-  return /케이/.test(line);
-}
-
-/**
- * 미팅 기록 텍스트에서 특정 키워드를 포함하는 라인의 가장 최신(우측 괄호 기준) 날짜를 찾음
- * @param {string} recordText 전체 미팅 기록 (멀티라인)
- * @param {'team'|'k'|'any'} mode
- * @returns {Date|null}
- */
-export function findLatestByKeyword(recordText, mode = 'any') {
-  if (!recordText) return null;
-  const lines = recordText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-
-  let latest = null;
-  for (const line of lines) {
-    const include =
-      mode === 'team' ? hasTeamKeyword(line) :
-      mode === 'k'    ? hasKKeyword(line)    :
-      true;
-
-    if (!include) continue;
-
-    const d = parseParenthesizedDate(line);
-    if (d && (!latest || d > latest)) latest = d;
-  }
-  return latest;
-}
-
-/**
- * (빌드 오류 해결용) 외부에서 import 하는 함수 이름을 맞춰서 export
- * - recordText 안에서 팀/케이 관련 최신 날짜를 뽑아 반환
- * - 사용처가 달라도 안전하게 쓰도록 넓은 형태로 제공
- * @param {string} recordText
- * @returns {{ teamLatest: Date|null, kLatest: Date|null, anyLatest: Date|null }}
- */
-export function extractMeetingDates(recordText) {
-  const teamLatest = findLatestByKeyword(recordText, 'team');
-  const kLatest    = findLatestByKeyword(recordText, 'k');
-  const anyLatest  = findLatestByKeyword(recordText, 'any');
-  return { teamLatest, kLatest, anyLatest };
-}
-
-/** 경력 텍스트에서 첫 줄의 첫 단어 */
-export function firstWordOfCareer(career) {
-  if (!career) return '';
-  const firstLine = career.split(/\r?\n/)[0] || '';
-  const firstWord = (firstLine.trim().split(/\s+/)[0] || '').replace(/[^\p{L}\p{N}._-]/gu, '');
+/** 첫 줄의 첫 단어 (현경력 칸에 사용) */
+function firstWordOfFirstLine(text = '') {
+  const firstLine = String(text || '').split('\n')[0] || '';
+  const firstWord = firstLine.trim().split(/\s+/)[0] || '';
   return firstWord;
 }
 
-/**
- * 표 데이터를 구성
- * 요구 컬럼:
- * - 이름
- * - 현경력(첫줄 첫단어)
- * - 최근 팀황 미팅 (팀 키워드 포함 라인 중 가장 최신)
- * - 최근 케이 미팅 (케이 키워드 포함 라인 중 가장 최신)
- * - 우선순
- * - 전체 미팅 히스토리 (원본 텍스트)
- *
- * 정렬: 최근 미팅일 내림차순
- */
-export function makeMeetingRows(profiles) {
-  const rows = profiles
-    .map(p => {
-      const teamDate = findLatestByKeyword(p.meetingRecord || '', 'team');
-      const  kDate   = findLatestByKeyword(p.meetingRecord || '', 'k');
-      // 전체 최신 (팀/케이 중 더 최신) — 없으면 null
-      const latest = teamDate && kDate ? (teamDate > kDate ? teamDate : kDate)
-                    : teamDate || kDate || null;
+/** (YY.MM.DD) / (YY.MM) / (YYYY-MM-DD) 등 다양한 토큰 파싱 */
+function parseDateToken(raw = '') {
+  const token = String(raw).trim();
+  // 2025-08-14
+  let m = token.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) {
+    const y = parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10);
+    const d = parseInt(m[3], 10);
+    return { year: y, month: mo, day: d, partial: false };
+  }
+  // 2025.08.14 or 25.08.14
+  m = token.match(/^(\d{2,4})\.(\d{1,2})\.(\d{1,2})$/);
+  if (m) {
+    let y = parseInt(m[1], 10);
+    if (y < 100) y = 2000 + y; // 2자리 연도 → 20xx 가정
+    const mo = parseInt(m[2], 10);
+    const d = parseInt(m[3], 10);
+    return { year: y, month: mo, day: d, partial: false };
+  }
+  // 2025.08 or 25.08 (월만 있는 경우)
+  m = token.match(/^(\d{2,4})\.(\d{1,2})$/);
+  if (m) {
+    let y = parseInt(m[1], 10);
+    if (y < 100) y = 2000 + y;
+    const mo = parseInt(m[2], 10);
+    return { year: y, month: mo, day: 1, partial: true };
+  }
+  return null;
+}
 
-      return {
-        id: p.id,
-        name: p.name || '',
-        careerFirstWord: firstWordOfCareer(p.career || ''),
-        teamLatestStr: formatYMD(teamDate),
-        kLatestStr: formatYMD(kDate),
-        priority: p.priority || '',
-        history: p.meetingRecord || '',
-        latestDate: latest, // 정렬용
-      };
-    })
-    .filter(r => r.history && (r.teamLatestStr || r.kLatestStr || r.history.trim().length > 0))
-    .sort((a, b) => {
-      const ad = a.latestDate ? a.latestDate.getTime() : 0;
-      const bd = b.latestDate ? b.latestDate.getTime() : 0;
-      return bd - ad; // 최신이 위로
-    });
+/** Date 및 라벨 생성 (일 미기재 시 1일로 가정해서 정렬에 사용, 라벨은 "YYYY년 M월") */
+function toDateAndLabel(parsed) {
+  if (!parsed) return null;
+  const { year, month, day, partial } = parsed;
+  const date = new Date(year, month - 1, day || 1);
+  const label = partial
+    ? `${year}년 ${month}월`
+    : `${year}년 ${month}월 ${day}일`;
+  return { date, label, partial };
+}
 
-  return rows;
+/** 한 줄에서 괄호 안의 모든 날짜 토큰을 추출하고 가장 최신(큰) 날짜 반환 */
+function extractLatestDateFromLine(line = '') {
+  const tokens = [];
+  const regex = /\(([^)]+)\)/g;
+  let m;
+  while ((m = regex.exec(line)) !== null) {
+    const p = parseDateToken(m[1]);
+    if (p) {
+      const info = toDateAndLabel(p);
+      if (info) tokens.push(info);
+    }
+  }
+  if (tokens.length === 0) return null;
+  tokens.sort((a, b) => b.date - a.date);
+  return tokens[0];
 }
 
 /**
- * (선택) 표를 바로 렌더링하고 싶을 때 사용할 수 있는 컴포넌트
- * App.js에서 `<MeetingsPage profiles={profiles} />`로 사용 가능
+ * 미팅 기록에서 팀/케이 관련 최신 날짜와 전체 최신 날짜를 뽑습니다.
+ * - team: "팀" 이 포함된 라인들
+ * - kay : "케이" 가 포함된 라인들
  */
-export function MeetingsPage({ profiles }) {
-  const rows = makeMeetingRows(profiles || []);
+export function extractMeetingDates(meetingRecord = '') {
+  const lines = String(meetingRecord || '').split('\n').map(s => s.trim()).filter(Boolean);
+
+  let latestTeam = null;
+  let latestKay = null;
+  let overallLatest = null;
+
+  for (const line of lines) {
+    const latestInLine = extractLatestDateFromLine(line);
+    if (latestInLine) {
+      if (!overallLatest || latestInLine.date > overallLatest.date) overallLatest = latestInLine;
+    }
+    // 팀 계열
+    if (line.includes('팀')) {
+      const t = extractLatestDateFromLine(line);
+      if (t && (!latestTeam || t.date > latestTeam.date)) latestTeam = t;
+    }
+    // 케이 계열
+    if (line.includes('케이')) {
+      const k = extractLatestDateFromLine(line);
+      if (k && (!latestKay || k.date > latestKay.date)) latestKay = k;
+    }
+  }
+
+  return { latestTeam, latestKay, overallLatest };
+}
+
+/** 테이블용 행 생성 */
+function buildRowsFromProfiles(profiles = []) {
+  const rows = [];
+
+  for (const p of profiles) {
+    if (!p.meetingRecord) continue; // 미팅 기록이 있는 프로필만
+    const { latestTeam, latestKay, overallLatest } = extractMeetingDates(p.meetingRecord);
+    const newest = latestTeam?.date || latestKay?.date || overallLatest?.date || null;
+
+    rows.push({
+      id: p.id,
+      name: p.name || '',
+      current: firstWordOfFirstLine(p.career || ''),
+      latestTeamLabel: latestTeam?.label || '',
+      latestKayLabel: latestKay?.label || '',
+      priority: p.priority || '',
+      history: p.meetingRecord || '',
+      sortDate: newest ? newest.getTime() : 0
+    });
+  }
+
+  // 최근일 순으로 내림차순 정렬
+  rows.sort((a, b) => b.sortDate - a.sortDate);
+  return rows;
+}
+
+/** 미팅 데이터 페이지 */
+export function MeetingsPage({ profiles = [], onNameClick }) {
+  const rows = useMemo(() => buildRowsFromProfiles(profiles), [profiles]);
 
   return (
-    <div className="bg-white rounded-xl shadow-md p-4">
+    <section className="bg-white p-6 rounded-xl shadow-md">
       <h2 className="text-xl font-bold mb-4">미팅 데이터</h2>
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
+
+      <div className="overflow-auto">
+        <table className="min-w-[900px] w-full text-sm">
           <thead>
-            <tr className="text-left border-b">
-              <th className="py-2 pr-4">이름</th>
-              <th className="py-2 pr-4">현경력</th>
-              <th className="py-2 pr-4">최근 팀황 미팅</th>
-              <th className="py-2 pr-4">최근 케이 미팅</th>
-              <th className="py-2 pr-4">우선순</th>
-              <th className="py-2">전체 미팅 히스토리</th>
+            <tr className="bg-gray-50 text-gray-700">
+              <th className="px-3 py-2 text-left font-semibold">이름</th>
+              <th className="px-3 py-2 text-left font-semibold">현경력</th>
+              <th className="px-3 py-2 text-left font-semibold">최근 팀황 미팅</th>
+              <th className="px-3 py-2 text-left font-semibold">최근 케이 미팅</th>
+              <th className="px-3 py-2 text-left font-semibold">우선순</th>
+              <th className="px-3 py-2 text-left font-semibold">전체 미팅 히스토리</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr><td colSpan={6} className="py-6 text-center text-gray-500">표시할 미팅 기록이 없습니다.</td></tr>
-            ) : rows.map(r => (
-              <tr key={r.id} className="border-b align-top">
-                <td className="py-2 pr-4 font-medium">{r.name}</td>
-                <td className="py-2 pr-4">{r.careerFirstWord}</td>
-                <td className="py-2 pr-4">{r.teamLatestStr || '-'}</td>
-                <td className="py-2 pr-4">{r.kLatestStr || '-'}</td>
-                <td className="py-2 pr-4">{r.priority || '-'}</td>
-                <td className="py-2 whitespace-pre-wrap">{r.history}</td>
+              <tr>
+                <td colSpan={6} className="px-3 py-8 text-center text-gray-500">
+                  미팅 기록이 있는 프로필이 없습니다.
+                </td>
               </tr>
-            ))}
+            ) : (
+              rows.map((r) => (
+                <tr key={r.id} className="border-b last:border-0 hover:bg-yellow-50/50">
+                  <td className="px-3 py-2">
+                    <button
+                      type="button"
+                      onClick={() => onNameClick && onNameClick(r.id)}
+                      className="text-blue-600 hover:underline"
+                    >
+                      {r.name}
+                    </button>
+                  </td>
+                  <td className="px-3 py-2">{r.current}</td>
+                  <td className="px-3 py-2">{r.latestTeamLabel}</td>
+                  <td className="px-3 py-2">{r.latestKayLabel}</td>
+                  <td className="px-3 py-2">{r.priority}</td>
+                  <td className="px-3 py-2 whitespace-pre-wrap text-gray-700">{r.history}</td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
-    </div>
+    </section>
   );
 }
