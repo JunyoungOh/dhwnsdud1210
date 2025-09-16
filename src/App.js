@@ -1003,9 +1003,13 @@ export default function App() {
   const [detailProfile, setDetailProfile] = useState(null);
 
   const openProfileDetailById = (id) => {
-  const p = profiles.find(x => x.id === id);
-  if (p) { setDetailProfile(p); setDetailOpen(true); }
+    const p = profiles.find((x) => x.id === id);
+    if (p) {
+      setDetailProfile(p);
+      setDetailOpen(true);
+    }
   };
+
   // --- 외부 스크립트 로드 (XLSX, gapi, gis) ---
   useEffect(() => {
     const xlsx = document.createElement('script');
