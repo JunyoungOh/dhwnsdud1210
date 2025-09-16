@@ -1,177 +1,143 @@
 // src/utils/meetings.js
 import React, { useMemo } from 'react';
 
-/** 첫 줄의 첫 단어 (현경력 칸에 사용) */
-function firstWordOfFirstLine(text = '') {
-  const firstLine = String(text || '').split('\n')[0] || '';
-  const firstWord = firstLine.trim().split(/\s+/)[0] || '';
-  return firstWord;
+// (yy.mm.dd), (yy.mm), (yy) 를 파싱해서 비교용 숫자 키와 표시 문자열을 반환
+function parseKoreanPartialDate(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim().replace(/[()\s]/g, '');
+  const mFull = s.match(/^(\d{2})\.(\d{1,2})\.(\d{1,2})$/);   // 25.08.14
+  const mYM   = s.match(/^(\d{2})\.(\d{1,2})$/);              // 25.12
+  const mY    = s.match(/^(\d{2})$/);                         // 25
+
+  let y, mo = 1, d = 1, label = '';
+  if (mFull) {
+    y = 2000 + Number(mFull[1]); mo = Number(mFull[2]); d = Number(mFull[3]);
+    label = `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  } else if (mYM) {
+    y = 2000 + Number(mYM[1]); mo = Number(mYM[2]);
+    label = `${y}-${String(mo).padStart(2,'0')}`;
+  } else if (mY) {
+    y = 2000 + Number(mY[1]);
+    label = `${y}`;
+  } else {
+    return null;
+  }
+  // 비교용 키(YYYYMMDD) — 없는 부분은 01로 보정
+  const key = y * 10000 + (mo || 1) * 100 + (d || 1);
+  return { key, label, year: y, month: mo, day: d };
 }
 
-/** (YY.MM.DD) / (YY.MM) / (YYYY-MM-DD) 등 다양한 토큰 파싱 */
-function parseDateToken(raw = '') {
-  const token = String(raw).trim();
-  // 2025-08-14
-  let m = token.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (m) {
-    const y = parseInt(m[1], 10);
-    const mo = parseInt(m[2], 10);
-    const d = parseInt(m[3], 10);
-    return { year: y, month: mo, day: d, partial: false };
-  }
-  // 2025.08.14 or 25.08.14
-  m = token.match(/^(\d{2,4})\.(\d{1,2})\.(\d{1,2})$/);
-  if (m) {
-    let y = parseInt(m[1], 10);
-    if (y < 100) y = 2000 + y; // 2자리 연도 → 20xx 가정
-    const mo = parseInt(m[2], 10);
-    const d = parseInt(m[3], 10);
-    return { year: y, month: mo, day: d, partial: false };
-  }
-  // 2025.08 or 25.08 (월만 있는 경우)
-  m = token.match(/^(\d{2,4})\.(\d{1,2})$/);
-  if (m) {
-    let y = parseInt(m[1], 10);
-    if (y < 100) y = 2000 + y;
-    const mo = parseInt(m[2], 10);
-    return { year: y, month: mo, day: 1, partial: true };
-  }
-  return null;
+// 한 줄에서 괄호 안 날짜 텍스트 추출
+function pickParenDate(line) {
+  const m = line.match(/\(([^\)]+)\)/);
+  return m ? m[1] : null;
 }
 
-/** Date 및 라벨 생성 (일 미기재 시 1일로 가정해서 정렬에 사용, 라벨은 "YYYY년 M월") */
-function toDateAndLabel(parsed) {
-  if (!parsed) return null;
-  const { year, month, day, partial } = parsed;
-  const date = new Date(year, month - 1, day || 1);
-  const label = partial
-    ? `${year}년 ${month}월`
-    : `${year}년 ${month}월 ${day}일`;
-  return { date, label, partial };
-}
+// “팀”계열 / “케이”계열 최근 일자와 전체 텍스트를 뽑기
+export function extractMeetingDates(text) {
+  if (!text) return { latestTeam: null, latestK: null, allText: '' };
+  const lines = String(text).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
 
-/** 한 줄에서 괄호 안의 모든 날짜 토큰을 추출하고 가장 최신(큰) 날짜 반환 */
-function extractLatestDateFromLine(line = '') {
-  const tokens = [];
-  const regex = /\(([^)]+)\)/g;
-  let m;
-  while ((m = regex.exec(line)) !== null) {
-    const p = parseDateToken(m[1]);
-    if (p) {
-      const info = toDateAndLabel(p);
-      if (info) tokens.push(info);
-    }
-  }
-  if (tokens.length === 0) return null;
-  tokens.sort((a, b) => b.date - a.date);
-  return tokens[0];
-}
-
-/**
- * 미팅 기록에서 팀/케이 관련 최신 날짜와 전체 최신 날짜를 뽑습니다.
- * - team: "팀" 이 포함된 라인들
- * - kay : "케이" 가 포함된 라인들
- */
-export function extractMeetingDates(meetingRecord = '') {
-  const lines = String(meetingRecord || '').split('\n').map(s => s.trim()).filter(Boolean);
-
-  let latestTeam = null;
-  let latestKay = null;
-  let overallLatest = null;
+  let bestTeam = null;
+  let bestK = null;
 
   for (const line of lines) {
-    const latestInLine = extractLatestDateFromLine(line);
-    if (latestInLine) {
-      if (!overallLatest || latestInLine.date > overallLatest.date) overallLatest = latestInLine;
+    const dateRaw = pickParenDate(line);
+    const parsed = parseKoreanPartialDate(dateRaw);
+    if (!parsed) continue;
+
+    const hasTeam = /팀/.test(line);  // '팀', '팀황' 등 포함
+    const hasK    = /케이/.test(line); // '케이' 포함
+
+    if (hasTeam) {
+      if (!bestTeam || parsed.key > bestTeam.key) bestTeam = parsed;
     }
-    // 팀 계열
-    if (line.includes('팀')) {
-      const t = extractLatestDateFromLine(line);
-      if (t && (!latestTeam || t.date > latestTeam.date)) latestTeam = t;
-    }
-    // 케이 계열
-    if (line.includes('케이')) {
-      const k = extractLatestDateFromLine(line);
-      if (k && (!latestKay || k.date > latestKay.date)) latestKay = k;
+    if (hasK) {
+      if (!bestK || parsed.key > bestK.key) bestK = parsed;
     }
   }
 
-  return { latestTeam, latestKay, overallLatest };
+  return {
+    latestTeam: bestTeam ? bestTeam.label : '',
+    latestK:    bestK ? bestK.label : '',
+    allText: text,
+  };
 }
 
-/** 테이블용 행 생성 */
-function buildRowsFromProfiles(profiles = []) {
-  const rows = [];
-
-  for (const p of profiles) {
-    if (!p.meetingRecord) continue; // 미팅 기록이 있는 프로필만
-    const { latestTeam, latestKay, overallLatest } = extractMeetingDates(p.meetingRecord);
-    const newest = latestTeam?.date || latestKay?.date || overallLatest?.date || null;
-
-    rows.push({
-      id: p.id,
-      name: p.name || '',
-      current: firstWordOfFirstLine(p.career || ''),
-      latestTeamLabel: latestTeam?.label || '',
-      latestKayLabel: latestKay?.label || '',
-      priority: p.priority || '',
-      history: p.meetingRecord || '',
-      sortDate: newest ? newest.getTime() : 0
-    });
-  }
-
-  // 최근일 순으로 내림차순 정렬
-  rows.sort((a, b) => b.sortDate - a.sortDate);
-  return rows;
+// 경력 첫 줄의 첫 단어 추출
+function firstWordOfFirstCareerLine(career) {
+  if (!career) return '';
+  const firstLine = String(career).split(/\r?\n/)[0] || '';
+  const word = firstLine.trim().split(/\s+/)[0] || '';
+  return word;
 }
 
-/** 미팅 데이터 페이지 */
-export function MeetingsPage({ profiles = [], onNameClick }) {
-  const rows = useMemo(() => buildRowsFromProfiles(profiles), [profiles]);
+// 목록 표 컴포넌트
+export function MeetingsPage({ profiles, onOpenDetail }) {
+  // 미팅 기록이 있는 프로필만 대상으로 가공
+  const rows = useMemo(() => {
+    const list = [];
+    for (const p of profiles) {
+      if (!p.meetingRecord || !String(p.meetingRecord).trim()) continue;
+      const ex = extractMeetingDates(p.meetingRecord);
+      // 정렬을 위해 team/k 중 더 최근 키를 구함
+      const tKey = ex.latestTeam ? parseKoreanPartialDate(ex.latestTeam.replace(/-/g,'.'))?.key : null;
+      const kKey = ex.latestK    ? parseKoreanPartialDate(ex.latestK.replace(/-/g,'.'))?.key : null;
+      const sortKey = Math.max(tKey || 0, kKey || 0);
+
+      list.push({
+        id: p.id,
+        name: p.name || '',
+        careerHead: firstWordOfFirstCareerLine(p.career),
+        latestTeam: ex.latestTeam || '',
+        latestK: ex.latestK || '',
+        priority: p.priority || '',
+        allText: ex.allText || '',
+        sortKey,
+      });
+    }
+    // 최근일수록 위로
+    return list.sort((a,b) => (b.sortKey||0) - (a.sortKey||0));
+  }, [profiles]);
 
   return (
     <section className="bg-white p-6 rounded-xl shadow-md">
       <h2 className="text-xl font-bold mb-4">미팅 데이터</h2>
-
-      <div className="overflow-auto">
-        <table className="min-w-[900px] w-full text-sm">
-          <thead>
-            <tr className="bg-gray-50 text-gray-700">
-              <th className="px-3 py-2 text-left font-semibold">이름</th>
-              <th className="px-3 py-2 text-left font-semibold">현경력</th>
-              <th className="px-3 py-2 text-left font-semibold">최근 팀황 미팅</th>
-              <th className="px-3 py-2 text-left font-semibold">최근 케이 미팅</th>
-              <th className="px-3 py-2 text-left font-semibold">우선순</th>
-              <th className="px-3 py-2 text-left font-semibold">전체 미팅 히스토리</th>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50">
+            <tr className="text-left text-gray-600">
+              <th className="px-3 py-2">이름</th>
+              <th className="px-3 py-2">현경력</th>
+              <th className="px-3 py-2">최근 팀황 미팅</th>
+              <th className="px-3 py-2">최근 케이 미팅</th>
+              <th className="px-3 py-2">우선순</th>
+              <th className="px-3 py-2">전체 미팅 히스토리</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-gray-500">
-                  미팅 기록이 있는 프로필이 없습니다.
-                </td>
+                <td colSpan={6} className="px-3 py-6 text-center text-gray-400">표시할 미팅 데이터가 없습니다.</td>
               </tr>
-            ) : (
-              rows.map((r) => (
-                <tr key={r.id} className="border-b last:border-0 hover:bg-yellow-50/50">
-                  <td className="px-3 py-2">
-                    <button
-                      type="button"
-                      onClick={() => onNameClick && onNameClick(r.id)}
-                      className="text-blue-600 hover:underline"
-                    >
-                      {r.name}
-                    </button>
-                  </td>
-                  <td className="px-3 py-2">{r.current}</td>
-                  <td className="px-3 py-2">{r.latestTeamLabel}</td>
-                  <td className="px-3 py-2">{r.latestKayLabel}</td>
-                  <td className="px-3 py-2">{r.priority}</td>
-                  <td className="px-3 py-2 whitespace-pre-wrap text-gray-700">{r.history}</td>
-                </tr>
-              ))
-            )}
+            ) : rows.map(r => (
+              <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
+                <td className="px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onOpenDetail?.(r.id); }}
+                    className="text-blue-600 hover:underline font-medium"
+                  >
+                    {r.name}
+                  </button>
+                </td>
+                <td className="px-3 py-2 text-gray-700">{r.careerHead}</td>
+                <td className="px-3 py-2">{r.latestTeam || '-'}</td>
+                <td className="px-3 py-2">{r.latestK || '-'}</td>
+                <td className="px-3 py-2">{r.priority || '-'}</td>
+                <td className="px-3 py-2 whitespace-pre-wrap text-gray-600">{r.allText}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
