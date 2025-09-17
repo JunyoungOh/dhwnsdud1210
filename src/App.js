@@ -1,4 +1,4 @@
-/* ===== App.js (업데이트 전체본) ===== */
+/* ===== App.js (패치 적용 완전체) ===== */
 import React, { useEffect, useState, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
@@ -81,30 +81,54 @@ const TZ = 'Asia/Seoul';
 const COLORS = ['#FFBB28', '#FF8042', '#00C49F', '#8884D8', '#FF4444', '#82ca9d'];
 const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아한형제들', '당근', '토스'];
 
-/* === 관리자 여부 공용 훅: 컨텍스트 → Firestore(users/{uid}) 순서로 확인 === */
+/* === 관리자 여부 공용 훅 (개선본) ===
+   - onAuthStateChanged로 uid 추적
+   - users/{uid} 실시간 구독
+   - 컨텍스트 플래그와 병합
+   - isLoading을 노출하여 버튼/페이지 제어 용이
+*/
 function useIsAdmin() {
   const ctx = useUserCtx?.();
-  const [isAdmin, setIsAdmin] = React.useState(!!(ctx?.isAdmin || ctx?.profile?.isAdmin));
 
-  // 컨텍스트 값이 바뀌면 즉시 반영
-  React.useEffect(() => {
-    setIsAdmin(!!(ctx?.isAdmin || ctx?.profile?.isAdmin));
-  }, [ctx]);
+  const [uid, setUid] = React.useState(null);
+  const [fireAdmin, setFireAdmin] = React.useState(null); // null=미확인, true/false=판정
+  const [err, setErr] = React.useState('');
 
-  // 컨텍스트가 false/undefined면 Firestore users/{uid} 보조 확인
+  // 로그인 상태 추적
   React.useEffect(() => {
-    if (isAdmin) return;
-    const u = auth.currentUser;
-    if (!u) return;
-    const ref = doc(db, 'users', u.uid);
-    const unsub = onSnapshot(ref, (snap) => {
-      const v = snap.data()?.isAdmin;
-      setIsAdmin(v === true || v === 'true');
-    }, () => setIsAdmin(false));
+    const off = onAuthStateChanged(auth, (u) => {
+      setUid(u?.uid || null);
+    });
+    return () => off();
+  }, []);
+
+  // users/{uid} 구독
+  React.useEffect(() => {
+    setErr('');
+    if (!uid) { setFireAdmin(null); return; }
+    const ref = doc(db, 'users', uid);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        const v = snap.data()?.isAdmin;
+        setFireAdmin(v === true || v === 'true');
+      },
+      (e) => {
+        setFireAdmin(false);
+        setErr(e?.code ? `${e.code}: ${e.message}` : 'users 문서를 읽을 수 없습니다.');
+      }
+    );
     return () => unsub();
-  }, [isAdmin]);
+  }, [uid]);
 
-  return { isAdmin };
+  // 컨텍스트 플래그
+  const ctxAdmin = !!(ctx?.isAdmin || ctx?.profile?.isAdmin);
+
+  // 최종 판정 + 로딩 상태
+  const isAdmin = Boolean(ctxAdmin || fireAdmin === true);
+  const isLoading = uid === null || (!ctxAdmin && fireAdmin === null);
+
+  return { isAdmin, isLoading, uid, ctxAdmin, fireAdmin, err };
 }
 
 // ============ 유틸 ============
@@ -1037,10 +1061,10 @@ const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, acc
   );
 };
 
-/* === 관리자 버튼: 공용 훅 사용해 간단하게 === */
+/* === 관리자 버튼 (개선본: 로딩 동안/권한 없으면 숨김) === */
 function AdminOnlyButton({ activeMain, setActiveMain, setFunctionsOpen }) {
-  const { isAdmin } = useIsAdmin();
-  if (!isAdmin) return null;
+  const { isAdmin, isLoading } = useIsAdmin();
+  if (isLoading || !isAdmin) return null;
   return (
     <button
       onClick={() => { setActiveMain('admin'); setFunctionsOpen(false); }}
@@ -1087,8 +1111,9 @@ export default function App() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailProfile, setDetailProfile] = useState(null);
 
-  // ✅ 관리자 여부 계산(전역)
-  const { isAdmin } = useIsAdmin();
+  // ✅ 관리자 여부(전역) — probe로 보관해 UserAdmin에 전달
+  const adminProbe = useIsAdmin();
+  const isAdmin = adminProbe.isAdmin;
 
   const openProfileDetailById = (id) => {
     const p = profiles.find((x) => x.id === id);
@@ -1478,9 +1503,8 @@ export default function App() {
       );
     }
     if (activeMain === 'admin') {
-      // ✅ 여기서 App 쪽 판별값을 최우선으로 사용
-      if (!isAdmin) return <div className="text-sm text-red-600">권한이 없습니다.</div>;
-      return <UserAdmin isAdminOverride />;
+      // ✅ App에서 게이트 막지 않음 — 항상 UserAdmin 렌더, probe로 판정/디버그 전달
+      return <UserAdmin probe={adminProbe} />;
     }
     return (
       <FunctionsPage
@@ -1612,7 +1636,7 @@ export default function App() {
                 {functionsOpen && (
                   <div className="pl-4 space-y-1">
                     <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('rec'); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
+                      className={`w-full flex items	center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
                       <Sparkles size={16}/> 추천
                     </button>
                     <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('long'); }}
@@ -1691,7 +1715,7 @@ export default function App() {
           {similarOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center">
               <div className="absolute inset-0 bg-black bg-opacity-40" onClick={()=>setSimilarOpen(false)} />
-              <div className="relative bg-white rounded-XL shadow-2xl w-full max-w-4xl max-h-[85vh] p-6 overflow-hidden">
+              <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] p-6 overflow-hidden">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-lg font-bold text-gray-800">
                     유사 프로필 — <span className="text-yellow-600">{similarBase?.name}</span>
