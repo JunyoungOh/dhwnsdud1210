@@ -1502,10 +1502,17 @@ export default function App() {
         />
       );
     }
-    if (activeMain === 'admin') {
-      // ✅ App에서 게이트 막지 않음 — 항상 UserAdmin 렌더, probe로 판정/디버그 전달
-      return <UserAdmin probe={adminProbe} />;
-    }
+   if (activeMain === 'admin') {
+     // App 최상단에서 이미 선언된 값 사용: const { isAdmin } = useIsAdmin();
+     const probe = { from: 'App', isAdmin, ts: new Date().toISOString() };
+
+     if (!isAdmin) {
+       return <div className="text-sm text-red-600">권한이 없습니다. (App gate)</div>;
+     }
+     // ✅ 반드시 isAdminOverride 전달
+     return <UserAdmin isAdminOverride={isAdmin} probe={probe} />;
+   }
+
     return (
       <FunctionsPage
         activeSub={functionsSub} setActiveSub={setFunctionsSub}
