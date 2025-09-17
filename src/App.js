@@ -6,7 +6,7 @@ import {
 } from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query,
-  updateDoc, writeBatch, getDoc, getDocs, setLogLevel, limit
+  updateDoc, writeBatch, getDoc, getDocs, setLogLevel, limit, setDoc
 } from 'firebase/firestore';
 
 import {
