@@ -1,4 +1,4 @@
-/* ===== admin/UserAdmin.jsx (전체본, auth 구독 + 확실한 판정) ===== */
+/* ===== admin/UserAdmin.jsx (빌드 에러 수정본) ===== */
 import React from 'react';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, onSnapshot } from 'firebase/firestore';
@@ -6,14 +6,16 @@ import { ShieldAlert, Loader2 } from 'lucide-react';
 import { useUserCtx } from '../auth/AuthGate';
 
 export default function UserAdmin() {
-  const ctx = useUserCtx?.();                 // AuthGate 컨텍스트(있으면 최우선)
+  // AuthGate 컨텍스트(있으면 사용)
+  const ctx = typeof useUserCtx === 'function' ? useUserCtx() : null;
+
   const auth = getAuth();
   const db   = getFirestore();
 
   // 컨텍스트 플래그 (불리언/문자열 모두 허용)
   const ctxAdmin = !!(ctx?.isAdmin || ctx?.profile?.isAdmin);
 
-  // 로그인 사용자 구독 (초기 null 문제 해결)
+  // 로그인 사용자 구독
   const [uid, setUid] = React.useState(null);
   const [email, setEmail] = React.useState('');
   React.useEffect(() => {
@@ -32,7 +34,6 @@ export default function UserAdmin() {
 
   React.useEffect(() => {
     if (!uid) {
-      // 로그인 전
       setFireAdmin(null);
       setAdminPath('users / (로그인 필요)');
       setLoadingDoc(false);
@@ -52,21 +53,19 @@ export default function UserAdmin() {
         setLoadingDoc(false);
       },
       (err) => {
-        // 읽기 권한 없음/문서 없음 등
         setFireAdmin(false);
         setLoadingDoc(false);
         setFireErr(err?.code ? `${err.code}: ${err.message}` : 'users 문서를 읽을 수 없습니다.');
-        // 콘솔에도 남겨 디버깅
         console.warn('[UserAdmin] onSnapshot error for users/' + uid, err);
       }
     );
     return () => unsub();
   }, [db, uid]);
 
-  // 최종 관리자 판정 (초기 null일 때는 컨텍스트에만 의존 X)
+  // 최종 관리자 판정
   const finalIsAdmin = Boolean(ctxAdmin || fireAdmin === true);
 
-  // ───────────── 디버그 배너: 항상 표시 ─────────────
+  // 디버그 배너
   const DebugBanner = () => (
     <div className="mb-4 text-xs space-x-2">
       <span className="inline-block bg-blue-50 text-blue-700 border border-blue-200 rounded px-2 py-1">
@@ -76,7 +75,7 @@ export default function UserAdmin() {
         ctx.isAdmin: <b>{String(ctxAdmin)}</b>
       </span>
       <span className="inline-block bg-gray-50 text-gray-700 border border-gray-200 rounded px-2 py-1">
-        users/{'{uid'}} isAdmin: <b>{String(fireAdmin)}</b>
+        users/{'{uid'} isAdmin: <b>{String(fireAdmin)}</b>
       </span>
       <span className="inline-block bg-purple-50 text-purple-700 border border-purple-200 rounded px-2 py-1">
         판정 경로: <span className="font-mono">{adminPath}</span>
@@ -107,14 +106,28 @@ export default function UserAdmin() {
                 <Loader2 className="w-4 h-4 animate-spin" /> 관리자 여부 확인 중...
               </div>
             ) : (
-              <ul className="text-sm text-gray-600 list-disc pl-5 space-y-1">
-                <li>로그인 계정의 <code>users/{'{uid'}}</code> 문서에 <code>isAdmin: true</code> 가 저장되어 있어야 합니다.</li>
-                <li>Firestore 규칙에
-                  <code className="ml-1">match /users/{'{uid'}} {{'{'}} allow read: if request.auth != null &amp;&amp; request.auth.uid == uid; {{'}'}}</code>
-                  가 있어야 합니다.
-                </li>
-                <li>브라우저가 다른 구글 계정으로 로그인되어 있지 않은지 확인해 주세요.</li>
-              </ul>
+              <div className="text-sm text-gray-600 space-y-2">
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>
+                    로그인 계정의 <code>users/&#123;uid&#125;</code> 문서에 <code>isAdmin: true</code> 가 저장되어 있어야 합니다.
+                  </li>
+                  <li>Firestore 규칙 예시:</li>
+                </ul>
+                <pre className="bg-gray-50 rounded border p-2 overflow-x-auto">
+                  <code>{`rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}`}</code>
+                </pre>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>브라우저가 다른 구글 계정으로 로그인되어 있지 않은지 확인해 주세요.</li>
+                </ul>
+              </div>
             )}
           </div>
         </div>
@@ -122,7 +135,7 @@ export default function UserAdmin() {
     );
   }
 
-  // ───────────── 관리자 본문 ─────────────
+  // 관리자 본문
   return (
     <div className="p-6 space-y-4">
       <DebugBanner />
