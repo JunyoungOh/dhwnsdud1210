@@ -51,11 +51,30 @@ const db   = getFirestore(app);
 const auth = getAuth(app);
 setLogLevel('debug');
 
-// 🔎 콘솔 진단용 전역 노출 (임시)
+// === DevTools 진단용 전역 노출 (디버그 전용) ===
 if (typeof window !== 'undefined') {
+  // Firebase 인스턴스
   window.__AUTH__ = auth;
   window.__DB__   = db;
-  window.__FIRE__ = { doc, getDoc, collection, getDocs, query, limit };
+
+  // 모듈식 Firestore 함수들 (이미 import 된 것만!)
+  window.__FIRE__ = {
+    db,
+    auth,
+    doc,
+    collection,
+    getDoc,
+    getDocs,
+    onSnapshot,
+    query,
+    updateDoc,
+    setDoc,
+    addDoc,
+    deleteDoc,
+    writeBatch,
+    limit,
+  };
+  console.log('[debug] window.__FIRE__ ready =', !!window.__FIRE__);
 }
 
 const TZ = 'Asia/Seoul';
