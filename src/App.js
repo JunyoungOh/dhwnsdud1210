@@ -1,4 +1,4 @@
-/* ===== App.js (패치본 전체) ===== */
+/* ===== App.js (업데이트 전체본) ===== */
 import React, { useEffect, useState, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
@@ -54,6 +54,32 @@ setLogLevel('debug');
 const TZ = 'Asia/Seoul';
 const COLORS = ['#FFBB28', '#FF8042', '#00C49F', '#8884D8', '#FF4444', '#82ca9d'];
 const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아한형제들', '당근', '토스'];
+
+/* === 관리자 여부 공용 훅: 컨텍스트 → Firestore(users/{uid}) 순서로 확인 === */
+function useIsAdmin() {
+  const ctx = useUserCtx?.();
+  const [isAdmin, setIsAdmin] = React.useState(!!(ctx?.isAdmin || ctx?.profile?.isAdmin));
+
+  // 컨텍스트 값이 바뀌면 즉시 반영
+  React.useEffect(() => {
+    setIsAdmin(!!(ctx?.isAdmin || ctx?.profile?.isAdmin));
+  }, [ctx]);
+
+  // 컨텍스트가 false/undefined면 Firestore users/{uid} 보조 확인
+  React.useEffect(() => {
+    if (isAdmin) return;
+    const u = auth.currentUser;
+    if (!u) return;
+    const ref = doc(db, 'users', u.uid);
+    const unsub = onSnapshot(ref, (snap) => {
+      const v = snap.data()?.isAdmin;
+      setIsAdmin(v === true || v === 'true');
+    }, () => setIsAdmin(false));
+    return () => unsub();
+  }, [isAdmin]);
+
+  return { isAdmin };
+}
 
 // ============ 유틸 ============
 function formatRFC3339InTZ(date, timeZone = TZ) {
@@ -985,40 +1011,10 @@ const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, acc
   );
 };
 
+/* === 관리자 버튼: 공용 훅 사용해 간단하게 === */
 function AdminOnlyButton({ activeMain, setActiveMain, setFunctionsOpen }) {
-  // 1) AuthGate 컨텍스트 우선 사용
-  const ctx = useUserCtx?.();
-
-  // 2) 컨텍스트에 없으면 Firestore의 users/{uid}를 직접 구독해서 보조판단
-  const [isAdmin, setIsAdmin] = React.useState(!!(ctx?.isAdmin || ctx?.profile?.isAdmin));
-
-  // 컨텍스트 값이 바뀌면 즉시 반영
-  React.useEffect(() => {
-    setIsAdmin(!!(ctx?.isAdmin || ctx?.profile?.isAdmin));
-  }, [ctx]);
-
-  // Firestore 보조 구독 (컨텍스트에 값이 없거나 false일 때만)
-  React.useEffect(() => {
-    if (isAdmin) return;               // 이미 관리자면 추가 구독 불필요
-    const u = auth.currentUser;
-    if (!u) return;                    // 아직 로그인 전
-
-    const ref = doc(db, 'users', u.uid);
-    const unsub = onSnapshot(ref, (snap) => {
-      const data = snap.data();
-      // Boolean true 또는 문자열 "true" 모두 허용
-      const v = data?.isAdmin;
-      setIsAdmin(v === true || v === 'true');
-    }, () => {
-      // 읽기 권한이 없거나 문서가 없을 때는 그냥 관리자 아님 처리
-      setIsAdmin(false);
-    });
-
-    return () => unsub();
-  }, [isAdmin]);
-
+  const { isAdmin } = useIsAdmin();
   if (!isAdmin) return null;
-
   return (
     <button
       onClick={() => { setActiveMain('admin'); setFunctionsOpen(false); }}
@@ -1064,6 +1060,9 @@ export default function App() {
   // 상세 모달
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailProfile, setDetailProfile] = useState(null);
+
+  // ✅ 관리자 여부 계산(전역)
+  const { isAdmin } = useIsAdmin();
 
   const openProfileDetailById = (id) => {
     const p = profiles.find((x) => x.id === id);
@@ -1120,7 +1119,7 @@ export default function App() {
     };
   }, []);
 
-  // Auth 상태 표시 (버튼 활성/비활성과 무관)
+  // Auth 상태
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setAuthStatus(user ? 'authenticated' : 'unauthenticated');
@@ -1146,19 +1145,17 @@ export default function App() {
 
         for (const path of candidates) {
           try {
-            const colRef = collection(db, ...path); // ✅ path는 항상 홀수 세그먼트(컬렉션)로 구성
+            const colRef = collection(db, ...path); // ✅ 컬렉션 참조
             const snap = await getDocs(query(colRef, limit(1)));
             if (!snap.empty) {
               chosen = colRef;
               chosenPathStr = path.join(' / ');
               break;
             }
-          } catch (e) {
-            // 권한/존재하지 않음 등은 다음 후보로
-          }
+          } catch (e) { /* 다음 후보 */ }
         }
 
-        // 아무 후보에서 문서를 못 찾은 경우: 최우선 경로를 바인딩(빈 컬렉션일 수 있음)
+        // 아무 후보에서도 문서를 못 찾으면: 첫 후보를 바인딩(빈일 수 있음)
         if (!chosen) {
           const fallbackPath = candidates[0];
           chosen = collection(db, ...fallbackPath);
@@ -1354,27 +1351,9 @@ export default function App() {
     useEffect(() => {
       (async () => {
         try {
-          // 경로 후보(상세보기용)
-          const tryPaths = [
-            ['artifacts', appId, 'public', 'data', accessCode, 'profiles', profileId], // ✅ 1순위
-            ['artifacts', appId, 'public', accessCode, 'profiles', profileId],
-            ['accessPools', accessCode, 'profiles', profileId],
-            ['public', accessCode, 'profiles', profileId],
-          ];
-
-          let found = null;
-          for (const p of tryPaths) {
-            try {
-              const ref = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
-              const snap = await getDoc(ref);
-              if (snap.exists()) { found = { ...snap.data(), id: snap.id }; break; }
-            } catch (e) {
-              // permission-denied 등은 다음 후보로 넘어감
-              continue;
-            }
-          }
-
-          if (found) setProfile(found);
+          const ref = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
+          const snap = await getDoc(ref);
+          if (snap.exists()) setProfile({ ...snap.data(), id: snap.id });
           else setError('프로필을 찾을 수 없습니다.');
         } catch (e) {
           console.error('Error fetching profile:', e);
@@ -1382,7 +1361,6 @@ export default function App() {
         } finally { setLoading(false); }
       })();
     }, [profileId, accessCode]);
-
 
     if (loading) return <div className="flex justify-center items-center min-h-screen"><Loader2 className="animate-spin h-10 w-10 text-yellow-500" /></div>;
     if (error)   return <div className="flex justify-center items-center min-h-screen text-red-500">{error}</div>;
@@ -1474,7 +1452,9 @@ export default function App() {
       );
     }
     if (activeMain === 'admin') {
-      return <UserAdmin />;
+      // ✅ 여기서 App 쪽 판별값을 최우선으로 사용
+      if (!isAdmin) return <div className="text-sm text-red-600">권한이 없습니다.</div>;
+      return <UserAdmin isAdminOverride />;
     }
     return (
       <FunctionsPage
@@ -1546,7 +1526,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* 디버그 배너: 실제 읽고 있는 경로 & 에러 */}
+            {/* 디버그 배너: 실제 읽는 경로 & 에러 */}
             {(resolvedPath || dataError) && (
               <div className="mt-2 text-xs">
                 {resolvedPath && (
@@ -1685,7 +1665,7 @@ export default function App() {
           {similarOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center">
               <div className="absolute inset-0 bg-black bg-opacity-40" onClick={()=>setSimilarOpen(false)} />
-              <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] p-6 overflow-hidden">
+              <div className="relative bg-white rounded-XL shadow-2xl w-full max-w-4xl max-h-[85vh] p-6 overflow-hidden">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-lg font-bold text-gray-800">
                     유사 프로필 — <span className="text-yellow-600">{similarBase?.name}</span>
