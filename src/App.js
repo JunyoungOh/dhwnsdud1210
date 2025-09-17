@@ -51,6 +51,13 @@ const db   = getFirestore(app);
 const auth = getAuth(app);
 setLogLevel('debug');
 
+// 🔎 콘솔 진단용 전역 노출 (임시)
+if (typeof window !== 'undefined') {
+  window.__AUTH__ = auth;
+  window.__DB__   = db;
+  window.__FIRE__ = { doc, getDoc, collection, getDocs, query, limit };
+}
+
 const TZ = 'Asia/Seoul';
 const COLORS = ['#FFBB28', '#FF8042', '#00C49F', '#8884D8', '#FF4444', '#82ca9d'];
 const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아한형제들', '당근', '토스'];
