@@ -1,4 +1,6 @@
-// ./admin/UserAdmin.jsx (white screen 핫픽스: Firebase 지연 초기화)
+// ./admin/UserAdmin.jsx
+// - 컨텍스트 isAdmin 없을 때 Firestore users/{uid} 폴백 확인
+// - 모듈 로드시 Firebase 핸들 접근 없음 (화이트스크린 방지: 내부에서 지연 초기화)
 import React from 'react';
 import {
   getFirestore,
@@ -14,23 +16,90 @@ import {
 import { getAuth } from 'firebase/auth';
 import { useUserCtx } from '../auth/AuthGate';
 import {
-  Shield, ShieldOff, Check, X, Trash2, Search as SearchIcon, Loader2, AlertCircle
+  Shield, ShieldOff, Check, X, Trash2, Search as SearchIcon, Loader2, AlertCircle, Info
 } from 'lucide-react';
 
-/**
- * 관리자 화면
- * - props.isAdminOverride: 상위(App)에서 이미 관리자 판정이 끝났다면 true로 전달해 UI 가드 우회
- */
 export default function UserAdmin({ isAdminOverride = false }) {
   const ctx = useUserCtx?.();
-  const isAdminFromCtx = !!(ctx?.isAdmin || ctx?.profile?.isAdmin);
-  const isAdmin = isAdminOverride || isAdminFromCtx;
+
+  // 1) 컨텍스트 값 먼저 반영
+  const ctxAdmin = !!(ctx?.isAdmin || ctx?.profile?.isAdmin);
+
+  // 2) 최종 판정 상태
+  const [isAdmin, setIsAdmin] = React.useState(isAdminOverride || ctxAdmin);
+  const [checking, setChecking] = React.useState(!(isAdminOverride || ctxAdmin));
+  const [debugSrc, setDebugSrc] = React.useState(isAdminOverride ? 'override' : (ctxAdmin ? 'context' : 'pending'));
+
+  // 컨텍스트 변경 시 즉시 반영
+  React.useEffect(() => {
+    if (isAdminOverride) {
+      setIsAdmin(true);
+      setChecking(false);
+      setDebugSrc('override');
+      return;
+    }
+    if (ctxAdmin) {
+      setIsAdmin(true);
+      setChecking(false);
+      setDebugSrc('context');
+    } else {
+      // 컨텍스트가 false/undefined면 폴백 체크 유지
+      setChecking(true);
+      setDebugSrc('pending');
+    }
+  }, [isAdminOverride, ctxAdmin]);
+
+  // 3) Firestore 폴백: users/{uid}.isAdmin === true / "true"
+  React.useEffect(() => {
+    if (isAdmin) return; // 이미 관리자면 폴백 불필요
+    let unsub = null;
+
+    const auth = getAuth();
+    const u = auth.currentUser;
+    if (!u) { setChecking(false); return; }
+
+    const db = getFirestore();
+    const ref = doc(db, 'users', u.uid);
+    unsub = onSnapshot(
+      ref,
+      (snap) => {
+        const v = snap.data()?.isAdmin;
+        const ok = v === true || v === 'true';
+        setIsAdmin(ok);
+        setChecking(false);
+        setDebugSrc(ok ? 'users/{uid}' : 'users/{uid}:not_admin');
+      },
+      () => {
+        // 권한 없음/문서 없음 → 관리자 아님 처리
+        setIsAdmin(false);
+        setChecking(false);
+        setDebugSrc('users/{uid}:no_access');
+      }
+    );
+
+    return () => { if (unsub) unsub(); };
+  }, [isAdmin]);
+
+  if (checking) {
+    return (
+      <div className="p-6 bg-white rounded-xl border shadow-sm text-gray-500 flex items-center gap-2">
+        <Loader2 className="w-4 h-4 animate-spin" /> 권한 확인 중…
+      </div>
+    );
+  }
 
   if (!isAdmin) {
     return (
-      <div className="p-4 bg-white rounded-xl border shadow-sm text-sm text-red-600 flex items-center gap-2">
-        <AlertCircle className="w-4 h-4" />
-        권한이 없습니다.
+      <div className="space-y-3">
+        <div className="p-4 bg-white rounded-xl border shadow-sm text-sm text-red-600 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4" />
+          권한이 없습니다.
+        </div>
+        <div className="p-3 bg-gray-50 rounded-lg border text-xs text-gray-600 flex items-center gap-2">
+          <Info className="w-4 h-4" />
+          관리자 판정 경로: <code className="px-1 py-0.5 bg-white border rounded">{debugSrc}</code>
+          <span className="ml-2">(`users/내UID` 문서의 <code>isAdmin</code>을 true 로 설정했는지 확인)</span>
+        </div>
       </div>
     );
   }
@@ -39,10 +108,9 @@ export default function UserAdmin({ isAdminOverride = false }) {
 }
 
 function UserAdminInner() {
-  // 🔑 여기서 ‘렌더 시점’에 Firebase 핸들 가져온다 (모듈 로드시 아님!)
+  // 렌더 시점에서 Firebase 핸들 준비(지연 초기화)
   const db   = React.useMemo(() => getFirestore(), []);
   const auth = React.useMemo(() => getAuth(), []);
-
   const me = auth.currentUser;
   const myUid = me?.uid || null;
 
@@ -73,7 +141,7 @@ function UserAdminInner() {
     return { total, admins, pending };
   }, [users]);
 
-  // 컬렉션 구독
+  // users 컬렉션 구독 (관리자는 읽기 허용되어야 함)
   React.useEffect(() => {
     setLoading(true);
     setPermErr('');
@@ -112,7 +180,7 @@ function UserAdminInner() {
     }
   }, [db]);
 
-  // 액션
+  // 액션들
   const approveUser = async (uid, value = true) => {
     const ref = doc(db, 'users', uid);
     await setDoc(ref, {
@@ -140,7 +208,7 @@ function UserAdminInner() {
 
   return (
     <div className="space-y-6">
-      {/* 헤더 / 설명 */}
+      {/* 헤더 */}
       <div className="bg-white border rounded-xl p-4 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
