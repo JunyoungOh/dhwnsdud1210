@@ -130,17 +130,16 @@ function similarityScore(a, b) {
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
-// ======== 경로 자동 탐지 (중요: "컬렉션" 경로는 세그먼트가 홀수여야 함) ========
-// 최우선 경로: artifacts / {appId} / public / {accessCode} / profiles
-// 콘솔에서 "<accessCode>" 문서 안에 "profiles" 서브컬렉션을 만든 뒤, 그 안에 프로필 문서를 추가하세요.
+// ======== 경로 자동 탐지 (우선순위 수정) ========
 function buildPathCandidates(accessCode, aid) {
   return [
-    ['artifacts', aid, 'public', accessCode, 'profiles'], // ✅ 권장 구조 (5세그먼트, 컬렉션 OK)
+    // ✅ 실제 구조를 맨 위로
+    ['artifacts', aid, 'public', 'data', accessCode, 'profiles'],
 
-    // 이하 호환 후보 (실제 콘솔 구조에 따라 존재하지 않을 수 있음)
-    ['artifacts', aid, 'public', 'data', accessCode],     // public/{data}(문서)/{accessCode}(컬렉션)
-    ['accessPools', accessCode, 'profiles'],               // 최상위 accessPools/<code>/profiles
-    ['public', accessCode, 'profiles'],                    // 최상위 public/<code>/profiles
+    // 호환 후보들 (있을 수도, 없을 수도)
+    ['artifacts', aid, 'public', accessCode, 'profiles'],
+    ['accessPools', accessCode, 'profiles'],
+    ['public', accessCode, 'profiles'],
   ];
 }
 
@@ -1329,10 +1328,27 @@ export default function App() {
     useEffect(() => {
       (async () => {
         try {
-          // ✅ 상세보기도 동일 경로 사용: artifacts / appId / public / accessCode / profiles / profileId
-          const ref = doc(db, 'artifacts', appId, 'public', accessCode, 'profiles', profileId);
-          const snap = await getDoc(ref);
-          if (snap.exists()) setProfile({ ...snap.data(), id: snap.id });
+          // 경로 후보(상세보기용)
+          const tryPaths = [
+            ['artifacts', appId, 'public', 'data', accessCode, 'profiles', profileId], // ✅ 1순위
+            ['artifacts', appId, 'public', accessCode, 'profiles', profileId],
+            ['accessPools', accessCode, 'profiles', profileId],
+            ['public', accessCode, 'profiles', profileId],
+          ];
+
+          let found = null;
+          for (const p of tryPaths) {
+            try {
+              const ref = doc(db, ...p);
+              const snap = await getDoc(ref);
+              if (snap.exists()) { found = { ...snap.data(), id: snap.id }; break; }
+            } catch (e) {
+              // permission-denied 등은 다음 후보로 넘어감
+              continue;
+            }
+          }
+
+          if (found) setProfile(found);
           else setError('프로필을 찾을 수 없습니다.');
         } catch (e) {
           console.error('Error fetching profile:', e);
@@ -1340,6 +1356,7 @@ export default function App() {
         } finally { setLoading(false); }
       })();
     }, [profileId, accessCode]);
+
 
     if (loading) return <div className="flex justify-center items-center min-h-screen"><Loader2 className="animate-spin h-10 w-10 text-yellow-500" /></div>;
     if (error)   return <div className="flex justify-center items-center min-h-screen text-red-500">{error}</div>;
