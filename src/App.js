@@ -130,16 +130,11 @@ function similarityScore(a, b) {
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
-// ======== 경로 자동 탐지 (우선순위 수정) ========
+// ======== 경로 자동 탐지 (기존 구조 고정) ========
 function buildPathCandidates(accessCode, aid) {
+  // artifacts/{aid}/public/data/{code}  <-- 여기가 '프로필 문서들이 들어있는 컬렉션'
   return [
-    // ✅ 실제 구조를 맨 위로
-    ['artifacts', aid, 'public', 'data', accessCode, 'profiles'],
-
-    // 호환 후보들 (있을 수도, 없을 수도)
-    ['artifacts', aid, 'public', accessCode, 'profiles'],
-    ['accessPools', accessCode, 'profiles'],
-    ['public', accessCode, 'profiles'],
+    ['artifacts', aid, 'public', 'data', accessCode],
   ];
 }
 
@@ -1339,7 +1334,7 @@ export default function App() {
           let found = null;
           for (const p of tryPaths) {
             try {
-              const ref = doc(db, ...p);
+              const ref = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
               const snap = await getDoc(ref);
               if (snap.exists()) { found = { ...snap.data(), id: snap.id }; break; }
             } catch (e) {
