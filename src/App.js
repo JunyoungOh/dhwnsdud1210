@@ -1,4 +1,4 @@
-/* ===== App.js (패치 적용 전체본) ===== */
+/* ===== App.js (전체) ===== */
 import React, { useEffect, useState, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
@@ -132,15 +132,10 @@ function similarityScore(a, b) {
 
 // ======== 경로 자동 탐지 ========
 function buildPathCandidates(accessCode, aid) {
-  // 표준 + 레거시 경로 모두 탐색
   return [
     ['artifacts', aid, 'public', 'data', accessCode],
     ['artifacts', aid, 'public', accessCode],
     ['artifacts', aid, 'data', accessCode],
-    // 레거시(앱ID 없이 artifacts 바로 아래)
-    ['artifacts', 'public', 'data', accessCode],
-    ['artifacts', 'public', accessCode],
-    ['artifacts', 'data', accessCode],
   ];
 }
 
@@ -161,7 +156,8 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   </div>
 );
 
-const LoginScreen = ({ onLogin, authStatus }) => {
+/* --- 교체된 LoginScreen (버튼 항상 활성 + 로그아웃 제공) --- */
+const LoginScreen = ({ onLogin, onLogout, isAuthed }) => {
   const [codeInput, setCodeInput] = useState('');
   const handleSubmit = (e) => { e.preventDefault(); if (codeInput.trim()) onLogin(codeInput.trim()); };
   return (
@@ -175,18 +171,35 @@ const LoginScreen = ({ onLogin, authStatus }) => {
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="relative">
             <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-            <input type="text" placeholder="Access Code"
+            <input
+              type="text"
+              placeholder="Access Code"
               className="w-full pl-10 pr-3 py-3 border rounded-lg"
-              value={codeInput} onChange={(e) => setCodeInput(e.target.value)} />
+              value={codeInput}
+              onChange={(e) => setCodeInput(e.target.value)}
+            />
           </div>
           <div>
-            <button type="submit" disabled={authStatus !== 'authenticated'}
-              className="w-full flex justify-center py-3 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
-              {authStatus === 'authenticating' && <Loader2 className="animate-spin mr-2" />}
-              {authStatus === 'authenticated' ? '데이터 불러오기' : '인증 중...'}
+            <button
+              type="submit"
+              className="w-full flex justify-center py-3 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500"
+            >
+              데이터 불러오기
             </button>
           </div>
         </form>
+
+        {isAuthed && (
+          <div className="mt-4 text-center">
+            <button
+              onClick={onLogout}
+              className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+              title="다른 계정으로 로그인하기"
+            >
+              <LogOut size={16} /> 로그아웃 (다른 계정으로 로그인)
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -378,7 +391,7 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
             {upcomingProfiles.map(p => (
               <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete}
                 accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
-            ))}
+          ))}
           </div>
         )}
       </section>
@@ -1081,7 +1094,7 @@ export default function App() {
     };
   }, []);
 
-  // --- Firebase Auth (이메일/비번 기반, 익명 로그인 제거) ---
+  // --- Firebase Auth (이메일/비번 기반) ---
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setAuthStatus(user ? 'authenticated' : 'unauthenticated');
@@ -1133,19 +1146,10 @@ export default function App() {
     if (typeof window !== 'undefined') localStorage.setItem('profileDbAccessCode', code);
   };
 
-  // ✅ Firebase 계정 로그아웃 핸들러 (계정 전환 가능)
   const handleFirebaseLogout = async () => {
-    try {
-      await signOut(auth);
-    } catch (e) {
-      console.error('signOut error:', e);
-    }
-    setAuthStatus('unauthenticated');
-    setAccessCode(null);
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('profileDbAccessCode');
-      if (window.gapi?.client) window.gapi.client.setToken(null);
-    }
+    try { await signOut(auth); } catch (e) { /* noop */ }
+    if (window.gapi?.client) window.gapi.client.setToken(null);
+    setIsGoogleSignedIn(false);
   };
 
   const handleAddOne = async (payload) => {
@@ -1188,7 +1192,7 @@ export default function App() {
   };
 
   // 삭제
-  const handleDeleteRequest = (profileId, profileName) => setShowDeleteConfirm({ show: false, profileId, profileName }); // 모달 안 쓰면 false 유지
+  const handleDeleteRequest = (profileId, profileName) => setShowDeleteConfirm({ show: true, profileId, profileName });
   const confirmDelete = async () => {
     if (showDeleteConfirm.profileId && activeColRef) await deleteDoc(doc(activeColRef, showDeleteConfirm.profileId));
     setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
@@ -1257,7 +1261,8 @@ export default function App() {
         result = await gapiClient.client.calendar.events.insert({ calendarId: 'primary', resource: eventResource });
       }
       const ev = result.result || {};
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', accessCode, profile.id), {
+      if (!activeColRef) throw new Error('컬렉션 참조가 없습니다.');
+      await updateDoc(doc(activeColRef, profile.id), {
         gcalEventId: ev.id || profile.gcalEventId || null,
         gcalHtmlLink: ev.htmlLink || profile.gcalHtmlLink || null,
         gcalLastSyncAt: new Date().toISOString(),
@@ -1346,7 +1351,7 @@ export default function App() {
     return <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />;
   }
   if (!accessCode) {
-    return <LoginScreen onLogin={handleLogin} authStatus={authStatus} />;
+    return <LoginScreen onLogin={handleLogin} onLogout={handleFirebaseLogout} isAuthed={authStatus==='authenticated'} />;
   }
 
   // 메인 콘텐츠 스위치
@@ -1417,7 +1422,7 @@ export default function App() {
       {profileIdFromUrl && accessCodeFromUrl ? (
         <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />
       ) : !accessCode ? (
-        <LoginScreen onLogin={handleLogin} authStatus={authStatus} />
+        <LoginScreen onLogin={handleLogin} onLogout={handleFirebaseLogout} isAuthed={authStatus==='authenticated'} />
       ) : (
         <div className="bg-gray-50 min-h-screen font-sans">
           {showDeleteConfirm.show && (
@@ -1463,7 +1468,7 @@ export default function App() {
                   )
                 )}
                 <button
-                  onClick={handleFirebaseLogout}
+                  onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }}
                   className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center"
                 >
                   <LogOut className="w-4 h-4 mr-1.5" /> 로그아웃
@@ -1505,12 +1510,6 @@ export default function App() {
                   <Calendar size={16}/> 미팅 데이터
                 </button>
 
-                {/* ✅ 프로필 관리 탭 추가 */}
-                <button onClick={()=>{ setActiveMain('manage'); setFunctionsOpen(false); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='manage'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-                  <UserPlus size={16}/> 프로필 관리
-                </button>
-
                 {/* Functions 토글 */}
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsOpen(v=>!v); }}
                   className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm ${activeMain==='functions'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
@@ -1541,6 +1540,16 @@ export default function App() {
                   setActiveMain={setActiveMain}
                   setFunctionsOpen={setFunctionsOpen}
                 />
+
+                {/* ✅ 가장 아래: 프로필 관리 */}
+                <button
+                  onClick={() => { setActiveMain('manage'); setFunctionsOpen(false); }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${
+                    activeMain==='manage' ? 'bg-yellow-400 text-white' : 'hover:bg-gray-100'
+                  }`}
+                >
+                  <UserPlus size={16}/> 프로필 관리
+                </button>
               </nav>
             </aside>
 
