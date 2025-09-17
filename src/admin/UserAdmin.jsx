@@ -1,4 +1,4 @@
-// ./admin/UserAdmin.jsx
+// ./admin/UserAdmin.jsx (white screen 핫픽스: Firebase 지연 초기화)
 import React from 'react';
 import {
   getFirestore,
@@ -7,7 +7,6 @@ import {
   onSnapshot,
   query,
   orderBy,
-  updateDoc,
   setDoc,
   deleteDoc,
   serverTimestamp,
@@ -18,19 +17,15 @@ import {
   Shield, ShieldOff, Check, X, Trash2, Search as SearchIcon, Loader2, AlertCircle
 } from 'lucide-react';
 
-const db = getFirestore();
-const auth = getAuth();
-
 /**
  * 관리자 화면
- * - props.isAdminOverride: 상위(App)에서 이미 관리자 판단이 끝났다면 true로 전달해 UI 가드 우회
+ * - props.isAdminOverride: 상위(App)에서 이미 관리자 판정이 끝났다면 true로 전달해 UI 가드 우회
  */
 export default function UserAdmin({ isAdminOverride = false }) {
   const ctx = useUserCtx?.();
   const isAdminFromCtx = !!(ctx?.isAdmin || ctx?.profile?.isAdmin);
   const isAdmin = isAdminOverride || isAdminFromCtx;
 
-  // UI 가드 (App에서 이미 한 번 필터링하지만, 단독 진입 시를 대비해 한 번 더)
   if (!isAdmin) {
     return (
       <div className="p-4 bg-white rounded-xl border shadow-sm text-sm text-red-600 flex items-center gap-2">
@@ -44,11 +39,15 @@ export default function UserAdmin({ isAdminOverride = false }) {
 }
 
 function UserAdminInner() {
+  // 🔑 여기서 ‘렌더 시점’에 Firebase 핸들 가져온다 (모듈 로드시 아님!)
+  const db   = React.useMemo(() => getFirestore(), []);
+  const auth = React.useMemo(() => getAuth(), []);
+
   const me = auth.currentUser;
   const myUid = me?.uid || null;
 
   const [loading, setLoading] = React.useState(true);
-  const [permErr, setPermErr] = React.useState(''); // permission-denied 등 표시
+  const [permErr, setPermErr] = React.useState('');
   const [users, setUsers] = React.useState([]);
 
   const [qText, setQText] = React.useState('');
@@ -79,35 +78,41 @@ function UserAdminInner() {
     setLoading(true);
     setPermErr('');
 
-    // 최신 가입 순으로 정렬(생성시간 필드가 없을 수 있어 isApproved/updatedAt 혼합 사용)
-    const q = query(collection(db, 'users'), orderBy('updatedAt', 'desc'));
-    const unsub = onSnapshot(q, (snap) => {
-      const arr = snap.docs.map((d) => {
-        const data = d.data() || {};
-        return {
-          uid: d.id,
-          displayName: data.displayName || data.name || '',
-          email: data.email || '',
-          isAdmin: data.isAdmin === true || data.isAdmin === 'true',
-          isApproved: !!data.isApproved,
-          createdAt: data.createdAt ? toDateSafe(data.createdAt) : null,
-          updatedAt: data.updatedAt ? toDateSafe(data.updatedAt) : null,
-          lastLoginAt: data.lastLoginAt ? toDateSafe(data.lastLoginAt) : null,
-        };
+    try {
+      const q = query(collection(db, 'users'), orderBy('updatedAt', 'desc'));
+      const unsub = onSnapshot(q, (snap) => {
+        const arr = snap.docs.map((d) => {
+          const data = d.data() || {};
+          return {
+            uid: d.id,
+            displayName: data.displayName || data.name || '',
+            email: data.email || '',
+            isAdmin: data.isAdmin === true || data.isAdmin === 'true',
+            isApproved: !!data.isApproved,
+            createdAt: data.createdAt ? toDateSafe(data.createdAt) : null,
+            updatedAt: data.updatedAt ? toDateSafe(data.updatedAt) : null,
+            lastLoginAt: data.lastLoginAt ? toDateSafe(data.lastLoginAt) : null,
+          };
+        });
+        setUsers(arr);
+        setLoading(false);
+      }, (err) => {
+        console.error('users onSnapshot error:', err);
+        setUsers([]);
+        setLoading(false);
+        setPermErr(err?.code ? `${err.code}: ${err.message}` : '알 수 없는 오류로 사용자 목록을 불러오지 못했습니다.');
       });
-      setUsers(arr);
-      setLoading(false);
-    }, (err) => {
-      console.error('users onSnapshot error:', err);
-      setUsers([]);
-      setLoading(false);
-      setPermErr(err?.code ? `${err.code}: ${err.message}` : '알 수 없는 오류로 사용자 목록을 불러오지 못했습니다.');
-    });
 
-    return () => unsub();
-  }, []);
+      return () => unsub();
+    } catch (err) {
+      console.error('users subscribe failed:', err);
+      setLoading(false);
+      setPermErr(err?.message || '구독 중 오류가 발생했습니다.');
+      return () => {};
+    }
+  }, [db]);
 
-  // 액션들
+  // 액션
   const approveUser = async (uid, value = true) => {
     const ref = doc(db, 'users', uid);
     await setDoc(ref, {
@@ -151,7 +156,6 @@ function UserAdminInner() {
           </div>
         </div>
 
-        {/* 권한/규칙 에러 배너 */}
         {permErr && (
           <div className="mt-3 text-xs bg-red-50 text-red-700 border border-red-200 rounded px-3 py-2">
             사용자 목록을 불러오는 중 오류가 발생했습니다: {permErr}
@@ -245,7 +249,6 @@ function UserRow({ meUid, user, onApprove, onToggleAdmin, onDelete }) {
 
       <div className="md:col-span-2">
         <div className="flex justify-end gap-1">
-          {/* 승인 / 승인취소 */}
           {user.isApproved ? (
             <IconBtn
               title="승인 취소"
@@ -261,7 +264,6 @@ function UserRow({ meUid, user, onApprove, onToggleAdmin, onDelete }) {
             />
           )}
 
-          {/* 관리자 토글 (본인 자기 권한은 내리기만 가능하게 막지 않음: 운영 정책에 따라 수정) */}
           {user.isAdmin ? (
             <IconBtn
               title={isMe ? '내 관리자 해제' : '관리자 해제'}
@@ -276,7 +278,6 @@ function UserRow({ meUid, user, onApprove, onToggleAdmin, onDelete }) {
             />
           )}
 
-          {/* 삭제 (본인 문서 삭제는 비활성화) */}
           <IconBtn
             title="문서 삭제"
             onClick={() => onDelete(user.uid)}
@@ -326,7 +327,6 @@ function StatPill({ label, value, tone = 'gray' }) {
 /* ---------- date helpers ---------- */
 
 function toDateSafe(ts) {
-  // 서버타임스탬프 or ISO string or millis → Date
   try {
     if (!ts) return null;
     if (ts.toDate) return ts.toDate();
