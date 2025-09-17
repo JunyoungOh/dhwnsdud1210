@@ -986,8 +986,39 @@ const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, acc
 };
 
 function AdminOnlyButton({ activeMain, setActiveMain, setFunctionsOpen }) {
-  const ctx = useUserCtx?.();            // AuthGate가 넣어준 사용자 컨텍스트
-  if (!ctx?.isAdmin) return null;        // 관리자가 아니면 버튼 자체를 숨김
+  // 1) AuthGate 컨텍스트 우선 사용
+  const ctx = useUserCtx?.();
+
+  // 2) 컨텍스트에 없으면 Firestore의 users/{uid}를 직접 구독해서 보조판단
+  const [isAdmin, setIsAdmin] = React.useState(!!(ctx?.isAdmin || ctx?.profile?.isAdmin));
+
+  // 컨텍스트 값이 바뀌면 즉시 반영
+  React.useEffect(() => {
+    setIsAdmin(!!(ctx?.isAdmin || ctx?.profile?.isAdmin));
+  }, [ctx]);
+
+  // Firestore 보조 구독 (컨텍스트에 값이 없거나 false일 때만)
+  React.useEffect(() => {
+    if (isAdmin) return;               // 이미 관리자면 추가 구독 불필요
+    const u = auth.currentUser;
+    if (!u) return;                    // 아직 로그인 전
+
+    const ref = doc(db, 'users', u.uid);
+    const unsub = onSnapshot(ref, (snap) => {
+      const data = snap.data();
+      // Boolean true 또는 문자열 "true" 모두 허용
+      const v = data?.isAdmin;
+      setIsAdmin(v === true || v === 'true');
+    }, () => {
+      // 읽기 권한이 없거나 문서가 없을 때는 그냥 관리자 아님 처리
+      setIsAdmin(false);
+    });
+
+    return () => unsub();
+  }, [isAdmin]);
+
+  if (!isAdmin) return null;
+
   return (
     <button
       onClick={() => { setActiveMain('admin'); setFunctionsOpen(false); }}
