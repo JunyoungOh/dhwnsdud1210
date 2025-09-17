@@ -1,8 +1,8 @@
-/* ===== App.js (전체) ===== */
+/* ===== App.js (패치 적용 전체본) ===== */
 import React, { useEffect, useState, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
-  getAuth, signInAnonymously, onAuthStateChanged
+  getAuth, onAuthStateChanged, signOut
 } from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query,
@@ -132,10 +132,15 @@ function similarityScore(a, b) {
 
 // ======== 경로 자동 탐지 ========
 function buildPathCandidates(accessCode, aid) {
+  // 표준 + 레거시 경로 모두 탐색
   return [
     ['artifacts', aid, 'public', 'data', accessCode],
     ['artifacts', aid, 'public', accessCode],
     ['artifacts', aid, 'data', accessCode],
+    // 레거시(앱ID 없이 artifacts 바로 아래)
+    ['artifacts', 'public', 'data', accessCode],
+    ['artifacts', 'public', accessCode],
+    ['artifacts', 'data', accessCode],
   ];
 }
 
@@ -1128,6 +1133,21 @@ export default function App() {
     if (typeof window !== 'undefined') localStorage.setItem('profileDbAccessCode', code);
   };
 
+  // ✅ Firebase 계정 로그아웃 핸들러 (계정 전환 가능)
+  const handleFirebaseLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {
+      console.error('signOut error:', e);
+    }
+    setAuthStatus('unauthenticated');
+    setAccessCode(null);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('profileDbAccessCode');
+      if (window.gapi?.client) window.gapi.client.setToken(null);
+    }
+  };
+
   const handleAddOne = async (payload) => {
     if (!activeColRef) return;
     const parsed = parseDateTimeFromRecord(payload.meetingRecord);
@@ -1168,7 +1188,7 @@ export default function App() {
   };
 
   // 삭제
-  const handleDeleteRequest = (profileId, profileName) => setShowDeleteConfirm({ show: true, profileId, profileName });
+  const handleDeleteRequest = (profileId, profileName) => setShowDeleteConfirm({ show: false, profileId, profileName }); // 모달 안 쓰면 false 유지
   const confirmDelete = async () => {
     if (showDeleteConfirm.profileId && activeColRef) await deleteDoc(doc(activeColRef, showDeleteConfirm.profileId));
     setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
@@ -1443,7 +1463,7 @@ export default function App() {
                   )
                 )}
                 <button
-                  onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }}
+                  onClick={handleFirebaseLogout}
                   className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center"
                 >
                   <LogOut className="w-4 h-4 mr-1.5" /> 로그아웃
@@ -1485,6 +1505,12 @@ export default function App() {
                   <Calendar size={16}/> 미팅 데이터
                 </button>
 
+                {/* ✅ 프로필 관리 탭 추가 */}
+                <button onClick={()=>{ setActiveMain('manage'); setFunctionsOpen(false); }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='manage'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
+                  <UserPlus size={16}/> 프로필 관리
+                </button>
+
                 {/* Functions 토글 */}
                 <button onClick={()=>{ setActiveMain('functions'); setFunctionsOpen(v=>!v); }}
                   className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm ${activeMain==='functions'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
@@ -1509,7 +1535,7 @@ export default function App() {
                   </div>
                 )}
 
-                {/* 관리자 전용: 사용자 관리 버튼 (아래 보조 컴포넌트로 대체) */}
+                {/* 관리자 전용: 사용자 관리 버튼 */}
                 <AdminOnlyButton
                   activeMain={activeMain}
                   setActiveMain={setActiveMain}
