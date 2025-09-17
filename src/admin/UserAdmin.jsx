@@ -1,423 +1,123 @@
-// ./admin/UserAdmin.jsx
-// - 컨텍스트 isAdmin 없을 때 Firestore users/{uid} 폴백 확인
-// - 모듈 로드시 Firebase 핸들 접근 없음 (화이트스크린 방지: 내부에서 지연 초기화)
+/* ===== admin/UserAdmin.jsx (전체본) ===== */
 import React from 'react';
-import {
-  getFirestore,
-  collection,
-  doc,
-  onSnapshot,
-  query,
-  orderBy,
-  setDoc,
-  deleteDoc,
-  serverTimestamp,
-} from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
+import { getFirestore, doc, onSnapshot } from 'firebase/firestore';
+import { ShieldAlert, Loader2 } from 'lucide-react';
 import { useUserCtx } from '../auth/AuthGate';
-import {
-  Shield, ShieldOff, Check, X, Trash2, Search as SearchIcon, Loader2, AlertCircle, Info
-} from 'lucide-react';
 
-export default function UserAdmin({ isAdminOverride = false }) {
-  const ctx = useUserCtx?.();
+export default function UserAdmin() {
+  const ctx = useUserCtx?.();           // AuthGate가 제공하는 컨텍스트(있으면 최우선)
+  const auth = getAuth();
+  const db   = getFirestore();
 
-  // 1) 컨텍스트 값 먼저 반영
+  // 컨텍스트의 관리자 플래그(없으면 false)
   const ctxAdmin = !!(ctx?.isAdmin || ctx?.profile?.isAdmin);
 
-  // 2) 최종 판정 상태
-  const [isAdmin, setIsAdmin] = React.useState(isAdminOverride || ctxAdmin);
-  const [checking, setChecking] = React.useState(!(isAdminOverride || ctxAdmin));
-  const [debugSrc, setDebugSrc] = React.useState(isAdminOverride ? 'override' : (ctxAdmin ? 'context' : 'pending'));
+  // Firestore의 users/{uid} 실시간 구독으로 보조 판단
+  const [fireAdmin, setFireAdmin]   = React.useState(null); // null=미확인, true/false=판단됨
+  const [adminPath, setAdminPath]   = React.useState('users / (로그인 필요)');
+  const [loadingDoc, setLoadingDoc] = React.useState(true);
 
-  // 컨텍스트 변경 시 즉시 반영
+  // 현재 로그인 사용자
+  const [uid, setUid] = React.useState(null);
   React.useEffect(() => {
-    if (isAdminOverride) {
-      setIsAdmin(true);
-      setChecking(false);
-      setDebugSrc('override');
+    const u = auth.currentUser;
+    setUid(u?.uid || null);
+  }, [auth]);
+
+  React.useEffect(() => {
+    // 로그인 전이거나 uid가 아직 없으면 대기
+    if (!uid) {
+      setFireAdmin(null);
+      setAdminPath('users / (로그인 필요)');
+      setLoadingDoc(false);
       return;
     }
-    if (ctxAdmin) {
-      setIsAdmin(true);
-      setChecking(false);
-      setDebugSrc('context');
-    } else {
-      // 컨텍스트가 false/undefined면 폴백 체크 유지
-      setChecking(true);
-      setDebugSrc('pending');
-    }
-  }, [isAdminOverride, ctxAdmin]);
 
-  // 3) Firestore 폴백: users/{uid}.isAdmin === true / "true"
-  React.useEffect(() => {
-    if (isAdmin) return; // 이미 관리자면 폴백 불필요
-    let unsub = null;
+    setLoadingDoc(true);
+    const ref = doc(db, 'users', uid);
+    setAdminPath(`users / ${uid}`);
 
-    const auth = getAuth();
-    const u = auth.currentUser;
-    if (!u) { setChecking(false); return; }
-
-    const db = getFirestore();
-    const ref = doc(db, 'users', u.uid);
-    unsub = onSnapshot(
+    const unsub = onSnapshot(
       ref,
       (snap) => {
-        const v = snap.data()?.isAdmin;
-        const ok = v === true || v === 'true';
-        setIsAdmin(ok);
-        setChecking(false);
-        setDebugSrc(ok ? 'users/{uid}' : 'users/{uid}:not_admin');
+        const data = snap.data();
+        const v = data?.isAdmin;
+        // boolean true, 혹은 문자열 "true" 모두 허용
+        setFireAdmin(v === true || v === 'true');
+        setLoadingDoc(false);
       },
       () => {
-        // 권한 없음/문서 없음 → 관리자 아님 처리
-        setIsAdmin(false);
-        setChecking(false);
-        setDebugSrc('users/{uid}:no_access');
+        // 읽기 권한 없음/문서 없음 → 관리자 아님으로 판단
+        setFireAdmin(false);
+        setLoadingDoc(false);
       }
     );
 
-    return () => { if (unsub) unsub(); };
-  }, [isAdmin]);
+    return () => unsub();
+  }, [db, uid]);
 
-  if (checking) {
-    return (
-      <div className="p-6 bg-white rounded-xl border shadow-sm text-gray-500 flex items-center gap-2">
-        <Loader2 className="w-4 h-4 animate-spin" /> 권한 확인 중…
+  // 최종 관리자 판정: 컨텍스트 OR Firestore 구독 결과
+  const finalIsAdmin = !!(ctxAdmin || fireAdmin);
+
+  // ───────────────── 상단 디버그 배너 (항상 표시) ─────────────────
+  const DebugBanner = () => (
+    <div className="mb-4 text-xs">
+      <div className="inline-block bg-blue-50 text-blue-700 border border-blue-200 rounded px-2 py-1 mr-2">
+        관리자 판정: <b>{finalIsAdmin ? 'YES' : 'NO'}</b>
       </div>
-    );
-  }
-
-  if (!isAdmin) {
-    return (
-      <div className="space-y-3">
-        <div className="p-4 bg-white rounded-xl border shadow-sm text-sm text-red-600 flex items-center gap-2">
-          <AlertCircle className="w-4 h-4" />
-          권한이 없습니다.
-        </div>
-        <div className="p-3 bg-gray-50 rounded-lg border text-xs text-gray-600 flex items-center gap-2">
-          <Info className="w-4 h-4" />
-          관리자 판정 경로: <code className="px-1 py-0.5 bg-white border rounded">{debugSrc}</code>
-          <span className="ml-2">(`users/내UID` 문서의 <code>isAdmin</code>을 true 로 설정했는지 확인)</span>
-        </div>
+      <div className="inline-block bg-gray-50 text-gray-700 border border-gray-200 rounded px-2 py-1 mr-2">
+        ctx.isAdmin: <b>{String(ctxAdmin)}</b>
       </div>
-    );
-  }
+      <div className="inline-block bg-gray-50 text-gray-700 border border-gray-200 rounded px-2 py-1 mr-2">
+        users/{'{uid'}} isAdmin: <b>{String(fireAdmin)}</b>
+      </div>
+      <div className="inline-block bg-purple-50 text-purple-700 border border-purple-200 rounded px-2 py-1">
+        판정 경로: <span className="font-mono">{adminPath}</span>
+      </div>
+    </div>
+  );
 
-  return <UserAdminInner />;
-}
-
-function UserAdminInner() {
-  // 렌더 시점에서 Firebase 핸들 준비(지연 초기화)
-  const db   = React.useMemo(() => getFirestore(), []);
-  const auth = React.useMemo(() => getAuth(), []);
-  const me = auth.currentUser;
-  const myUid = me?.uid || null;
-
-  const [loading, setLoading] = React.useState(true);
-  const [permErr, setPermErr] = React.useState('');
-  const [users, setUsers] = React.useState([]);
-
-  const [qText, setQText] = React.useState('');
-  const filtered = React.useMemo(() => {
-    const t = qText.trim().toLowerCase();
-    if (!t) return users;
-    return users.filter((u) => {
-      const bag = [
-        u.displayName || '',
-        u.email || '',
-        u.uid || '',
-        String(u.isAdmin || ''),
-        String(u.isApproved || ''),
-      ].join(' ').toLowerCase();
-      return bag.includes(t);
-    });
-  }, [qText, users]);
-
-  const stats = React.useMemo(() => {
-    const total = users.length;
-    const admins = users.filter(u => u.isAdmin === true || u.isAdmin === 'true').length;
-    const pending = users.filter(u => !u.isApproved).length;
-    return { total, admins, pending };
-  }, [users]);
-
-  // users 컬렉션 구독 (관리자는 읽기 허용되어야 함)
-  React.useEffect(() => {
-    setLoading(true);
-    setPermErr('');
-
-    try {
-      const q = query(collection(db, 'users'), orderBy('updatedAt', 'desc'));
-      const unsub = onSnapshot(q, (snap) => {
-        const arr = snap.docs.map((d) => {
-          const data = d.data() || {};
-          return {
-            uid: d.id,
-            displayName: data.displayName || data.name || '',
-            email: data.email || '',
-            isAdmin: data.isAdmin === true || data.isAdmin === 'true',
-            isApproved: !!data.isApproved,
-            createdAt: data.createdAt ? toDateSafe(data.createdAt) : null,
-            updatedAt: data.updatedAt ? toDateSafe(data.updatedAt) : null,
-            lastLoginAt: data.lastLoginAt ? toDateSafe(data.lastLoginAt) : null,
-          };
-        });
-        setUsers(arr);
-        setLoading(false);
-      }, (err) => {
-        console.error('users onSnapshot error:', err);
-        setUsers([]);
-        setLoading(false);
-        setPermErr(err?.code ? `${err.code}: ${err.message}` : '알 수 없는 오류로 사용자 목록을 불러오지 못했습니다.');
-      });
-
-      return () => unsub();
-    } catch (err) {
-      console.error('users subscribe failed:', err);
-      setLoading(false);
-      setPermErr(err?.message || '구독 중 오류가 발생했습니다.');
-      return () => {};
-    }
-  }, [db]);
-
-  // 액션들
-  const approveUser = async (uid, value = true) => {
-    const ref = doc(db, 'users', uid);
-    await setDoc(ref, {
-      isApproved: !!value,
-      approvedAt: serverTimestamp(),
-      approvedBy: myUid || null,
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-  };
-
-  const toggleAdmin = async (uid, value) => {
-    const ref = doc(db, 'users', uid);
-    await setDoc(ref, {
-      isAdmin: !!value,
-      adminChangedAt: serverTimestamp(),
-      adminChangedBy: myUid || null,
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-  };
-
-  const removeUserDoc = async (uid) => {
-    if (!window.confirm('정말 이 사용자 문서를 삭제하시겠습니까? 계정 자체는 삭제되지 않습니다.')) return;
-    await deleteDoc(doc(db, 'users', uid));
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* 헤더 */}
-      <div className="bg-white border rounded-xl p-4 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+  // ───────────────── 권한 없음 화면 ─────────────────
+  if (!finalIsAdmin) {
+    return (
+      <div className="p-6">
+        <DebugBanner />
+        <div className="flex items-start gap-3 p-4 rounded-lg border bg-white">
+          <ShieldAlert className="text-red-500 mt-0.5" />
           <div>
-            <h2 className="text-xl font-bold text-gray-800">사용자 관리</h2>
-            <p className="text-sm text-gray-500 mt-1">
-              가입 승인/권한 부여를 관리합니다.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 text-xs">
-            <StatPill label="전체" value={stats.total} />
-            <StatPill label="승인대기" value={stats.pending} tone="amber" />
-            <StatPill label="관리자" value={stats.admins} tone="indigo" />
+            <div className="font-semibold text-gray-900 mb-1">권한이 없습니다.</div>
+            {loadingDoc ? (
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <Loader2 className="w-4 h-4 animate-spin" /> 관리자 여부 확인 중...
+              </div>
+            ) : (
+              <ul className="text-sm text-gray-600 list-disc pl-5 space-y-1">
+                <li>로그인한 계정의 <code>users/{'{uid'}}</code> 문서에 <code>isAdmin: true</code> 가 있는지 확인해 주세요.</li>
+                <li>Firestore 규칙에서 <code>match /users/{'{uid'}}</code> 에 대해 <code>allow read</code> 가 허용되어 있는지 확인해 주세요.</li>
+                <li>브라우저가 다른 계정으로 로그인되어 있지 않은지 확인해 주세요.</li>
+              </ul>
+            )}
           </div>
         </div>
-
-        {permErr && (
-          <div className="mt-3 text-xs bg-red-50 text-red-700 border border-red-200 rounded px-3 py-2">
-            사용자 목록을 불러오는 중 오류가 발생했습니다: {permErr}
-            <div className="mt-1 text-[11px] text-red-600">
-              전체 사용자 목록을 보려면 보안규칙에서 관리자에게 <code>read</code> 권한을 부여해야 합니다.
-            </div>
-          </div>
-        )}
       </div>
-
-      {/* 검색 */}
-      <div className="bg-white border rounded-xl p-3 shadow-sm">
-        <div className="relative">
-          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-          <input
-            type="text"
-            placeholder="이름/이메일/UID/권한 검색…"
-            value={qText}
-            onChange={(e) => setQText(e.target.value)}
-            className="w-full pl-10 pr-3 py-2 border rounded-lg text-sm"
-          />
-        </div>
-      </div>
-
-      {/* 목록 */}
-      <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
-        <div className="hidden md:grid grid-cols-12 gap-3 px-4 py-2 text-xs font-semibold text-gray-500 bg-gray-50 border-b">
-          <div className="col-span-3">이름 / 이메일</div>
-          <div className="col-span-3">UID</div>
-          <div className="col-span-2">상태</div>
-          <div className="col-span-2">최근</div>
-          <div className="col-span-2 text-right">액션</div>
-        </div>
-
-        {loading ? (
-          <div className="flex items-center justify-center py-16 text-gray-400">
-            <Loader2 className="animate-spin mr-2" /> 불러오는 중…
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="p-6 text-sm text-gray-500">표시할 사용자가 없습니다.</div>
-        ) : (
-          <ul className="divide-y">
-            {filtered.map((u) => (
-              <li key={u.uid} className="px-4 py-3">
-                <UserRow
-                  meUid={myUid}
-                  user={u}
-                  onApprove={approveUser}
-                  onToggleAdmin={toggleAdmin}
-                  onDelete={removeUserDoc}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function UserRow({ meUid, user, onApprove, onToggleAdmin, onDelete }) {
-  const isMe = user.uid === meUid;
-
-  const statusBadge = user.isApproved
-    ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-green-100 text-green-800">승인</span>
-    : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-amber-100 text-amber-800">대기</span>;
-
-  const adminBadge = user.isAdmin
-    ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-indigo-100 text-indigo-800">관리자</span>
-    : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-gray-100 text-gray-700">일반</span>;
-
-  return (
-    <div className="grid md:grid-cols-12 gap-2 md:gap-3 items-center">
-      <div className="md:col-span-3">
-        <div className="font-medium text-gray-800">{user.displayName || '—'}</div>
-        <div className="text-xs text-gray-500">{user.email || '—'}</div>
-      </div>
-
-      <div className="md:col-span-3">
-        <code className="text-[11px] bg-gray-50 px-2 py-1 rounded border">{user.uid}</code>
-      </div>
-
-      <div className="md:col-span-2 flex items-center gap-2">
-        {statusBadge}
-        {adminBadge}
-      </div>
-
-      <div className="md:col-span-2 text-xs text-gray-500">
-        {formatHumanDate(user.updatedAt || user.lastLoginAt || user.createdAt)}
-      </div>
-
-      <div className="md:col-span-2">
-        <div className="flex justify-end gap-1">
-          {user.isApproved ? (
-            <IconBtn
-              title="승인 취소"
-              onClick={() => onApprove(user.uid, false)}
-              icon={<X className="w-4 h-4" />}
-            />
-          ) : (
-            <IconBtn
-              title="승인"
-              onClick={() => onApprove(user.uid, true)}
-              icon={<Check className="w-4 h-4" />}
-              primary
-            />
-          )}
-
-          {user.isAdmin ? (
-            <IconBtn
-              title={isMe ? '내 관리자 해제' : '관리자 해제'}
-              onClick={() => onToggleAdmin(user.uid, false)}
-              icon={<ShieldOff className="w-4 h-4" />}
-            />
-          ) : (
-            <IconBtn
-              title="관리자 지정"
-              onClick={() => onToggleAdmin(user.uid, true)}
-              icon={<Shield className="w-4 h-4" />}
-            />
-          )}
-
-          <IconBtn
-            title="문서 삭제"
-            onClick={() => onDelete(user.uid)}
-            icon={<Trash2 className="w-4 h-4" />}
-            disabled={isMe}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ---------- UI helpers ---------- */
-
-function IconBtn({ title, onClick, icon, primary = false, disabled = false }) {
-  return (
-    <button
-      title={title}
-      onClick={onClick}
-      disabled={disabled}
-      className={[
-        'inline-flex items-center justify-center rounded-md border px-2 py-1 text-xs',
-        primary
-          ? 'bg-yellow-400 border-yellow-400 text-white hover:bg-yellow-500'
-          : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50',
-        disabled ? 'opacity-40 cursor-not-allowed' : '',
-      ].join(' ')}
-    >
-      {icon}
-    </button>
-  );
-}
-
-function StatPill({ label, value, tone = 'gray' }) {
-  const tones = {
-    gray:   'bg-gray-100 text-gray-800 border-gray-200',
-    amber:  'bg-amber-100 text-amber-800 border-amber-200',
-    indigo: 'bg-indigo-100 text-indigo-800 border-indigo-200',
-  };
-  return (
-    <div className={`px-2 py-1 rounded-full border text-[11px] ${tones[tone] || tones.gray}`}>
-      {label}: <span className="font-semibold">{value}</span>
-    </div>
-  );
-}
-
-/* ---------- date helpers ---------- */
-
-function toDateSafe(ts) {
-  try {
-    if (!ts) return null;
-    if (ts.toDate) return ts.toDate();
-    if (typeof ts === 'number') return new Date(ts);
-    if (typeof ts === 'string') return new Date(ts);
-    return null;
-  } catch {
-    return null;
+    );
   }
-}
 
-function pad(n) { return n < 10 ? `0${n}` : `${n}`; }
+  // ───────────────── 관리자 본문 (샘플) ─────────────────
+  // 여기서부터는 실제 관리자 UI를 자유롭게 배치하면 됩니다.
+  // 최소한의 틀만 넣어 두었습니다.
+  return (
+    <div className="p-6 space-y-4">
+      <DebugBanner />
+      <h1 className="text-xl font-bold text-gray-800">사용자 관리</h1>
 
-function formatHumanDate(d) {
-  if (!d) return '—';
-  try {
-    const yyyy = d.getFullYear();
-    const mm = pad(d.getMonth() + 1);
-    const dd = pad(d.getDate());
-    const hh = pad(d.getHours());
-    const mi = pad(d.getMinutes());
-    return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
-  } catch {
-    return '—';
-  }
+      <div className="rounded-xl border bg-white p-4">
+        <p className="text-sm text-gray-600">
+          관리자 권한이 확인되었습니다. 필요한 관리 도구를 여기에 배치하세요.
+        </p>
+        {/* 예: 승인 대기 목록, 사용자 권한 토글, 감사 로그 등 */}
+      </div>
+    </div>
+  );
 }
