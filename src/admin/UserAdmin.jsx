@@ -1,4 +1,4 @@
-/* ===== admin/UserAdmin.jsx (빌드 에러 수정본) ===== */
+/* ===== admin/UserAdmin.jsx (훅 규칙 준수 + 안전한 규칙 예시 렌더) ===== */
 import React from 'react';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, onSnapshot } from 'firebase/firestore';
@@ -6,8 +6,8 @@ import { ShieldAlert, Loader2 } from 'lucide-react';
 import { useUserCtx } from '../auth/AuthGate';
 
 export default function UserAdmin() {
-  // AuthGate 컨텍스트(있으면 사용)
-  const ctx = typeof useUserCtx === 'function' ? useUserCtx() : null;
+  // ✅ 훅은 무조건 같은 순서로 호출되어야 합니다.
+  const ctx = useUserCtx();
 
   const auth = getAuth();
   const db   = getFirestore();
