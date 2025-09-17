@@ -130,12 +130,22 @@ function similarityScore(a, b) {
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
-// ======== 경로 자동 탐지 ========
+// ======== 경로 자동 탐지 (교체) ========
 function buildPathCandidates(accessCode, aid) {
+  // 가장 위가 우선순위 높음
   return [
+    // 기존 경로들
     ['artifacts', aid, 'public', 'data', accessCode],
     ['artifacts', aid, 'public', accessCode],
     ['artifacts', aid, 'data', accessCode],
+
+    // 루트/일반적인 대안 경로들 (당신이 콘솔에서 만든 위치일 가능성 높음)
+    ['profiles', accessCode],
+    ['profileData', accessCode],
+    ['data', accessCode],
+    ['public', 'data', accessCode],
+    // 최후: accessCode 자체를 컬렉션 이름으로 쓴 경우
+    [accessCode],
   ];
 }
 
@@ -1034,6 +1044,9 @@ export default function App() {
   const [activeColRef, setActiveColRef] = useState(null);
   const [dataReady, setDataReady] = useState(false);
 
+  const [dataError, setDataError] = useState('');      
+  const [resolvedPath, setResolvedPath] = useState(''); 
+
   // ✅ 모달 상태
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailProfile, setDetailProfile] = useState(null);
@@ -1106,35 +1119,65 @@ export default function App() {
   useEffect(() => {
     let unsub = null; let cancelled = false;
     (async () => {
-      setDataReady(false); setActiveColRef(null);
+      setDataReady(false);
+      setActiveColRef(null);
+      setDataError('');            // 🔵 초기화
+      setResolvedPath('');         // 🔵 초기화
+
       if (!accessCode) { setProfiles([]); setDataReady(true); return; }
 
       try {
         const candidates = buildPathCandidates(accessCode, appId);
         let chosen = null;
+        let chosenPathStr = '';
+
+        // 경로 후보 순회하면서 "문서가 1개 이상 존재"하는 컬렉션을 선택
         for (const path of candidates) {
           const colRef = collection(db, ...path);
-          const snap = await getDocs(query(colRef, limit(1)));
-          if (!snap.empty) { chosen = colRef; break; }
+          try {
+            const snap = await getDocs(query(colRef, limit(1)));
+            if (!snap.empty) {
+              chosen = colRef;
+              chosenPathStr = path.join(' / ');
+              break;
+            }
+          } catch (e) {
+            // 권한/경로 에러는 다음 후보로 넘어감 (마지막에 표시)
+          }
         }
-        if (!chosen) { chosen = collection(db, ...candidates[0]); }
+
+        // 하나도 못 찾았으면: 최상위 후보(첫번째)에 바인딩하되, 경고를 띄울 수 있도록 경로 저장
+        if (!chosen) {
+          const fallback = collection(db, ...candidates[0]);
+          chosen = fallback;
+          chosenPathStr = candidates[0].join(' / ');
+        }
+
         if (cancelled) return;
         setActiveColRef(chosen);
+        setResolvedPath(chosenPathStr);   // 🔵 선택된 경로 기록
 
-        unsub = onSnapshot(query(chosen), (qs) => {
-          if (cancelled) return;
-          const data = qs.docs.map(d => ({ ...d.data(), id: d.id }));
-          setProfiles(data);
-          setDataReady(true);
-        }, (err) => {
-          console.error('profiles onSnapshot error:', err);
-          setProfiles([]);
-          setDataReady(true);
-        });
+        unsub = onSnapshot(
+          query(chosen),
+          (qs) => {
+            if (cancelled) return;
+            const data = qs.docs.map(d => ({ ...d.data(), id: d.id }));
+            setProfiles(data);
+            setDataReady(true);
+            setDataError(data.length === 0 ? '선택된 경로에 문서가 없습니다.' : '');
+          },
+          (err) => {
+            console.error('profiles onSnapshot error:', err);
+            setProfiles([]);
+            setDataReady(true);
+            setDataError(err?.code ? `${err.code}: ${err.message}` : '알 수 없는 오류로 데이터를 불러오지 못했습니다.');
+          }
+        );
       } catch (e) {
         console.error('profiles collection resolve error:', e);
         setProfiles([]);
         setDataReady(true);
+        setDataError(e?.message || '데이터 경로를 해석하는 중 오류가 발생했습니다.');
       }
     })();
     return () => { cancelled = true; if (unsub) unsub(); };
@@ -1475,6 +1518,22 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+            {/* 🔵 디버그 배너: 실제 읽고 있는 경로 & 에러 */}
+            {(resolvedPath || dataError) && (
+              <div className="mt-2 text-xs">
+                {resolvedPath && (
+                  <div className="inline-block bg-blue-50 text-blue-700 border border-blue-200 rounded px-2 py-1 mr-2">
+                    현재 읽는 경로: <span className="font-mono">{resolvedPath}</span>
+                  </div>
+                )}
+                {dataError && (
+                  <div className="inline-block bg-red-50 text-red-700 border border-red-200 rounded px-2 py-1">
+                    데이터 로드 오류: {dataError}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* 카운트 박스 (헤더 안) */}
             <div className="mt-3 flex items-center gap-4">
