@@ -1,4 +1,4 @@
-/* ===== App.js (전체) ===== */
+/* ===== App.js (패치본 전체) ===== */
 import React, { useEffect, useState, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
@@ -6,7 +6,7 @@ import {
 } from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query,
-  updateDoc, writeBatch, getDoc, getDocs, setDoc, setLogLevel, limit
+  updateDoc, writeBatch, getDoc, getDocs, setLogLevel, limit
 } from 'firebase/firestore';
 
 import {
@@ -130,22 +130,17 @@ function similarityScore(a, b) {
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
-// ======== 경로 자동 탐지 (교체) ========
+// ======== 경로 자동 탐지 (중요: "컬렉션" 경로는 세그먼트가 홀수여야 함) ========
+// 최우선 경로: artifacts / {appId} / public / {accessCode} / profiles
+// 콘솔에서 "<accessCode>" 문서 안에 "profiles" 서브컬렉션을 만든 뒤, 그 안에 프로필 문서를 추가하세요.
 function buildPathCandidates(accessCode, aid) {
-  // 가장 위가 우선순위 높음
   return [
-    // 기존 경로들
-    ['artifacts', aid, 'public', 'data', accessCode],
-    ['artifacts', aid, 'public', accessCode],
-    ['artifacts', aid, 'data', accessCode],
+    ['artifacts', aid, 'public', accessCode, 'profiles'], // ✅ 권장 구조 (5세그먼트, 컬렉션 OK)
 
-    // 루트/일반적인 대안 경로들 (당신이 콘솔에서 만든 위치일 가능성 높음)
-    ['profiles', accessCode],
-    ['profileData', accessCode],
-    ['data', accessCode],
-    ['public', 'data', accessCode],
-    // 최후: accessCode 자체를 컬렉션 이름으로 쓴 경우
-    [accessCode],
+    // 이하 호환 후보 (실제 콘솔 구조에 따라 존재하지 않을 수 있음)
+    ['artifacts', aid, 'public', 'data', accessCode],     // public/{data}(문서)/{accessCode}(컬렉션)
+    ['accessPools', accessCode, 'profiles'],               // 최상위 accessPools/<code>/profiles
+    ['public', accessCode, 'profiles'],                    // 최상위 public/<code>/profiles
   ];
 }
 
@@ -166,7 +161,7 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   </div>
 );
 
-/* --- 교체된 LoginScreen (버튼 항상 활성 + 로그아웃 제공) --- */
+/* --- 로그인 화면 (항상 입력 가능 + 로그아웃 버튼 제공) --- */
 const LoginScreen = ({ onLogin, onLogout, isAuthed }) => {
   const [codeInput, setCodeInput] = useState('');
   const handleSubmit = (e) => { e.preventDefault(); if (codeInput.trim()) onLogin(codeInput.trim()); };
@@ -342,7 +337,7 @@ const ProfileCard = ({
         </div>
       )}
 
-      {/* 하단 바: 좌측(옵션 버튼들) + 우측(캘린더) */}
+      {/* 하단 바 */}
       <div className="mt-2 pt-2 border-t flex items-center justify-between">
         <div className="flex items-center gap-2">
           {typeof renderFooterLeft === 'function' ? renderFooterLeft() : null}
@@ -401,7 +396,7 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
             {upcomingProfiles.map(p => (
               <ProfileCard key={p.id} profile={p} onUpdate={onUpdate} onDelete={onDelete}
                 accessCode={accessCode} onSyncOne={onSyncOne} onShowSimilar={onShowSimilar} onToggleStar={onToggleStar} />
-          ))}
+            ))}
           </div>
         )}
       </section>
@@ -412,7 +407,6 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
 const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
   const [searchTerm, setSearchTerm] = useState('');
 
-  // 기존 고급(필드/AND/OR/부분 일치) 검색
   const advancedResults = useMemo(() => {
     const term = searchTerm.trim();
     if (!term) return [];
@@ -441,7 +435,6 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
     }));
   }, [searchTerm, profiles]);
 
-  // 자연어 파싱 + 매칭
   const parsedNL = useMemo(() => parseNaturalQuery(searchTerm), [searchTerm]);
   const hasNL = useMemo(() => !!parsedNL && !parsedNL.__isEmpty, [parsedNL]);
 
@@ -454,7 +447,6 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
     }
   }, [profiles, parsedNL, hasNL]);
 
-  // 보여줄 결과 선택
   const looksLikeAdvanced = useMemo(() => /:|\sAND\s|\sOR\s/i.test(searchTerm), [searchTerm]);
   const visible = useMemo(() => {
     if (!searchTerm.trim()) return [];
@@ -534,7 +526,6 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
   const now = useMemo(() => new Date(), []);
   const threeMonthsAgo = useMemo(() => { const d = new Date(now); d.setMonth(d.getMonth() - 3); return d; }, [now]);
 
-  // 추천 목록
   const recommended = useMemo(() => {
     const scoreOf = (p) => {
       const last = p.lastReviewedDate ? new Date(p.lastReviewedDate) : (p.eventDate ? new Date(p.eventDate) : null);
@@ -614,7 +605,6 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
     }
   }, [profiles, activeFilter]);
 
-  // 액션 (카드 좌하단 버튼)
   const handleConfirm = async (p) => {
     await onUpdate(p.id, { lastReviewedDate: new Date().toISOString(), snoozeUntil: null });
   };
@@ -703,7 +693,6 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
 
       {activeSub === 'graphs' && (
         <>
-          {/* 그래프 섹션들 (생략 없이 그대로 유지) */}
           <section className="bg-white p-6 rounded-xl shadow-md">
             <h2 className="text-xl font-bold text-gray-800 mb-4">우선순위별 분포</h2>
             <ResponsiveContainer width="100%" height={300}>
@@ -1019,15 +1008,15 @@ function AdminOnlyButton({ activeMain, setActiveMain, setFunctionsOpen }) {
 
 // ============ App ============
 export default function App() {
-  // --- 상태들 (항상 최상단 선언) ---
+  // --- 상태들 ---
   const [accessCode, setAccessCode] = useState(typeof window !== 'undefined' ? (localStorage.getItem('profileDbAccessCode') || null) : null);
   const [profiles, setProfiles]     = useState([]);
   const [authStatus, setAuthStatus] = useState('authenticating');
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeMain, setActiveMain]   = useState('alerts');
-  const [functionsOpen, setFunctionsOpen] = useState(false); // 사이드바에서 Functions 접기/펼치기
-  const [functionsSub, setFunctionsSub] = useState('rec');   // 추천/장기관리/그래프
+  const [functionsOpen, setFunctionsOpen] = useState(false);
+  const [functionsSub, setFunctionsSub] = useState('rec');
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
 
@@ -1044,14 +1033,13 @@ export default function App() {
   const [activeColRef, setActiveColRef] = useState(null);
   const [dataReady, setDataReady] = useState(false);
 
-  const [dataError, setDataError] = useState('');      
-  const [resolvedPath, setResolvedPath] = useState(''); 
+  const [dataError, setDataError] = useState('');
+  const [resolvedPath, setResolvedPath] = useState('');
 
-  // ✅ 모달 상태
+  // 상세 모달
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailProfile, setDetailProfile] = useState(null);
 
-  // ✅ 모달 열기 콜백 (MeetingsPage에 넘겨줍니다)
   const openProfileDetailById = (id) => {
     const p = profiles.find((x) => x.id === id);
     if (p) {
@@ -1060,7 +1048,7 @@ export default function App() {
     }
   };
 
-  // --- 외부 스크립트 로드 (XLSX, gapi, gis) ---
+  // 외부 스크립트 로드
   useEffect(() => {
     const xlsx = document.createElement('script');
     xlsx.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
@@ -1107,7 +1095,7 @@ export default function App() {
     };
   }, []);
 
-  // --- Firebase Auth (이메일/비번 기반) ---
+  // Auth 상태 표시 (버튼 활성/비활성과 무관)
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setAuthStatus(user ? 'authenticated' : 'unauthenticated');
@@ -1115,14 +1103,14 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // --- 데이터 로드 ---
+  // 데이터 로드
   useEffect(() => {
     let unsub = null; let cancelled = false;
     (async () => {
       setDataReady(false);
       setActiveColRef(null);
-      setDataError('');            // 🔵 초기화
-      setResolvedPath('');         // 🔵 초기화
+      setDataError('');
+      setResolvedPath('');
 
       if (!accessCode) { setProfiles([]); setDataReady(true); return; }
 
@@ -1131,10 +1119,9 @@ export default function App() {
         let chosen = null;
         let chosenPathStr = '';
 
-        // 경로 후보 순회하면서 "문서가 1개 이상 존재"하는 컬렉션을 선택
         for (const path of candidates) {
-          const colRef = collection(db, ...path);
           try {
+            const colRef = collection(db, ...path); // ✅ path는 항상 홀수 세그먼트(컬렉션)로 구성
             const snap = await getDocs(query(colRef, limit(1)));
             if (!snap.empty) {
               chosen = colRef;
@@ -1142,20 +1129,20 @@ export default function App() {
               break;
             }
           } catch (e) {
-            // 권한/경로 에러는 다음 후보로 넘어감 (마지막에 표시)
+            // 권한/존재하지 않음 등은 다음 후보로
           }
         }
 
-        // 하나도 못 찾았으면: 최상위 후보(첫번째)에 바인딩하되, 경고를 띄울 수 있도록 경로 저장
+        // 아무 후보에서 문서를 못 찾은 경우: 최우선 경로를 바인딩(빈 컬렉션일 수 있음)
         if (!chosen) {
-          const fallback = collection(db, ...candidates[0]);
-          chosen = fallback;
-          chosenPathStr = candidates[0].join(' / ');
+          const fallbackPath = candidates[0];
+          chosen = collection(db, ...fallbackPath);
+          chosenPathStr = fallbackPath.join(' / ');
         }
 
         if (cancelled) return;
         setActiveColRef(chosen);
-        setResolvedPath(chosenPathStr);   // 🔵 선택된 경로 기록
+        setResolvedPath(chosenPathStr);
 
         unsub = onSnapshot(
           query(chosen),
@@ -1234,7 +1221,6 @@ export default function App() {
     await updateDoc(doc(activeColRef, profileId), updatedData);
   };
 
-  // 삭제
   const handleDeleteRequest = (profileId, profileName) => setShowDeleteConfirm({ show: true, profileId, profileName });
   const confirmDelete = async () => {
     if (showDeleteConfirm.profileId && activeColRef) await deleteDoc(doc(activeColRef, showDeleteConfirm.profileId));
@@ -1317,7 +1303,7 @@ export default function App() {
     }
   };
 
-  // --- URL 파라미터 & 파생값 (모든 훅은 조기 return보다 위에서 호출) ---
+  // URL 파라미터
   const urlParams = useMemo(() => {
     if (typeof window === 'undefined') return new URLSearchParams('');
     return new URLSearchParams(window.location.search);
@@ -1334,7 +1320,7 @@ export default function App() {
     [profiles]
   );
 
-  // URL 파라미터 상세보기
+  // 상세보기 (공유 링크로 접근 시)
   function ProfileDetailView({ profileId, accessCode }) {
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -1343,7 +1329,8 @@ export default function App() {
     useEffect(() => {
       (async () => {
         try {
-          const ref = doc(db, 'artifacts', appId, 'public', 'data', accessCode, profileId);
+          // ✅ 상세보기도 동일 경로 사용: artifacts / appId / public / accessCode / profiles / profileId
+          const ref = doc(db, 'artifacts', appId, 'public', accessCode, 'profiles', profileId);
           const snap = await getDoc(ref);
           if (snap.exists()) setProfile({ ...snap.data(), id: snap.id });
           else setError('프로필을 찾을 수 없습니다.');
@@ -1430,7 +1417,6 @@ export default function App() {
       );
     }
     if (activeMain === 'meetings') {
-      // ✅ 모달 열기 콜백 연결!
       return <MeetingsPage profiles={profilesWithHelpers} onOpenDetail={openProfileDetailById} />;
     }
     if (activeMain === 'manage') {
@@ -1447,8 +1433,6 @@ export default function App() {
     if (activeMain === 'admin') {
       return <UserAdmin />;
     }
-
-    // functions
     return (
       <FunctionsPage
         activeSub={functionsSub} setActiveSub={setFunctionsSub}
@@ -1460,7 +1444,7 @@ export default function App() {
     );
   };
 
-   return (
+  return (
     <AuthGate>
       {profileIdFromUrl && accessCodeFromUrl ? (
         <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />
@@ -1519,7 +1503,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* 🔵 디버그 배너: 실제 읽고 있는 경로 & 에러 */}
+            {/* 디버그 배너: 실제 읽고 있는 경로 & 에러 */}
             {(resolvedPath || dataError) && (
               <div className="mt-2 text-xs">
                 {resolvedPath && (
@@ -1535,7 +1519,7 @@ export default function App() {
               </div>
             )}
 
-            {/* 카운트 박스 (헤더 안) */}
+            {/* 카운트 박스 */}
             <div className="mt-3 flex items-center gap-4">
               <div className="bg-white p-4 rounded-xl shadow-sm border">
                 <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
@@ -1593,14 +1577,14 @@ export default function App() {
                   </div>
                 )}
 
-                {/* 관리자 전용: 사용자 관리 버튼 */}
+                {/* 관리자 전용 */}
                 <AdminOnlyButton
                   activeMain={activeMain}
                   setActiveMain={setActiveMain}
                   setFunctionsOpen={setFunctionsOpen}
                 />
 
-                {/* ✅ 가장 아래: 프로필 관리 */}
+                {/* ✅ 항상 제일 아래: 프로필 관리 */}
                 <button
                   onClick={() => { setActiveMain('manage'); setFunctionsOpen(false); }}
                   className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${
