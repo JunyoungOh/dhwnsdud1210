@@ -1,4 +1,3 @@
-/* ===== App.js (패치 적용 완전체) ===== */
 import React, { useEffect, useState, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
@@ -372,23 +371,25 @@ const ProfileCard = ({
           )}
         </div>
         <div className="flex items-center gap-1">
-          <button title={profile.starred ? '주목중' : '모아보기'}
+          <Btn
+            variant="subtle"
+            aria-label={profile.starred ? '주목중' : '모아보기'}
             onClick={() => onToggleStar?.(profile.id, !profile.starred)}
-            className={`p-1.5 rounded-full ${profile.starred ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+          >
             {profile.starred ? <Star size={14}/> : <StarOff size={14}/>}
-          </button>
-          <button onClick={() => onShowSimilar?.(profile)} title="유사 프로필" className="p-1.5 rounded-full bg-indigo-100 text-indigo-700 hover:bg-indigo-200">
+          </Btn>
+          <Btn variant="subtle" aria-label="유사 프로필" onClick={() => onShowSimilar?.(profile)}>
             <Layers size={14}/>
-          </button>
-          <button onClick={handleShare} title="공유 링크 복사" className="p-1.5 rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200">
+          </Btn>
+          <Btn variant="subtle" aria-label="공유 링크 복사" onClick={handleShare}>
             <Share2 size={14}/>
-          </button>
-          <button onClick={() => setIsEditing(true)} title="수정" className="p-1.5 rounded-full bg-blue-50 text-blue-700 hover:bg-blue-100">
+          </Btn>
+          <Btn variant="subtle" aria-label="수정" onClick={() => setIsEditing(true)}>
             <Edit size={14}/>
-          </button>
-          <button onClick={() => onDelete(profile.id, profile.name)} title="삭제" className="p-1.5 rounded-full bg-red-50 text-red-600 hover:bg-red-100">
+          </Btn>
+          <Btn variant="danger" aria-label="삭제" onClick={() => onDelete(profile.id, profile.name)}>
             <Trash2 size={14}/>
-          </button>
+          </Btn>
         </div>
       </div>
 
@@ -1537,7 +1538,7 @@ export default function App() {
                 <h1 className="text-xl font-bold text-gray-800">프로필 대시보드</h1>
                 <span className="text-xs sm:text-sm bg-gray-200 px-2 sm:px-3 py-1 rounded-full font-mono">{accessCode}</span>
               </div>
-              <div className="hidden md:flex items-center gap-4">
+              <div className="hidden md:flex items-center gap-3">
                 {googleApiReady === false && (
                   <span className="text-xs text-red-500">
                     Google Calendar 연동 비활성화됨{googleError ? ` (${googleError})` : ' (초기화 실패)'}
@@ -1545,27 +1546,30 @@ export default function App() {
                 )}
                 {googleApiReady === true && (
                   isGoogleSignedIn ? (
-                    <button
+                    <Btn
+                      size="sm"
+                      variant="subtle"
                       onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
-                      className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
                     >
                       Google 로그아웃
-                    </button>
+                    </Btn>
                   ) : (
-                    <button
+                    <Btn
+                      size="sm"
+                      variant="subtle"
                       onClick={() => tokenClient?.requestAccessToken({ prompt: 'consent' })}
-                      className="text-sm font-semibold text-gray-600 hover:text-yellow-600"
                     >
                       Google 로그인
-                    </button>
+                    </Btn>
                   )
                 )}
-                <button
+                <Btn
+                  size="sm"
+                  variant="subtle"
                   onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }}
-                  className="text-sm font-semibold text-gray-600 hover:text-yellow-600 flex items-center"
                 >
                   <LogOut className="w-4 h-4 mr-1.5" /> 로그아웃
-                </button>
+                </Btn>
               </div>
             </div>
 
