@@ -28,6 +28,12 @@ import { MeetingsPage } from './utils/meetings';
 import AuthGate, { useUserCtx } from './auth/AuthGate';
 import UserAdmin from './admin/UserAdmin';
 
+/* === 새 UI 컴포넌트들 === */
+import Btn from './components/ui/Btn';
+import Badge from './components/ui/Badge';
+import SkeletonRow from './components/ui/SkeletonRow';
+import { toast } from './components/ui/Toast';
+
 // ============ 환경 변수 ============
 const GOOGLE_API_KEY   = process.env.REACT_APP_GOOGLE_API_KEY;
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
@@ -53,11 +59,8 @@ setLogLevel('debug');
 
 // === DevTools 진단용 전역 노출 (디버그 전용) ===
 if (typeof window !== 'undefined') {
-  // Firebase 인스턴스
   window.__AUTH__ = auth;
   window.__DB__   = db;
-
-  // 모듈식 Firestore 함수들 (이미 import 된 것만!)
   window.__FIRE__ = {
     db,
     auth,
@@ -81,20 +84,14 @@ const TZ = 'Asia/Seoul';
 const COLORS = ['#FFBB28', '#FF8042', '#00C49F', '#8884D8', '#FF4444', '#82ca9d'];
 const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아한형제들', '당근', '토스'];
 
-/* === 관리자 여부 공용 훅 (개선본) ===
-   - onAuthStateChanged로 uid 추적
-   - users/{uid} 실시간 구독
-   - 컨텍스트 플래그와 병합
-   - isLoading을 노출하여 버튼/페이지 제어 용이
-*/
+/* === 관리자 여부 공용 훅 (개선본) === */
 function useIsAdmin() {
   const ctx = useUserCtx?.();
 
   const [uid, setUid] = React.useState(null);
-  const [fireAdmin, setFireAdmin] = React.useState(null); // null=미확인, true/false=판정
+  const [fireAdmin, setFireAdmin] = React.useState(null); // null=미확인
   const [err, setErr] = React.useState('');
 
-  // 로그인 상태 추적
   React.useEffect(() => {
     const off = onAuthStateChanged(auth, (u) => {
       setUid(u?.uid || null);
@@ -102,7 +99,6 @@ function useIsAdmin() {
     return () => off();
   }, []);
 
-  // users/{uid} 구독
   React.useEffect(() => {
     setErr('');
     if (!uid) { setFireAdmin(null); return; }
@@ -121,10 +117,8 @@ function useIsAdmin() {
     return () => unsub();
   }, [uid]);
 
-  // 컨텍스트 플래그
   const ctxAdmin = !!(ctx?.isAdmin || ctx?.profile?.isAdmin);
 
-  // 최종 판정 + 로딩 상태
   const isAdmin = Boolean(ctxAdmin || fireAdmin === true);
   const isLoading = uid === null || (!ctxAdmin && fireAdmin === null);
 
@@ -200,7 +194,7 @@ function similarityScore(a, b) {
   let score = jaccard(ta, tb) * 100;
   if (a.priority && b.priority && a.priority === b.priority) score += 6;
   const ak = TARGET_KEYWORDS.filter(k => (a.career||'').includes(k));
-  const bk = TARGET_KEYWORDS.filter(k => (b.career||'').includes(k));
+  const bk = TARGET_KEYWORDS.filter(k => (b.career||'').includes(k)).filter(Boolean);
   score += Math.min(ak.filter(k => bk.includes(k)).length * 6, 18);
   if (a.expertise && b.expertise && a.expertise === b.expertise) score += 8;
   return Math.max(0, Math.min(100, Math.round(score)));
@@ -208,7 +202,6 @@ function similarityScore(a, b) {
 
 // ======== 경로 자동 탐지 (기존 구조 고정) ========
 function buildPathCandidates(accessCode, aid) {
-  // artifacts/{aid}/public/data/{code}  <-- 여기가 '프로필 문서들이 들어있는 컬렉션'
   return [
     ['artifacts', aid, 'public', 'data', accessCode],
   ];
@@ -219,19 +212,19 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
     <div className="bg-white rounded-lg p-8 shadow-xl max-w-sm w-full mx-4">
       <div className="text-center">
-        <ShieldAlert className="mx-auto h-12 w-12 text-red-500" />
+        <ShieldAlert className="mx-auto h-12 w-12 text-red-500" aria-hidden />
         <h3 className="mt-4 text-lg font-medium text-gray-900">확인</h3>
         <div className="mt-2 text-sm text-gray-500"><p>{message}</p></div>
       </div>
       <div className="mt-6 flex justify-center gap-4">
-        <button onClick={onCancel} className="px-6 py-2 rounded-md text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300">취소</button>
-        <button onClick={onConfirm} className="px-6 py-2 rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700">확인</button>
+        <Btn variant="subtle" onClick={onCancel}>취소</Btn>
+        <Btn variant="danger" onClick={onConfirm}>확인</Btn>
       </div>
     </div>
   </div>
 );
 
-/* --- 로그인 화면 (항상 입력 가능 + 로그아웃 버튼 제공) --- */
+/* --- 로그인 화면 --- */
 const LoginScreen = ({ onLogin, onLogout, isAuthed }) => {
   const [codeInput, setCodeInput] = useState('');
   const handleSubmit = (e) => { e.preventDefault(); if (codeInput.trim()) onLogin(codeInput.trim()); };
@@ -239,13 +232,13 @@ const LoginScreen = ({ onLogin, onLogout, isAuthed }) => {
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
       <div className="w-full max-w-md bg-white p-8 rounded-xl shadow-lg">
         <div className="text-center">
-          <Users className="mx-auto text-yellow-400 w-12 h-12" />
+          <Users className="mx-auto text-yellow-400 w-12 h-12" aria-hidden />
           <h2 className="mt-4 text-2xl font-bold text-gray-800">프로필 대시보드 접속</h2>
           <p className="mt-2 text-sm text-gray-500">데이터를 불러올 접속 코드를 입력하세요.</p>
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="relative">
-            <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} aria-hidden />
             <input
               type="text"
               placeholder="Access Code"
@@ -255,12 +248,9 @@ const LoginScreen = ({ onLogin, onLogout, isAuthed }) => {
             />
           </div>
           <div>
-            <button
-              type="submit"
-              className="w-full flex justify-center py-3 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500"
-            >
+            <Btn as="button" type="submit" className="w-full" variant="primary">
               데이터 불러오기
-            </button>
+            </Btn>
           </div>
         </form>
 
@@ -271,7 +261,7 @@ const LoginScreen = ({ onLogin, onLogout, isAuthed }) => {
               className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
               title="다른 계정으로 로그인하기"
             >
-              <LogOut size={16} /> 로그아웃 (다른 계정으로 로그인)
+              <LogOut size={16} aria-hidden /> 로그아웃 (다른 계정으로 로그인)
             </button>
           </div>
         )}
@@ -291,10 +281,10 @@ const ProfileCard = ({
 
   useEffect(() => { setEditedProfile(profile); }, [profile]);
 
-  const priorityColors = {
-    '3': 'bg-red-100 text-red-800',
-    '2': 'bg-yellow-100 text-yellow-800',
-    '1': 'bg-green-100 text-green-800',
+  const priorityTone = {
+    '3': 'danger',
+    '2': 'warning',
+    '1': 'success',
   };
 
   const handleInputChange = (e) => {
@@ -318,24 +308,29 @@ const ProfileCard = ({
     try {
       await onUpdate(profile.id, payload);
       setIsEditing(false);
+      (toast.success?.('프로필이 저장되었습니다.') ?? toast('프로필이 저장되었습니다.'));
     } catch (e) {
       console.error('프로필 저장 실패:', e);
-      alert('프로필 저장 중 오류가 발생했습니다.');
+      (toast.error?.('프로필 저장 중 오류가 발생했습니다.') ?? toast('프로필 저장 중 오류가 발생했습니다.'));
     }
   };
 
   const handleShare = () => {
     const shareUrl = `${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`;
     navigator.clipboard.writeText(shareUrl).then(
-      () => alert('공유 링크가 클립보드에 복사되었습니다.'),
-      () => alert('링크 복사에 실패했습니다.')
+      () => (toast.success?.('공유 링크가 복사되었습니다.') ?? toast('공유 링크가 복사되었습니다.')),
+      () => (toast.error?.('링크 복사에 실패했습니다.') ?? toast('링크 복사에 실패했습니다.'))
     );
   };
 
   const handleSyncClick = async () => {
     if (!onSyncOne) return;
     setSyncing(true);
-    try { await onSyncOne(profile); } finally { setSyncing(false); }
+    try {
+      await onSyncOne(profile);
+    } finally {
+      setSyncing(false);
+    }
   };
 
   if (isEditing) {
@@ -357,8 +352,8 @@ const ProfileCard = ({
           </div>
         </div>
         <div className="mt-3 flex justify-end gap-2">
-          <button onClick={() => setIsEditing(false)} className="p-2 text-gray-500 hover:text-gray-800"><X size={20} /></button>
-          <button onClick={handleSave} className="p-2 text-green-600 hover:text-green-800"><Save size={20} /></button>
+          <Btn variant="subtle" onClick={() => setIsEditing(false)}><X size={18} /> 취소</Btn>
+          <Btn variant="success" onClick={handleSave}><Save size={18} /> 저장</Btn>
         </div>
       </div>
     );
@@ -371,9 +366,9 @@ const ProfileCard = ({
           <h3 className="font-bold text-yellow-600 text-lg">{profile.name}</h3>
           {profile.age && <span className="text-sm text-gray-500">{profile.age}세</span>}
           {profile.priority && (
-            <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${priorityColors[profile.priority] || 'bg-gray-100 text-gray-800'}`}>
+            <Badge tone={priorityTone[profile.priority] || 'neutral'}>
               {profile.priority}
-            </span>
+            </Badge>
           )}
         </div>
         <div className="flex items-center gap-1">
@@ -418,11 +413,10 @@ const ProfileCard = ({
               <ExternalLink size={14}/> Google Calendar
             </a>
           ) : <span className="text-xs text-gray-400">캘린더 미연동</span>}
-          <button onClick={handleSyncClick} disabled={syncing}
-            className="text-xs bg-blue-500 text-white font-semibold px-3 py-1 rounded-full hover:bg-blue-600 disabled:bg-blue-300 flex items-center">
+          <Btn size="xs" variant="primary" onClick={handleSyncClick} disabled={syncing}>
             {syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <CalendarPlus className="w-3 h-3 mr-1" />}
             {profile.gcalEventId ? '캘린더 수정' : '캘린더 등록'}
-          </button>
+          </Btn>
         </div>
       </div>
     </div>
@@ -448,7 +442,7 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
   return (
     <div className="space-y-8">
       <section>
-        <h2 className="text-xl font-bold mb-4 flex items-center"><Calendar className="mr-2 text-red-500" />오늘의 일정</h2>
+        <h2 className="text-xl font-bold mb-4 flex items-center"><Calendar className="mr-2 text-red-500" aria-hidden />오늘의 일정</h2>
         {todayProfiles.length === 0 ? <div className="text-sm text-gray-500">없음</div> : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {todayProfiles.map(p => (
@@ -460,7 +454,7 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
       </section>
 
       <section>
-        <h2 className="text-xl font-bold mb-4 flex items-center"><Zap className="mr-2 text-blue-500" />다가오는 일정</h2>
+        <h2 className="text-xl font-bold mb-4 flex items-center"><Zap className="mr-2 text-blue-500" aria-hidden />다가오는 일정</h2>
         {upcomingProfiles.length === 0 ? <div className="text-sm text-gray-500">없음</div> : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {upcomingProfiles.map(p => (
@@ -528,7 +522,7 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
   return (
     <div>
       <div className="relative">
-        <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+        <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden />
         <input
           type="text"
           placeholder="자연어로도 검색 가능: 예) 네이버 경력 백엔드 30대 리더"
@@ -677,10 +671,12 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
 
   const handleConfirm = async (p) => {
     await onUpdate(p.id, { lastReviewedDate: new Date().toISOString(), snoozeUntil: null });
+    (toast.success?.('확인 처리되었습니다.') ?? toast('확인 처리되었습니다.'));
   };
   const handleSnooze3M = async (p) => {
     const dt = new Date(); dt.setMonth(dt.getMonth() + 3);
     await onUpdate(p.id, { snoozeUntil: dt.toISOString() });
+    (toast.success?.('3개월 후 다시 알림으로 설정했습니다.') ?? toast('3개월 후 다시 알림으로 설정했습니다.'));
   };
 
   return (
@@ -691,7 +687,7 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-bold text-gray-800">추천 : 다시 들여다볼 프로필</h2>
               <div className="relative group">
-                <AlertCircle className="w-4 h-4 text-yellow-600 cursor-default" />
+                <AlertCircle className="w-4 h-4 text-yellow-600 cursor-default" aria-hidden />
                 <div className="absolute z-10 hidden group-hover:block bg-gray-900 text-white text-xs rounded-md px-3 py-2 w-72 -left-2 mt-2 shadow-lg">
                   최근 팔로업 시점/스누즈/우선순위/IT 키워드 등을 반영해 점수를 계산해요.
                   <br/>팔로업 ‘확인’을 누르면 목록에서 제외되고, 보통 3개월 후 조건 충족 시 다시 나타납니다.
@@ -710,12 +706,10 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
                 accessCode={accessCode} onSyncOne={onSyncOne}
                 onShowSimilar={onShowSimilar} onToggleStar={onToggleStar}
                 renderFooterLeft={() => (
-                  <button
-                    onClick={() => handleConfirm(p)}
-                    className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded-full border"
-                  >
-                    확인
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <Btn size="xs" variant="subtle" onClick={() => handleConfirm(p)}>확인</Btn>
+                    <Btn size="xs" variant="warning" onClick={() => handleSnooze3M(p)}>3개월 후 다시</Btn>
+                  </div>
                 )}
               />
             ))}
@@ -727,7 +721,7 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
         <section className="bg-white rounded-xl shadow-md p-4">
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-bold flex items-center">
-              <BellRing className="mr-2 text-orange-500" />장기 미접촉 알림 (3개월 이상)
+              <BellRing className="mr-2 text-orange-500" aria-hidden />장기 미접촉 알림 (3개월 이상)
             </h2>
           </div>
           <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -741,18 +735,8 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
                 onShowSimilar={onShowSimilar} onToggleStar={onToggleStar}
                 renderFooterLeft={() => (
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleConfirm(p)}
-                      className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded-full border"
-                    >
-                      확인
-                    </button>
-                    <button
-                      onClick={() => handleSnooze3M(p)}
-                      className="text-xs bg-yellow-100 hover:bg-yellow-200 text-yellow-800 px-3 py-1 rounded-full border border-yellow-300"
-                    >
-                      3개월 후 다시
-                    </button>
+                    <Btn size="xs" variant="subtle" onClick={() => handleConfirm(p)}>확인</Btn>
+                    <Btn size="xs" variant="warning" onClick={() => handleSnooze3M(p)}>3개월 후 다시</Btn>
                   </div>
                 )}
               />
@@ -893,7 +877,7 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, acc
   <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in mt-4">
     <div className="flex justify-between items-center mb-4">
       <h3 className="text-lg font-bold text-gray-800">{title}</h3>
-      <button onClick={onClear} className="text-sm text-gray-500 hover:text-gray-800">필터 해제</button>
+      <Btn size="xs" variant="subtle" onClick={onClear}>필터 해제</Btn>
     </div>
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {profiles.length > 0 ? (
@@ -942,8 +926,11 @@ const ExcelUploader = ({ onBulkAdd }) => {
         })).filter(p => p.name && p.career);
         const msg = await onBulkAdd(newProfiles);
         setMessage(msg); setFile(null);
+        (toast.success?.(msg) ?? toast(msg));
       } catch (err) {
-        console.error('엑셀 처리 오류:', err); setMessage('엑셀 파일을 처리하는 중 오류가 발생했습니다.');
+        console.error('엑셀 처리 오류:', err);
+        setMessage('엑셀 파일을 처리하는 중 오류가 발생했습니다.');
+        (toast.error?.('엑셀 처리 중 오류가 발생했습니다.') ?? toast('엑셀 처리 중 오류가 발생했습니다.'));
       } finally { setIsUploading(false); }
     };
     reader.readAsArrayBuffer(file);
@@ -951,7 +938,7 @@ const ExcelUploader = ({ onBulkAdd }) => {
 
   return (
     <section className="bg-white p-6 rounded-xl shadow-md">
-      <h2 className="text-xl font-bold mb-4 flex items-center"><UploadCloud className="mr-2 text-yellow-500"/>엑셀로 일괄 등록</h2>
+      <h2 className="text-xl font-bold mb-4 flex items-center"><UploadCloud className="mr-2 text-yellow-500" aria-hidden/>엑셀로 일괄 등록</h2>
       <div className="space-y-4">
         <p className="text-sm text-gray-600">정해진 양식의 엑셀 파일을 업로드하여 여러 프로필을 한 번에 추가할 수 있습니다.</p>
         <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md border">
@@ -961,9 +948,9 @@ const ExcelUploader = ({ onBulkAdd }) => {
           <p className="font-bold mt-1">※ 기존 프로필과 이름이 겹칠 경우, 덮어쓰기됩니다.</p>
         </div>
         <input type="file" accept=".xlsx, .xls" onChange={(e)=>{ setFile(e.target.files[0]); setMessage(''); }} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100"/>
-        <button onClick={handleUpload} disabled={!file || isUploading} className="w-full flex justify-center items-center py-2 px-4 border rounded-lg text-white bg-yellow-400 hover:bg-yellow-500 disabled:bg-yellow-200">
+        <Btn onClick={handleUpload} disabled={!file || isUploading} className="w-full" variant="primary">
           {isUploading ? <Loader2 className="animate-spin" /> : '업로드 및 추가'}
-        </button>
+        </Btn>
         {message && <p className="text-sm text-center text-gray-600">{message}</p>}
       </div>
     </section>
@@ -999,12 +986,13 @@ const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, acc
       meetingRecord: newMeetingRecord || ''
     });
     setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewExpertise(''); setNewPriority(''); setNewMeetingRecord('');
+    (toast.success?.('프로필이 추가되었습니다.') ?? toast('프로필이 추가되었습니다.'));
   };
 
   return (
     <div className="space-y-8">
       <section className="bg-white p-6 rounded-xl shadow-md">
-        <h2 className="text-xl font-bold mb-4 flex items-center"><UserPlus className="mr-2 text-yellow-500"/>새 프로필 추가</h2>
+        <h2 className="text-xl font-bold mb-4 flex items-center"><UserPlus className="mr-2 text-yellow-500" aria-hidden/>새 프로필 추가</h2>
         <form onSubmit={handleFormSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <input type="text" placeholder="이름" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-2 border rounded" />
@@ -1016,7 +1004,7 @@ const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, acc
           <textarea placeholder="기타 정보" value={newOtherInfo} onChange={e => setNewOtherInfo(e.target.value)} className="w-full p-2 border rounded h-24" />
           <textarea placeholder="미팅기록 (예: (25.08.14) 오후 7:00)" value={newMeetingRecord} onChange={e => setNewMeetingRecord(e.target.value)} className="w-full p-2 border rounded h-24" />
           <div className="flex justify-end">
-            <button type="submit" className="bg-yellow-400 text-white px-4 py-2 rounded hover:bg-yellow-500">추가하기</button>
+            <Btn as="button" type="submit" variant="primary">추가하기</Btn>
           </div>
         </form>
       </section>
@@ -1061,7 +1049,7 @@ const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, acc
   );
 };
 
-/* === 관리자 버튼 (개선본: 로딩 동안/권한 없으면 숨김) === */
+/* === 관리자 버튼 (개선본) === */
 function AdminOnlyButton({ activeMain, setActiveMain, setFunctionsOpen }) {
   const { isAdmin, isLoading } = useIsAdmin();
   if (isLoading || !isAdmin) return null;
@@ -1108,10 +1096,11 @@ export default function App() {
   const [resolvedPath, setResolvedPath] = useState('');
 
   // 상세 모달
+  thead
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailProfile, setDetailProfile] = useState(null);
 
-  // ✅ 관리자 여부(전역) — probe로 보관해 UserAdmin에 전달
+  // ✅ 관리자 여부 probe
   const adminProbe = useIsAdmin();
   const isAdmin = adminProbe.isAdmin;
 
@@ -1196,17 +1185,16 @@ export default function App() {
 
         for (const path of candidates) {
           try {
-            const colRef = collection(db, ...path); // ✅ 컬렉션 참조
+            const colRef = collection(db, ...path);
             const snap = await getDocs(query(colRef, limit(1)));
             if (!snap.empty) {
               chosen = colRef;
               chosenPathStr = path.join(' / ');
               break;
             }
-          } catch (e) { /* 다음 후보 */ }
+          } catch (e) { /* next */ }
         }
 
-        // 아무 후보에서도 문서를 못 찾으면: 첫 후보를 바인딩(빈일 수 있음)
         if (!chosen) {
           const fallbackPath = candidates[0];
           chosen = collection(db, ...fallbackPath);
@@ -1298,6 +1286,7 @@ export default function App() {
   const confirmDelete = async () => {
     if (showDeleteConfirm.profileId && activeColRef) await deleteDoc(doc(activeColRef, showDeleteConfirm.profileId));
     setShowDeleteConfirm({ show: false, profileId: null, profileName: '' });
+    (toast.success?.('삭제되었습니다.') ?? toast('삭제되었습니다.'));
   };
 
   const openSimilarModal = (base) => {
@@ -1320,13 +1309,13 @@ export default function App() {
   };
 
   const handleSyncOneToCalendar = async (profile) => {
-    if (!googleApiReady) { alert('Google API가 준비되지 않았습니다.'); return; }
+    if (!googleApiReady) { (toast.error?.('Google API가 준비되지 않았습니다.') ?? toast('Google API가 준비되지 않았습니다.')); return; }
     try { await ensureGoogleAuth(); }
-    catch (e) { alert(e.message || 'Google 인증에 실패했습니다.'); return; }
+    catch (e) { (toast.error?.(e.message || 'Google 인증에 실패했습니다.') ?? toast(e.message || 'Google 인증에 실패했습니다.')); return; }
 
     let parsed = parseDateTimeFromRecord(profile.meetingRecord);
     if (!parsed && profile.eventDate) parsed = { date: new Date(profile.eventDate), hadTime: true };
-    if (!parsed) { alert('미팅 날짜/시간을 인식할 수 없습니다. "미팅기록"에 날짜를 입력해주세요.'); return; }
+    if (!parsed) { (toast.error?.('날짜/시간을 인식할 수 없습니다. "미팅기록"을 확인하세요.') ?? toast('날짜/시간을 인식할 수 없습니다. "미팅기록"을 확인하세요.')); return; }
 
     const startDate = parsed.date;
     let eventResource;
@@ -1369,10 +1358,11 @@ export default function App() {
         gcalHtmlLink: ev.htmlLink || profile.gcalHtmlLink || null,
         gcalLastSyncAt: new Date().toISOString(),
       });
-      alert(profile.gcalEventId ? '캘린더 일정이 수정되었습니다.' : '캘린더 일정이 등록되었습니다.');
+      (toast.success?.(profile.gcalEventId ? '캘린더 일정이 수정되었습니다.' : '캘린더 일정이 등록되었습니다.') ??
+        toast(profile.gcalEventId ? '캘린더 일정이 수정되었습니다.' : '캘린더 일정이 등록되었습니다.'));
     } catch (e) {
       console.error('Google Calendar 동기화 실패:', e);
-      alert('캘린더 동기화에 실패했습니다. 콘솔 오류를 확인해주세요.');
+      (toast.error?.('캘린더 동기화에 실패했습니다. 콘솔을 확인하세요.') ?? toast('캘린더 동기화에 실패했습니다. 콘솔을 확인하세요.'));
     }
   };
 
@@ -1502,16 +1492,13 @@ export default function App() {
         />
       );
     }
-   if (activeMain === 'admin') {
-     // App 최상단에서 이미 선언된 값 사용: const { isAdmin } = useIsAdmin();
-     const probe = { from: 'App', isAdmin, ts: new Date().toISOString() };
-
-     if (!isAdmin) {
-       return <div className="text-sm text-red-600">권한이 없습니다. (App gate)</div>;
-     }
-     // ✅ 반드시 isAdminOverride 전달
-     return <UserAdmin isAdminOverride={isAdmin} probe={probe} />;
-   }
+    if (activeMain === 'admin') {
+      const probe = { from: 'App', isAdmin, ts: new Date().toISOString() };
+      if (!isAdmin) {
+        return <div className="text-sm text-red-600">권한이 없습니다. (App gate)</div>;
+      }
+      return <UserAdmin isAdminOverride={isAdmin} probe={probe} />;
+    }
 
     return (
       <FunctionsPage
@@ -1544,10 +1531,10 @@ export default function App() {
           <header className="px-4 sm:px-6 py-3 border-b bg-white sticky top-0 z-20">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <button className="md:hidden p-2 rounded-md border bg-white" onClick={()=>setSidebarOpen(s=>!s)}>
+                <button className="md:hidden p-2 rounded-md border bg-white" onClick={()=>setSidebarOpen(s=>!s)} aria-label="사이드바 토글">
                   <Menu size={18}/>
                 </button>
-                <Users className="text-yellow-500 w-7 h-7" />
+                <Users className="text-yellow-500 w-7 h-7" aria-hidden />
                 <h1 className="text-xl font-bold text-gray-800">프로필 대시보드</h1>
                 <span className="text-xs sm:text-sm bg-gray-200 px-2 sm:px-3 py-1 rounded-full font-mono">{accessCode}</span>
               </div>
@@ -1583,7 +1570,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* 디버그 배너: 실제 읽는 경로 & 에러 */}
+            {/* 디버그 배너 */}
             {(resolvedPath || dataError) && (
               <div className="mt-2 text-xs">
                 {resolvedPath && (
@@ -1643,7 +1630,7 @@ export default function App() {
                 {functionsOpen && (
                   <div className="pl-4 space-y-1">
                     <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('rec'); }}
-                      className={`w-full flex items	center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
+                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
                       <Sparkles size={16}/> 추천
                     </button>
                     <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('long'); }}
@@ -1679,8 +1666,12 @@ export default function App() {
             {/* 본문 */}
             <main className="flex-1 p-4 sm:p-6 md:ml-0 ml-0 mt-3 md:mt-4">
               {!dataReady ? (
-                <div className="flex items-center justify-center py-24 text-gray-400">
-                  <Loader2 className="animate-spin mr-2" /> 데이터를 불러오는 중...
+                <div className="max-w-[1200px] mx-auto space-y-3">
+                  {/* 스켈레톤 로딩 */}
+                  <SkeletonRow />
+                  <SkeletonRow />
+                  <SkeletonRow />
+                  <SkeletonRow />
                 </div>
               ) : (
                 <div className="max-w-[1200px] mx-auto">
@@ -1699,7 +1690,7 @@ export default function App() {
                   <h3 className="text-lg font-bold text-gray-800">
                     {detailProfile?.name || '프로필'}
                   </h3>
-                  <button onClick={() => setDetailOpen(false)} className="text-gray-500 hover:text-gray-800">
+                  <button onClick={() => setDetailOpen(false)} className="text-gray-500 hover:text-gray-800" aria-label="닫기">
                     <X size={20} />
                   </button>
                 </div>
@@ -1727,7 +1718,7 @@ export default function App() {
                   <h3 className="text-lg font-bold text-gray-800">
                     유사 프로필 — <span className="text-yellow-600">{similarBase?.name}</span>
                   </h3>
-                  <button onClick={()=>setSimilarOpen(false)} className="text-gray-500 hover:text-gray-800"><X size={20} /></button>
+                  <button onClick={()=>setSimilarOpen(false)} className="text-gray-500 hover:text-gray-800" aria-label="닫기"><X size={20} /></button>
                 </div>
                 <div className="overflow-y-auto pr-3" style={{ maxHeight: '70vh' }}>
                   {similarList.length === 0 ? (
