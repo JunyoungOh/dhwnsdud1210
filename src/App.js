@@ -385,13 +385,13 @@ const ProfileCard = ({
             </Badge>
           )}
         </div>
-        <div className="flex items-center gap-1">
-          {/* ⭐ 주목 토글: 미선택=빈 별(회색 테두리), 선택=노란 채움 */}
+        <div className="flex items-center gap-0.5">
+          {/* ⭐ 주목 토글: 노란 채움/빈 테두리, 패딩 최소화 */}
           <button
             title={profile.starred ? '주목 해제' : '주목'}
             aria-pressed={!!profile.starred}
             onClick={() => onToggleStar?.(profile.id, !profile.starred)}
-            className="p-1.5 rounded-full hover:bg-yellow-50 transition"
+            className="p-1 rounded hover:bg-yellow-50 transition"
           >
             <Star
               size={16}
@@ -399,17 +399,22 @@ const ProfileCard = ({
             />
           </button>
 
-          <Btn variant="subtle" aria-label="유사 프로필" onClick={() => onShowSimilar?.(profile)}>
-            <Layers size={14}/>
+          {/* 아이콘 간격 ↓, 버튼 테두리(박스) 느낌 최소화, 각기 컬러 지정 */}
+          <Btn variant="subtle" aria-label="유사 프로필" onClick={() => onShowSimilar?.(profile)} className="p-1">
+            <Layers size={16} className="text-indigo-500" />
           </Btn>
-          <Btn variant="subtle" aria-label="공유 링크 복사" onClick={handleShare}>
-            <Share2 size={14}/>
+
+          <Btn variant="subtle" aria-label="공유 링크 복사" onClick={handleShare} className="p-1">
+            <Share2 size={16} className="text-teal-500" />
           </Btn>
-          <Btn variant="subtle" aria-label="수정" onClick={() => setIsEditing(true)}>
-            <Edit size={14}/>
+
+          <Btn variant="subtle" aria-label="수정" onClick={() => setIsEditing(true)} className="p-1">
+            <Edit size={16} className="text-blue-500" />
           </Btn>
-          <Btn variant="danger" aria-label="삭제" onClick={() => onDelete(profile.id, profile.name)}>
-            <Trash2 size={14}/>
+
+          {/* ⛔ ‘빨간 박스’ 제거: danger → subtle, 아이콘만 빨간색 */}
+          <Btn variant="subtle" aria-label="삭제" onClick={() => onDelete(profile.id, profile.name)} className="p-1">
+            <Trash2 size={16} className="text-red-500" />
           </Btn>
         </div>
       </div>
@@ -436,8 +441,13 @@ const ProfileCard = ({
             </a>
           ) : <span className="text-xs text-gray-400">캘린더 미연동</span>}
           {/* ⬇ 글자 크기 축소(약 10px) */}
-          <Btn size="xs" variant="primary" onClick={handleSyncClick} disabled={syncing} className="text-[10px] leading-none">
-            {syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <CalendarPlus className="w-3 h-3 mr-1" />}
+          <Btn
+            variant="primary"
+            onClick={handleSyncClick}
+            disabled={syncing}
+            className="!h-10 !px-5 text-[13px] leading-none"
+          >
+            {syncing ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <CalendarPlus className="w-4 h-4 mr-1" />}
             {profile.gcalEventId ? '캘린더 수정' : '캘린더 등록'}
           </Btn>
         </div>
