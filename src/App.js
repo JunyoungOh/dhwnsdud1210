@@ -1096,7 +1096,6 @@ export default function App() {
   const [resolvedPath, setResolvedPath] = useState('');
 
   // 상세 모달
-  thead
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailProfile, setDetailProfile] = useState(null);
 
