@@ -385,7 +385,6 @@ const ProfileCard = ({
             </Badge>
           )}
         </div>
-        // 👇 ProfileCard 컴포넌트 안, 아이콘 묶음 교체
         <div className="flex items-center gap-1">
           {/*
             공통 버튼 스타일: 동일한 클릭 영역(32x32), 중앙정렬, 호버/포커스 일관
