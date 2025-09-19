@@ -16,7 +16,7 @@ import {
 import {
   Users, LogOut, Search as SearchIcon, Calendar, Zap, UserPlus, KeyRound, Loader2,
   Edit, Trash2, ShieldAlert, X, Save, UploadCloud, BellRing, Share2,
-  CalendarPlus, AlertCircle, Star, StarOff, Menu,
+  CalendarPlus, AlertCircle, Star, Menu,
   Layers, LineChart as LineChartIcon, Clock, Sparkles, ExternalLink,
   ChevronDown
 } from 'lucide-react';
@@ -223,13 +223,28 @@ const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   </div>
 );
 
-/* --- 로그인 화면 --- */
+/* --- 로그인 화면 (배경 그라디언트 + 패턴 적용) --- */
 const LoginScreen = ({ onLogin, onLogout, isAuthed }) => {
   const [codeInput, setCodeInput] = useState('');
   const handleSubmit = (e) => { e.preventDefault(); if (codeInput.trim()) onLogin(codeInput.trim()); };
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
-      <div className="w-full max-w-md bg-white p-8 rounded-xl shadow-lg">
+    <div className="relative min-h-screen p-4 flex items-center justify-center overflow-hidden">
+      {/* 배경 그라디언트 */}
+      <div className="absolute inset-0 bg-gradient-to-br from-amber-50 via-yellow-50 to-rose-50" />
+      {/* 점 패턴 (자체 작성 SVG — 자유 사용) */}
+      <svg
+        className="absolute inset-0 w-full h-full opacity-40 pointer-events-none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <defs>
+          <pattern id="dotPattern" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="1" fill="#FACC15" />
+          </pattern>
+        </defs>
+        <rect x="0" y="0" width="100%" height="100%" fill="url(#dotPattern)" />
+      </svg>
+
+      <div className="relative w-full max-w-md bg-white/90 backdrop-blur p-8 rounded-xl shadow-lg">
         <div className="text-center">
           <Users className="mx-auto text-yellow-400 w-12 h-12" aria-hidden />
           <h2 className="mt-4 text-2xl font-bold text-gray-800">프로필 대시보드 접속</h2>
@@ -371,13 +386,19 @@ const ProfileCard = ({
           )}
         </div>
         <div className="flex items-center gap-1">
-          <Btn
-            variant="subtle"
-            aria-label={profile.starred ? '주목중' : '모아보기'}
+          {/* ⭐ 주목 토글: 미선택=빈 별(회색 테두리), 선택=노란 채움 */}
+          <button
+            title={profile.starred ? '주목 해제' : '주목'}
+            aria-pressed={!!profile.starred}
             onClick={() => onToggleStar?.(profile.id, !profile.starred)}
+            className="p-1.5 rounded-full hover:bg-yellow-50 transition"
           >
-            {profile.starred ? <Star size={14}/> : <StarOff size={14}/>}
-          </Btn>
+            <Star
+              size={16}
+              className={profile.starred ? 'stroke-yellow-500 fill-yellow-400' : 'stroke-gray-400'}
+            />
+          </button>
+
           <Btn variant="subtle" aria-label="유사 프로필" onClick={() => onShowSimilar?.(profile)}>
             <Layers size={14}/>
           </Btn>
@@ -414,7 +435,8 @@ const ProfileCard = ({
               <ExternalLink size={14}/> Google Calendar
             </a>
           ) : <span className="text-xs text-gray-400">캘린더 미연동</span>}
-          <Btn size="xs" variant="primary" onClick={handleSyncClick} disabled={syncing}>
+          {/* ⬇ 글자 크기 축소(약 10px) */}
+          <Btn size="xs" variant="primary" onClick={handleSyncClick} disabled={syncing} className="text-[10px] leading-none">
             {syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <CalendarPlus className="w-3 h-3 mr-1" />}
             {profile.gcalEventId ? '캘린더 수정' : '캘린더 등록'}
           </Btn>
