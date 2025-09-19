@@ -1,87 +1,77 @@
 // src/components/ui/Toast.jsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
-// 간단한 이벤트 버스
-const listeners = new Set();
-const emit = (event) => listeners.forEach((fn) => fn(event));
-
-let idSeq = 1;
-
-/**
- * 메시지 토스트 띄우기
- * @param {string|React.ReactNode} message
- * @param {{type?: 'info'|'success'|'error'|'warning', duration?: number}} opts
- * @returns {number} toastId
- */
+let pushToast;
 export function toast(message, opts = {}) {
-  const id = idSeq++;
-  const payload = {
-    id,
-    message,
-    type: opts.type || 'info',
-    // 기본 3초
-    duration: typeof opts.duration === 'number' ? opts.duration : 3000,
-  };
-  emit({ kind: 'add', payload });
-  return id;
+  if (typeof pushToast === 'function') {
+    pushToast({
+      id: Math.random().toString(36).slice(2),
+      message: String(message ?? ''),
+      type: opts.type || 'info', // 'success' | 'error' | 'info'
+      duration: typeof opts.duration === 'number' ? opts.duration : 2600,
+    });
+  } else {
+    // 호스트가 아직 준비 전이면 콘솔로만
+    console.warn('[toast]', message);
+  }
 }
 
-/** 특정 토스트 닫기 */
-export function dismiss(id) {
-  emit({ kind: 'remove', payload: { id } });
-}
-
-/** 루트에 한 번만 렌더하는 호스트 */
 export function ToastHost() {
   const [items, setItems] = useState([]);
+  const timers = useRef(new Map());
 
   useEffect(() => {
-    const onEvent = (evt) => {
-      if (evt.kind === 'add') {
-        setItems((prev) => [...prev, evt.payload]);
-        // 자동 닫기 타이머
-        if (evt.payload.duration > 0) {
-          const toClose = evt.payload.id;
-          setTimeout(() => emit({ kind: 'remove', payload: { id: toClose } }), evt.payload.duration);
-        }
-      } else if (evt.kind === 'remove') {
-        setItems((prev) => prev.filter((t) => t.id !== evt.payload.id));
-      } else if (evt.kind === 'clear') {
-        setItems([]);
-      }
+    pushToast = (item) => {
+      setItems((prev) => [...prev, item]);
+      const t = setTimeout(() => {
+        setItems((prev) => prev.filter((x) => x.id !== item.id));
+      }, item.duration);
+      timers.current.set(item.id, t);
     };
-    listeners.add(onEvent);
-    return () => listeners.delete(onEvent);
+    return () => {
+      pushToast = undefined;
+      timers.current.forEach((t) => clearTimeout(t));
+      timers.current.clear();
+    };
   }, []);
 
-  const badgeByType = {
-    info:    'bg-gray-800 text-white',
-    success: 'bg-emerald-600 text-white',
-    error:   'bg-red-600 text-white',
-    warning: 'bg-amber-500 text-gray-900',
+  const remove = (id) => {
+    const t = timers.current.get(id);
+    if (t) clearTimeout(t);
+    timers.current.delete(id);
+    setItems((prev) => prev.filter((x) => x.id !== id));
+  };
+
+  const typeStyle = (type) => {
+    switch (type) {
+      case 'success': return 'bg-emerald-600';
+      case 'error':   return 'bg-rose-600';
+      default:        return 'bg-gray-800';
+    }
   };
 
   return (
-    <div className="fixed top-4 right-4 z-[9999] space-y-2 pointer-events-none">
-      {items.map((t) => (
-        <div
-          key={t.id}
-          className={`pointer-events-auto min-w-[240px] max-w-[360px] rounded-lg shadow-lg px-4 py-3 flex items-start gap-3 ${badgeByType[t.type] || badgeByType.info}`}
-          role="status"
-        >
-          <div className="flex-1 text-sm leading-5">{t.message}</div>
-          <button
-            onClick={() => dismiss(t.id)}
-            className="ml-2 text-white/80 hover:text-white transition"
-            aria-label="닫기"
+    <div className="fixed inset-0 pointer-events-none z-[9999]">
+      <div className="absolute bottom-4 right-4 flex flex-col gap-2">
+        {items.map((it) => (
+          <div
+            key={it.id}
+            className={`pointer-events-auto min-w-[240px] max-w-[80vw] text-white text-sm shadow-lg rounded-lg px-4 py-3 ${typeStyle(it.type)}`}
+            role="status"
           >
-            ×
-          </button>
-        </div>
-      ))}
+            <div className="flex items-start gap-3">
+              <div className="flex-1">{it.message}</div>
+              <button
+                onClick={() => remove(it.id)}
+                className="opacity-80 hover:opacity-100 transition"
+                aria-label="dismiss"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
-
-// 기본 export도 제공(사용처에서 import toast from ... 형태 쓸 수 있게)
-export default toast;
