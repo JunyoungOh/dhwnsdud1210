@@ -385,37 +385,69 @@ const ProfileCard = ({
             </Badge>
           )}
         </div>
-        <div className="flex items-center gap-0.5">
-          {/* ⭐ 주목 토글: 노란 채움/빈 테두리, 패딩 최소화 */}
-          <button
-            title={profile.starred ? '주목 해제' : '주목'}
-            aria-pressed={!!profile.starred}
-            onClick={() => onToggleStar?.(profile.id, !profile.starred)}
-            className="p-1 rounded hover:bg-yellow-50 transition"
-          >
-            <Star
-              size={16}
-              className={profile.starred ? 'stroke-yellow-500 fill-yellow-400' : 'stroke-gray-400'}
-            />
-          </button>
+        // 👇 ProfileCard 컴포넌트 안, 아이콘 묶음 교체
+        <div className="flex items-center gap-1">
+          {/*
+            공통 버튼 스타일: 동일한 클릭 영역(32x32), 중앙정렬, 호버/포커스 일관
+          */}
+          {(() => {
+            const ICON_BTN =
+              "inline-flex items-center justify-center w-8 h-8 rounded-md " +
+              "hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-yellow-400/40";
 
-          {/* 아이콘 간격 ↓, 버튼 테두리(박스) 느낌 최소화, 각기 컬러 지정 */}
-          <Btn variant="subtle" aria-label="유사 프로필" onClick={() => onShowSimilar?.(profile)} className="p-1">
-            <Layers size={16} className="text-indigo-500" />
-          </Btn>
+            return (
+              <>
+                {/* ⭐ 주목 토글 (선택시 채움, 미선택시 테두리 느낌) */}
+                <button
+                  title={profile.starred ? '주목 해제' : '주목'}
+                  aria-pressed={!!profile.starred}
+                  onClick={() => onToggleStar?.(profile.id, !profile.starred)}
+                  className={ICON_BTN}
+                >
+                  <Star
+                    size={16}
+                    className={profile.starred ? 'stroke-yellow-500 fill-yellow-400' : 'stroke-gray-400'}
+                  />
+                </button>
 
-          <Btn variant="subtle" aria-label="공유 링크 복사" onClick={handleShare} className="p-1">
-            <Share2 size={16} className="text-teal-500" />
-          </Btn>
+                {/* 🧩 유사 프로필 */}
+                <button
+                  title="유사 프로필"
+                  onClick={() => onShowSimilar?.(profile)}
+                  className={ICON_BTN}
+                >
+                  <Layers size={16} className="text-indigo-500" />
+                </button>
 
-          <Btn variant="subtle" aria-label="수정" onClick={() => setIsEditing(true)} className="p-1">
-            <Edit size={16} className="text-blue-500" />
-          </Btn>
+                {/* 🔗 공유 링크 복사 */}
+                <button
+                  title="공유 링크 복사"
+                  onClick={handleShare}
+                  className={ICON_BTN}
+                >
+                  <Share2 size={16} className="text-teal-500" />
+                </button>
 
-          {/* ⛔ ‘빨간 박스’ 제거: danger → subtle, 아이콘만 빨간색 */}
-          <Btn variant="subtle" aria-label="삭제" onClick={() => onDelete(profile.id, profile.name)} className="p-1">
-            <Trash2 size={16} className="text-red-500" />
-          </Btn>
+                {/* ✏️ 수정 */}
+                <button
+                  title="수정"
+                  onClick={() => setIsEditing(true)}
+                  className={ICON_BTN}
+                >
+                  <Edit size={16} className="text-blue-500" />
+                </button>
+
+                {/* 🗑 삭제 (빨간 박스 X, 아이콘만 레드) */}
+                <button
+                  title="삭제"
+                  onClick={() => onDelete(profile.id, profile.name)}
+                  className={ICON_BTN}
+                >
+                  <Trash2 size={16} className="text-red-500" />
+                </button>
+              </>
+            );
+          })()}
         </div>
       </div>
 
