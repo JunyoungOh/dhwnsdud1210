@@ -27,6 +27,12 @@ import { MeetingsPage } from './utils/meetings';
 import AuthGate, { useUserCtx } from './auth/AuthGate';
 import UserAdmin from './admin/UserAdmin';
 
+/* === 새 UI 컴포넌트들 === */
+import Btn from './components/ui/Btn';
+import Badge from './components/ui/Badge';
+import SkeletonRow from './components/ui/SkeletonRow';
+import { toast } from './components/ui/Toast';
+
 // ✅ App.js 상단, import 라인들 바로 아래에 추가
 class ErrorBoundary extends React.Component {
   constructor(props){ super(props); this.state = { hasError:false, error:null }; }
@@ -49,12 +55,6 @@ class ErrorBoundary extends React.Component {
     return this.props.children;
   }
 }
-
-/* === 새 UI 컴포넌트들 === */
-import Btn from './components/ui/Btn';
-import Badge from './components/ui/Badge';
-import SkeletonRow from './components/ui/SkeletonRow';
-import { toast } from './components/ui/Toast';
 
 // ============ 환경 변수 ============
 const GOOGLE_API_KEY   = process.env.REACT_APP_GOOGLE_API_KEY;
