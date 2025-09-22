@@ -1780,9 +1780,6 @@ export default function App() {
                 <Users className="text-white w-7 h-7" aria-hidden />
                 <h1 className="text-xl font-bold text-white">프로필 대시보드</h1>
                 <span className="text-xs sm:text-sm bg-gray-200 px-2 sm:px-3 py-1 rounded-full font-mono">{accessCode}</span>
-                <span className="text-xs sm:text-sm bg-white/25 border border-white/40 px-2 sm:px-3 py-1 rounded-full font-mono">
-                  {accessCode}
-                </span>
               </div>
               <div className="hidden md:flex items-center gap-3">
                 {googleApiReady === false && (
