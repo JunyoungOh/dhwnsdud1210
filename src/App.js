@@ -1296,6 +1296,80 @@ function AdminOnlyButton({ activeMain, setActiveMain, setFunctionsOpen }) {
   );
 }
 
+// ===== MainContent (App 바깥으로 호이스팅) =====
+function MainContent({
+   activeMain, functionsSub, setFunctionsSub,
+   profilesWithHelpers, handleUpdate, handleDeleteRequest,
+   accessCode, handleSyncOneToCalendar, openSimilarModal,
+   setActiveMain, setFunctionsOpen,
+   isAdmin,
+   // 검색/필터 글로벌 상태
+   searchTerm, setSearchTerm,
+   activeFilter, setActiveFilter,
+ }) {
+   if (activeMain === 'alerts') {
+     return (
+       <AlertsPage
+         profiles={profilesWithHelpers}
+         onUpdate={handleUpdate} onDelete={handleDeleteRequest}
+         accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
+         onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+       />
+     );
+   }
+   if (activeMain === 'search') {
+     return (
+       <SearchPage
+         profiles={profilesWithHelpers}
+         onUpdate={handleUpdate} onDelete={handleDeleteRequest}
+         accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
+         onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+         searchTerm={searchTerm}
+         setSearchTerm={setSearchTerm}
+       />
+     );
+   }
+   if (activeMain === 'starred') {
+     return (
+       <StarredPage
+         profiles={profilesWithHelpers}
+         onUpdate={handleUpdate} onDelete={handleDeleteRequest}
+         accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
+         onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+       />
+     );
+   }
+   if (activeMain === 'meetings') {
+     return <MeetingsPage profiles={profilesWithHelpers} onOpenDetail={(id)=>{/* 기존 openProfileDetailById 사용 */}} />;
+   }
+   if (activeMain === 'manage') {
+     return (
+       <ManagePage
+         profiles={profilesWithHelpers}
+         onUpdate={handleUpdate} onDelete={handleDeleteRequest}
+         onAddOne={/* 기존 handleAddOne */} handleBulkAdd={/* 기존 handleBulkAdd */}
+         accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
+         onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+       />
+     );
+   }
+   if (activeMain === 'admin') {
+     if (!isAdmin) return <div className="text-sm text-red-600">권한이 없습니다. (App gate)</div>;
+     return <UserAdmin isAdminOverride={isAdmin} probe={{ from:'App', isAdmin, ts:new Date().toISOString() }} />;
+   }
+   // functions (graphs/rec/long)
+   return (
+     <FunctionsPage
+       activeSub={functionsSub} setActiveSub={setFunctionsSub}
+       profiles={profilesWithHelpers}
+       onUpdate={handleUpdate} onDelete={handleDeleteRequest}
+       accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
+       onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+       activeFilter={activeFilter} setActiveFilter={setActiveFilter}
+     />
+   );
+ }
+
 // ============ App ============
 export default function App() {
   // --- 상태들 ---
@@ -1687,76 +1761,6 @@ export default function App() {
     );
   }
 
-
-  // 메인 콘텐츠 스위치
-  const MainContent = () => {
-    if (activeMain === 'alerts') {
-      return (
-        <AlertsPage
-          profiles={profilesWithHelpers}
-          onUpdate={handleUpdate} onDelete={handleDeleteRequest}
-          accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
-        />
-      );
-    }
-    if (activeMain === 'search') {
-      return (
-        <SearchPage
-          profiles={profilesWithHelpers}
-          onUpdate={handleUpdate} onDelete={handleDeleteRequest}
-          accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
-          searchTerm={searchTermGlobal}
-          setSearchTerm={setSearchTermGlobal}
-        />
-      );
-    }
-    if (activeMain === 'starred') {
-      return (
-        <StarredPage
-          profiles={profilesWithHelpers}
-          onUpdate={handleUpdate} onDelete={handleDeleteRequest}
-          accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
-        />
-      );
-    }
-    if (activeMain === 'meetings') {
-      return <MeetingsPage profiles={profilesWithHelpers} onOpenDetail={openProfileDetailById} />;
-    }
-    if (activeMain === 'manage') {
-      return (
-        <ManagePage
-          profiles={profilesWithHelpers}
-          onUpdate={handleUpdate} onDelete={handleDeleteRequest}
-          onAddOne={handleAddOne} handleBulkAdd={handleBulkAdd}
-          accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
-        />
-      );
-    }
-    if (activeMain === 'admin') {
-      const probe = { from: 'App', isAdmin, ts: new Date().toISOString() };
-      if (!isAdmin) {
-        return <div className="text-sm text-red-600">권한이 없습니다. (App gate)</div>;
-      }
-      return <UserAdmin isAdminOverride={isAdmin} probe={probe} />;
-    }
-
-    return (
-      <FunctionsPage
-        activeSub={functionsSub} setActiveSub={setFunctionsSub}
-        profiles={profilesWithHelpers}
-        onUpdate={handleUpdate} onDelete={handleDeleteRequest}
-        accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-        onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
-        activeFilter={functionsActiveFilter}
-        setActiveFilter={setFunctionsActiveFilter}
-      />
-    );
-  };
-
   return (
     <ErrorBoundary>
     <AuthGate>
@@ -1927,7 +1931,25 @@ export default function App() {
                 </div>
               ) : (
                 <div className="max-w-[1200px] mx-auto">
-                  <MainContent />
+                  <MainContent
+                    activeMain={activeMain}
+                    functionsSub={functionsSub}
+                    setFunctionsSub={setFunctionsSub}
+                    profilesWithHelpers={profilesWithHelpers}
+                    handleUpdate={handleUpdate}
+                    handleDeleteRequest={handleDeleteRequest}
+                    accessCode={accessCode}
+                    handleSyncOneToCalendar={handleSyncOneToCalendar}
+                    openSimilarModal={openSimilarModal}
+                    setActiveMain={setActiveMain}
+                    setFunctionsOpen={setFunctionsOpen}
+                    isAdmin={isAdmin}
+                    // 검색/그래프 필터 (글로벌 상태)
+                    searchTerm={searchTermGlobal}
+                    setSearchTerm={setSearchTermGlobal}
+                    activeFilter={functionsActiveFilter}
+                    setActiveFilter={setFunctionsActiveFilter}
+                  />
                 </div>
               )}
             </main>
