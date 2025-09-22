@@ -420,7 +420,7 @@ const ProfileCard = ({
             return (
               <>
                 {/* ⭐ 주목 토글 (선택시 채움, 미선택시 테두리 느낌) */}
-                <button
+                <button type="button"
                   title={profile.starred ? '주목 해제' : '주목'}
                   aria-pressed={!!profile.starred}
                   onClick={() => onToggleStar?.(profile.id, !profile.starred)}
@@ -433,7 +433,7 @@ const ProfileCard = ({
                 </button>
 
                 {/* 🧩 유사 프로필 */}
-                <button
+                <button type="button"
                   title="유사 프로필"
                   onClick={() => onShowSimilar?.(profile)}
                   className={ICON_BTN}
@@ -442,7 +442,7 @@ const ProfileCard = ({
                 </button>
 
                 {/* 🔗 공유 링크 복사 */}
-                <button
+                <button type="button"
                   title="공유 링크 복사"
                   onClick={handleShare}
                   className={ICON_BTN}
@@ -451,7 +451,7 @@ const ProfileCard = ({
                 </button>
 
                 {/* ✏️ 수정 */}
-                <button
+                <button type="button"
                   title="수정"
                   onClick={() => setIsEditing(true)}
                   className={ICON_BTN}
@@ -460,7 +460,7 @@ const ProfileCard = ({
                 </button>
 
                 {/* 🗑 삭제 (빨간 박스 X, 아이콘만 레드) */}
-                <button
+                <button type="button"
                   title="삭제"
                   onClick={() => onDelete(profile.id, profile.name)}
                   className={ICON_BTN}
@@ -1771,15 +1771,18 @@ export default function App() {
           )}
 
           {/* 상단 헤더 */}
-          <header className="px-4 sm:px-6 py-3 border-b bg-white sticky top-0 z-20">
+          <header className="px-4 sm:px-6 py-3 border-b bg-yellow-400 text-white sticky top-0 z-20">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <button className="md:hidden p-2 rounded-md border bg-white" onClick={()=>setSidebarOpen(s=>!s)} aria-label="사이드바 토글">
                   <Menu size={18}/>
                 </button>
-                <Users className="text-yellow-500 w-7 h-7" aria-hidden />
-                <h1 className="text-xl font-bold text-gray-800">프로필 대시보드</h1>
+                <Users className="text-white w-7 h-7" aria-hidden />
+                <h1 className="text-xl font-bold text-white">프로필 대시보드</h1>
                 <span className="text-xs sm:text-sm bg-gray-200 px-2 sm:px-3 py-1 rounded-full font-mono">{accessCode}</span>
+                <span className="text-xs sm:text-sm bg-white/25 border border-white/40 px-2 sm:px-3 py-1 rounded-full font-mono">
+                  {accessCode}
+                </span>
               </div>
               <div className="hidden md:flex items-center gap-3">
                 {googleApiReady === false && (
@@ -1817,9 +1820,9 @@ export default function App() {
             </div>
 
             {/* 디버그 배너 */}
-            {(resolvedPath || dataError) && (
+            {( (isAdmin && resolvedPath) || dataError ) && (
               <div className="mt-2 text-xs">
-                {resolvedPath && (
+                {isAdmin && resolvedPath && (
                   <div className="inline-block bg-blue-50 text-blue-700 border border-blue-200 rounded px-2 py-1 mr-2">
                     현재 읽는 경로: <span className="font-mono">{resolvedPath}</span>
                   </div>
