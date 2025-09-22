@@ -1049,6 +1049,7 @@ const ExcelUploader = ({ onBulkAdd }) => {
 
   const handleUpload = async () => {
     if (!file) { setMessage('파일을 먼저 선택해주세요.'); return; }
+    if (!window.XLSX) { (toast?.info?.('로딩 중입니다. 잠시 후 다시.') ?? toast('로딩 중입니다. 잠시 후 다시.')); return; }
     if (!window.XLSX) { setMessage('엑셀 라이브러리를 불러오는 중입니다. 잠시 후 다시 시도해주세요.'); return; }
 
     setIsUploading(true);
@@ -1179,8 +1180,8 @@ const ExcelUploader = ({ onBulkAdd }) => {
                      file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100"
         />
 
-        <Btn onClick={handleUpload} disabled={!file || isUploading} className="w-full" variant="primary">
-          {isUploading ? <Loader2 className="animate-spin" /> : '업로드 및 추가'}
+        <Btn onClick={handleUpload} disabled={!file || isUploading || !window.XLSX} className="w-full" variant="primary">
+          {isUploading ? <Loader2 className="animate-spin" /> : (!window.XLSX ? '로딩 중…' : '업로드 및 추가')}
         </Btn>
 
         {message && <p className="text-sm text-center text-gray-600 whitespace-pre-wrap">{message}</p>}
