@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps } from 'firebase/app';
 import {
   getAuth, onAuthStateChanged, signOut
 } from 'firebase/auth';
@@ -27,6 +27,29 @@ import { MeetingsPage } from './utils/meetings';
 import AuthGate, { useUserCtx } from './auth/AuthGate';
 import UserAdmin from './admin/UserAdmin';
 
+// ✅ App.js 상단, import 라인들 바로 아래에 추가
+class ErrorBoundary extends React.Component {
+  constructor(props){ super(props); this.state = { hasError:false, error:null }; }
+  static getDerivedStateFromError(err){ return { hasError:true, error:err }; }
+  componentDidCatch(err, info){ if (process.env.NODE_ENV !== 'production') console.error(err, info); }
+  render(){
+    if(this.state.hasError){
+      return (
+        <div style={{ padding:16, fontSize:14 }}>
+          <b>문제가 발생했어요.</b>
+          <div style={{ opacity:0.8, marginTop:8 }}>새로고침하거나 잠시 뒤 다시 시도해주세요.</div>
+          {process.env.NODE_ENV !== 'production' && (
+            <pre style={{ whiteSpace:'pre-wrap', fontSize:12, marginTop:12 }}>
+              {String(this.state.error)}
+            </pre>
+          )}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /* === 새 UI 컴포넌트들 === */
 import Btn from './components/ui/Btn';
 import Badge from './components/ui/Badge';
@@ -51,7 +74,7 @@ const firebaseConfig = {
 };
 
 const appId = 'profile-db-app-junyoungoh';
-const app  = initializeApp(firebaseConfig);
+const app  = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 const db   = getFirestore(app);
 const auth = getAuth(app);
 setLogLevel('debug');
@@ -1503,11 +1526,21 @@ export default function App() {
   }
 
   if (profileIdFromUrl && accessCodeFromUrl) {
-    return <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />;
+    return (
+      <ErrorBoundary>
+        <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />
+      </ErrorBoundary>
+    );
   }
+
   if (!accessCode) {
-    return <LoginScreen onLogin={handleLogin} onLogout={handleFirebaseLogout} isAuthed={authStatus==='authenticated'} />;
+    return (
+      <ErrorBoundary>
+        <LoginScreen onLogin={handleLogin} onLogout={handleFirebaseLogout} isAuthed={authStatus==='authenticated'} />
+      </ErrorBoundary>
+    );
   }
+
 
   // 메인 콘텐츠 스위치
   const MainContent = () => {
@@ -1575,6 +1608,7 @@ export default function App() {
   };
 
   return (
+    <ErrorBoundary>
     <AuthGate>
       {profileIdFromUrl && accessCodeFromUrl ? (
         <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />
@@ -1812,5 +1846,6 @@ export default function App() {
         </div>
       )}
     </AuthGate>
-  );
+  </ErrorBoundary>
+);
 }
