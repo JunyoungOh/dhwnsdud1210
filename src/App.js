@@ -1303,6 +1303,8 @@ function MainContent({
    accessCode, handleSyncOneToCalendar, openSimilarModal,
    setActiveMain, setFunctionsOpen,
    isAdmin,
+   handleAddOne, handleBulkAdd,
+   openProfileDetailById,
    // 검색/필터 글로벌 상태
    searchTerm, setSearchTerm,
    activeFilter, setActiveFilter,
@@ -1340,14 +1342,15 @@ function MainContent({
      );
    }
    if (activeMain === 'meetings') {
-     return <MeetingsPage profiles={profilesWithHelpers} onOpenDetail={(id)=>{/* 기존 openProfileDetailById 사용 */}} />;
+     return <MeetingsPage profiles={profilesWithHelpers} onOpenDetail={openProfileDetailById} />;
    }
    if (activeMain === 'manage') {
      return (
        <ManagePage
          profiles={profilesWithHelpers}
          onUpdate={handleUpdate} onDelete={handleDeleteRequest}
-         onAddOne={/* 기존 handleAddOne */} handleBulkAdd={/* 기존 handleBulkAdd */}
+         onAddOne={handleAddOne}
+         handleBulkAdd={handleBulkAdd}
          accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
        />
@@ -1944,6 +1947,9 @@ export default function App() {
                     setActiveMain={setActiveMain}
                     setFunctionsOpen={setFunctionsOpen}
                     isAdmin={isAdmin}
+                    handleAddOne={handleAddOne}
+                    handleBulkAdd={handleBulkAdd}
+                    openProfileDetailById={openProfileDetailById}
                     // 검색/그래프 필터 (글로벌 상태)
                     searchTerm={searchTermGlobal}
                     setSearchTerm={setSearchTermGlobal}
