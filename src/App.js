@@ -420,10 +420,11 @@ const ProfileCard = ({
             return (
               <>
                 {/* ⭐ 주목 토글 (선택시 채움, 미선택시 테두리 느낌) */}
-                <button type="button"
+                 <button
+                   type="button"
+                   onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); onToggleStar?.(profile.id, !profile.starred); }}
                   title={profile.starred ? '주목 해제' : '주목'}
                   aria-pressed={!!profile.starred}
-                  onClick={() => onToggleStar?.(profile.id, !profile.starred)}
                   className={ICON_BTN}
                 >
                   <Star
@@ -555,8 +556,7 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
   );
 };
 
-const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
-  const [searchTerm, setSearchTerm] = useState('');
+const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar, searchTerm, setSearchTerm }) => {
 
   const advancedResults = useMemo(() => {
     const term = searchTerm.trim();
@@ -673,7 +673,7 @@ const StarredPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSh
   );
 };
 
-const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar }) => {
+const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar, activeFilter, setActiveFilter }) => {
   const now = useMemo(() => new Date(), []);
   const threeMonthsAgo = useMemo(() => { const d = new Date(now); d.setMonth(d.getMonth() - 3); return d; }, [now]);
 
@@ -705,8 +705,6 @@ const FunctionsPage = ({ activeSub, setActiveSub, profiles, onUpdate, onDelete, 
       return last && last < threeMonthsAgo && (!snoozeUntil || snoozeUntil < now);
     }).sort((a,b) => (new Date(a.lastReviewedDate || a.eventDate||0)) - (new Date(b.lastReviewedDate || b.eventDate||0)))
   ), [profiles, threeMonthsAgo, now]);
-
-  const [activeFilter, setActiveFilter] = useState({ type: null, value: null });
 
   const ageData = useMemo(() => {
     const groups = { '10대': 0, '20대': 0, '30대': 0, '40대': 0, '50대 이상': 0 };
@@ -1301,6 +1299,8 @@ function AdminOnlyButton({ activeMain, setActiveMain, setFunctionsOpen }) {
 // ============ App ============
 export default function App() {
   // --- 상태들 ---
+  const [searchTermGlobal, setSearchTermGlobal] = React.useState('');     // 검색어 글로벌
+  const [functionsActiveFilter, setFunctionsActiveFilter] = React.useState({ type:null, value:null }); // 그래프 필터 글로벌
   const [accessCode, setAccessCode] = useState(typeof window !== 'undefined' ? (localStorage.getItem('profileDbAccessCode') || null) : null);
   const [profiles, setProfiles]     = useState([]);
   const [authStatus, setAuthStatus] = useState('authenticating');
@@ -1707,6 +1707,8 @@ export default function App() {
           onUpdate={handleUpdate} onDelete={handleDeleteRequest}
           accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
           onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+          searchTerm={searchTermGlobal}
+          setSearchTerm={setSearchTermGlobal}
         />
       );
     }
@@ -1749,6 +1751,8 @@ export default function App() {
         onUpdate={handleUpdate} onDelete={handleDeleteRequest}
         accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
         onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+        activeFilter={functionsActiveFilter}
+        setActiveFilter={setFunctionsActiveFilter}
       />
     );
   };
