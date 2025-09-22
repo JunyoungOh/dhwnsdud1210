@@ -229,6 +229,228 @@ function buildPathCandidates(accessCode, aid) {
   ];
 }
 
+// ===== IdealGame Utilities =====
+function shuffleArray(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+function sampleProfilesByCategory(profiles, category, optionValue, size) {
+  let pool = [];
+  if (category === 'expertise') {
+    pool = profiles.filter(p => (p.expertise || '').trim() === optionValue);
+  } else if (category === 'priority') {
+    pool = profiles.filter(p => (p.priority || '').trim() === optionValue);
+  } else { // random
+    pool = [...profiles];
+  }
+  const shuffled = shuffleArray(pool);
+  return shuffled.slice(0, size);
+}
+
+// ===== IdealGame Page =====
+function IdealGamePage({
+  profiles,
+  onUpdate, onDelete,
+  accessCode, onSyncOne, onShowSimilar, onToggleStar
+}) {
+  const [phase, setPhase] = React.useState('setup'); // setup | play | result
+  const [category, setCategory] = React.useState('expertise'); // expertise | priority | random
+  const expertiseOptions = React.useMemo(
+    () => Array.from(new Set(profiles.map(p => p.expertise).filter(Boolean))),
+    [profiles]
+  );
+  const [expertiseValue, setExpertiseValue] = React.useState(expertiseOptions[0] || '');
+  const [priorityValue, setPriorityValue] = React.useState('3');
+  const [size, setSize] = React.useState(16);
+
+  const [currentRound, setCurrentRound] = React.useState(1);
+  const [roundPairs, setRoundPairs] = React.useState([]); // [[p1,p2], [p3,p4], ...]
+  const [winners, setWinners] = React.useState([]);       // 누적 선택된 승자 (한 라운드)
+  const [champion, setChampion] = React.useState(null);
+
+  // 라운드 페어링 만들기
+  const makePairs = React.useCallback((list) => {
+    const pairs = [];
+    for (let i = 0; i < list.length; i += 2) {
+      pairs.push([list[i], list[i + 1]]);
+    }
+    return pairs;
+  }, []);
+
+  // 시작
+  const handleStart = () => {
+    const optVal = category === 'expertise' ? expertiseValue : (category === 'priority' ? priorityValue : null);
+    const chosen = sampleProfilesByCategory(profiles, category, optVal, size);
+    if (chosen.length < size) {
+      alert(`선택한 조건으로 ${size}명을 확보하지 못했습니다. (현재: ${chosen.length}명)`);
+      return;
+    }
+    const pairs = makePairs(chosen);
+    setCurrentRound(1);
+    setRoundPairs(pairs);
+    setWinners([]);
+    setChampion(null);
+    setPhase('play');
+  };
+
+  // 승자 선택
+  const pickWinner = (winner) => {
+    setWinners(prev => {
+      const next = [...prev, winner];
+      // 라운드 종료 → 다음 라운드로
+      if (next.length === roundPairs.length) {
+        if (next.length === 1) {
+          setChampion(next[0]);
+          setPhase('result');
+          return next;
+        }
+        // 다음 라운드 세팅
+        const nextPairs = makePairs(shuffleArray(next));
+        setRoundPairs(nextPairs);
+        setCurrentRound(r => r + 1);
+        return [];
+      }
+      return next;
+    });
+  };
+
+  // UI
+  if (phase === 'setup') {
+    return (
+      <section className="bg-white rounded-xl shadow-md p-6 space-y-4">
+        <h2 className="text-xl font-bold">이상형게임 설정</h2>
+        <div className="grid md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">카테고리</label>
+            <select
+              className="w-full border rounded px-2 py-2 text-sm"
+              value={category}
+              onChange={(e)=>setCategory(e.target.value)}
+            >
+              <option value="expertise">특정직군(전문영역)</option>
+              <option value="priority">특정레벨(우선순위)</option>
+              <option value="random">랜덤</option>
+            </select>
+          </div>
+
+          {category === 'expertise' && (
+            <div>
+              <label className="block text-sm text-gray-600 mb-1">전문영역</label>
+              <select
+                className="w-full border rounded px-2 py-2 text-sm"
+                value={expertiseValue}
+                onChange={(e)=>setExpertiseValue(e.target.value)}
+              >
+                {expertiseOptions.length === 0 ? (
+                  <option value="">없음</option>
+                ) : expertiseOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+              </select>
+            </div>
+          )}
+
+          {category === 'priority' && (
+            <div>
+              <label className="block text-sm text-gray-600 mb-1">우선순위</label>
+              <select
+                className="w-full border rounded px-2 py-2 text-sm"
+                value={priorityValue}
+                onChange={(e)=>setPriorityValue(e.target.value)}
+              >
+                <option value="3">3 (상)</option>
+                <option value="2">2 (중)</option>
+                <option value="1">1 (하)</option>
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">토너먼트 인원</label>
+            <select
+              className="w-full border rounded px-2 py-2 text-sm"
+              value={size}
+              onChange={(e)=>setSize(Number(e.target.value))}
+            >
+              <option value={16}>16명</option>
+              <option value={32}>32명</option>
+              <option value={64}>64명</option>
+            </select>
+          </div>
+        </div>
+        <div className="pt-2">
+          <Btn variant="primary" onClick={handleStart}>시작하기</Btn>
+        </div>
+      </section>
+    );
+  }
+
+  if (phase === 'play') {
+    const currentIndex = winners.length; // 진행 중인 페어 인덱스
+    const pair = roundPairs[currentIndex] || [];
+    const [left, right] = pair;
+
+    return (
+      <section className="space-y-4">
+        <div className="bg-white rounded-xl shadow-md p-4 flex items-center justify-between">
+          <h2 className="text-lg font-bold">라운드 {currentRound} — {roundPairs.length - winners.length} 매치 남음</h2>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-4">
+          {left && (
+            <div className="bg-white rounded-xl shadow border p-4">
+              <ProfileCard
+                profile={left}
+                onUpdate={onUpdate} onDelete={onDelete}
+                accessCode={accessCode} onSyncOne={onSyncOne}
+                onShowSimilar={onShowSimilar} onToggleStar={onToggleStar}
+              />
+              <div className="mt-3 flex justify-end">
+                <Btn variant="success" onClick={()=>pickWinner(left)} type="button">이 프로필 선택</Btn>
+              </div>
+            </div>
+          )}
+          {right && (
+            <div className="bg-white rounded-xl shadow border p-4">
+              <ProfileCard
+                profile={right}
+                onUpdate={onUpdate} onDelete={onDelete}
+                accessCode={accessCode} onSyncOne={onSyncOne}
+                onShowSimilar={onShowSimilar} onToggleStar={onToggleStar}
+              />
+              <div className="mt-3 flex justify-end">
+                <Btn variant="success" onClick={()=>pickWinner(right)} type="button">이 프로필 선택</Btn>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  // result
+  return (
+    <section className="bg-white rounded-xl shadow-md p-6">
+      <h2 className="text-xl font-bold mb-4">최종 우승자</h2>
+      {champion ? (
+        <ProfileCard
+          profile={champion}
+          onUpdate={onUpdate} onDelete={onDelete}
+          accessCode={accessCode} onSyncOne={onSyncOne}
+          onShowSimilar={onShowSimilar} onToggleStar={onToggleStar}
+        />
+      ) : (
+        <div className="text-sm text-gray-500">결과 없음</div>
+      )}
+      <div className="mt-4">
+        <Btn variant="subtle" onClick={() => { setPhase('setup'); setChampion(null); }}>다시 하기</Btn>
+      </div>
+    </section>
+  );
+}
+
 // ============ UI 컴포넌트 ============
 const ConfirmationModal = ({ message, onConfirm, onCancel }) => (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
@@ -1360,6 +1582,18 @@ function MainContent({
      if (!isAdmin) return <div className="text-sm text-red-600">권한이 없습니다. (App gate)</div>;
      return <UserAdmin isAdminOverride={isAdmin} probe={{ from:'App', isAdmin, ts:new Date().toISOString() }} />;
    }
+   if (activeMain === 'ideal') {
+     return (
+       <IdealGamePage
+         profiles={profilesWithHelpers}
+         onUpdate={handleUpdate} onDelete={handleDeleteRequest}
+         accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
+         onShowSimilar={openSimilarModal}
+         onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+       />
+     );
+   }
+
    // functions (graphs/rec/long)
    return (
      <FunctionsPage
@@ -1902,6 +2136,13 @@ export default function App() {
                     </button>
                   </div>
                 )}
+                  
+                <button
+                  onClick={()=>{ setActiveMain('ideal'); setFunctionsOpen(false); }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='ideal'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}
+                >
+                  <Sparkles size={16}/> 이상형게임
+                </button>
 
                 {/* 관리자 전용 */}
                 <AdminOnlyButton
