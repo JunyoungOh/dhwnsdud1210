@@ -993,52 +993,197 @@ const ExcelUploader = ({ onBulkAdd }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState('');
 
+  // 헤더 정규화: 소문자화 + 공백/특수문자 제거
+  const norm = (s) =>
+    String(s || '')
+      .toLowerCase()
+      .replace(/\s+/g, '')
+      .replace(/[()\[\]{}\-_/\\.:,*'"`|!?@#%^&+~]/g, '');
+
+  // 헤더 매칭 사전
+  const HEADERS = {
+    name: new Set(['이름', 'name']),
+    career: new Set(['경력', '경력요약', 'career', 'careersummary']),
+    age: new Set(['나이', '추정나이', 'age', 'estimatedage']),
+    expertise: new Set(['전문영역', '전문분야', 'expertise', 'specialty']),
+    priority: new Set(['우선순위', 'priority']),
+    meeting: new Set(['미팅기록', '미팅히스토리', 'meetinghistory', 'meetingrecord']),
+    // 기타정보로 통합할 후보들 (여러 열 가능)
+    otherGroup: new Set([
+      '추가정보',
+      '경력상세내용',
+      '비공식레퍼런스',
+      '현황체크',
+      '기타',
+      '메모',
+      'notes',
+      'detail',
+    ]),
+  };
+
+  const detectColumns = (headerRow) => {
+    const map = {
+      name: null,
+      career: null,
+      age: null,
+      expertise: null,
+      priority: null,
+      meeting: null,
+      others: [], // 인덱스 배열
+      rawHeaders: headerRow, // 나중에 라벨 표시에 사용
+    };
+    headerRow.forEach((h, idx) => {
+      const n = norm(h);
+      if (HEADERS.name.has(n) && map.name == null) map.name = idx;
+      else if (HEADERS.career.has(n) && map.career == null) map.career = idx;
+      else if (HEADERS.age.has(n) && map.age == null) map.age = idx;
+      else if (HEADERS.expertise.has(n) && map.expertise == null) map.expertise = idx;
+      else if (HEADERS.priority.has(n) && map.priority == null) map.priority = idx;
+      else if (HEADERS.meeting.has(n) && map.meeting == null) map.meeting = idx;
+      else if (HEADERS.otherGroup.has(n)) map.others.push(idx);
+    });
+    return map;
+  };
+
+  const val = (row, idx) => (idx == null ? '' : (row[idx] ?? ''));
+
   const handleUpload = async () => {
     if (!file) { setMessage('파일을 먼저 선택해주세요.'); return; }
-    setIsUploading(true); setMessage('파일을 읽는 중...');
+    if (!window.XLSX) { setMessage('엑셀 라이브러리를 불러오는 중입니다. 잠시 후 다시 시도해주세요.'); return; }
+
+    setIsUploading(true);
+    setMessage('파일을 읽는 중...');
+
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
         const data = new Uint8Array(e.target.result);
-        const workbook = window.XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const json = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-        if (json.length < 2) { setMessage('엑셀 파일에 데이터가 없습니다 (2행부터 읽습니다).'); setIsUploading(false); return; }
-        const newProfiles = json.slice(1).map(row => ({
-          name: row[2] || '', career: row[3] || '', age: row[5] ? Number(row[5]) : null,
-          expertise: row[7] || '', priority: row[9] ? String(row[9]) : '',
-          meetingRecord: row[11] || '', otherInfo: row[13] || '',
-          eventDate: (()=>{const p=parseDateTimeFromRecord(row[11]||''); return p? p.date.toISOString():null;})(),
-        })).filter(p => p.name && p.career);
+        const wb = window.XLSX.read(data, { type: 'array' });
+        const sheetName = wb.SheetNames[0];
+        const ws = wb.Sheets[sheetName];
+        const rows = window.XLSX.utils.sheet_to_json(ws, { header: 1 });
+
+        if (!rows || rows.length < 2) {
+          setMessage('엑셀 파일에 데이터가 없습니다. (1행: 헤더, 2행부터 데이터)');
+          setIsUploading(false);
+          return;
+        }
+
+        // 1) 헤더 자동 추적
+        const header = rows[0].map((x) => (x ?? ''));
+        const col = detectColumns(header);
+
+        // 2) 데이터 행 파싱
+        const newProfiles = [];
+        for (let i = 1; i < rows.length; i++) {
+          const r = rows[i] || [];
+
+          const name = String(val(r, col.name) || '').trim();
+          const career = String(val(r, col.career) || '').trim();
+          const ageRaw = String(val(r, col.age) ?? '').trim();
+          const expertise = String(val(r, col.expertise) || '').trim();
+          const priority = String(val(r, col.priority) || '').trim();
+          const meetingRecord = String(val(r, col.meeting) || '').trim();
+
+          // 기타정보 통합: "헤더명: 값" 형태로 줄바꿈 결합
+          const others = (col.others || [])
+            .map((idx) => {
+              const h = String(header[idx] ?? '').trim();
+              const v = String(val(r, idx) ?? '').trim();
+              return v ? `${h}: ${v}` : '';
+            })
+            .filter(Boolean)
+            .join('\n');
+
+          // 숫자 변환 (인식 실패 시 null)
+          let age = null;
+          if (ageRaw) {
+            const n = Number(ageRaw);
+            if (!Number.isNaN(n) && Number.isFinite(n)) age = n;
+          }
+
+          // 미팅기록 → eventDate 추출(인식 실패는 null로)
+          const parsed = parseDateTimeFromRecord(meetingRecord);
+          const eventDate = parsed ? parsed.date.toISOString() : null;
+
+          // 최소 생성 조건:
+          //  - 이름은 반드시 필요 (덮어쓰기 키)
+          //  - 그 외 항목은 비어 있어도 OK (요청사항 반영)
+          if (!name) continue;
+
+          newProfiles.push({
+            name,
+            career, // 없으면 빈문자열
+            age, // null 허용
+            otherInfo: others || '', // 통합
+            expertise,
+            priority,
+            meetingRecord,
+            eventDate,
+          });
+        }
+
+        if (newProfiles.length === 0) {
+          setMessage('추가/업데이트할 유효한 행이 없습니다. (이름이 비어 있는 행은 건너뜁니다)');
+          setIsUploading(false);
+          return;
+        }
+
+        // 3) 업로드 (기존 정책 유지: 이름이 같으면 덮어쓰기)
         const msg = await onBulkAdd(newProfiles);
-        setMessage(msg); setFile(null);
+        setMessage(msg);
+        setFile(null);
         (toast.success?.(msg) ?? toast(msg));
       } catch (err) {
         console.error('엑셀 처리 오류:', err);
         setMessage('엑셀 파일을 처리하는 중 오류가 발생했습니다.');
         (toast.error?.('엑셀 처리 중 오류가 발생했습니다.') ?? toast('엑셀 처리 중 오류가 발생했습니다.'));
-      } finally { setIsUploading(false); }
+      } finally {
+        setIsUploading(false);
+      }
     };
+
     reader.readAsArrayBuffer(file);
   };
 
   return (
     <section className="bg-white p-6 rounded-xl shadow-md">
-      <h2 className="text-xl font-bold mb-4 flex items-center"><UploadCloud className="mr-2 text-yellow-500" aria-hidden/>엑셀로 일괄 등록</h2>
+      <h2 className="text-xl font-bold mb-4 flex items-center">
+        <UploadCloud className="mr-2 text-yellow-500" aria-hidden/>엑셀로 일괄 등록
+      </h2>
+
       <div className="space-y-4">
-        <p className="text-sm text-gray-600">정해진 양식의 엑셀 파일을 업로드하여 여러 프로필을 한 번에 추가할 수 있습니다.</p>
         <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md border">
-          <p className="font-semibold">엑셀 양식 안내:</p>
-          <p>2행부터 각 행을 한 프로필로 읽습니다.</p>
-          <p>각 열의 C=이름, D=경력, F=나이, H=전문영역, J=우선순위, L=미팅기록, N=기타정보 로 입력됩니다.</p>
-          <p className="font-bold mt-1">※ 기존 프로필과 이름이 겹칠 경우, 덮어쓰기됩니다.</p>
+          <p className="font-semibold">엑셀 양식 안내 (헤더 자동추적)</p>
+          <ul className="list-disc ml-4 mt-1 space-y-1">
+            <li>1행은 헤더입니다. 열 위치와 상관없이 아래 단어를 인식합니다.</li>
+            <li><b>이름</b> → 이름</li>
+            <li><b>경력</b> 또는 <b>경력 요약</b> → 경력</li>
+            <li><b>나이</b> 또는 <b>추정 나이</b> → 나이</li>
+            <li><b>전문영역</b> → 전문영역</li>
+            <li><b>우선순위</b> → 우선순위</li>
+            <li><b>미팅 히스토리</b> → 미팅기록</li>
+            <li><b>추가 정보 / 경력 상세 내용 / 비공식 레퍼런스 / 현황체크 / 기타 / 메모</b> → 기타정보로 통합 저장</li>
+            <li>인식되지 않은 헤더/열은 무시됩니다. (오류 없이 건너뜀)</li>
+            <li>최소 요건: <b>이름</b>이 비어 있으면 해당 행은 건너뜁니다.</li>
+            <li>동명이인이면 기존 프로필을 <b>덮어쓰기</b>합니다.</li>
+          </ul>
         </div>
-        <input type="file" accept=".xlsx, .xls" onChange={(e)=>{ setFile(e.target.files[0]); setMessage(''); }} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100"/>
+
+        <input
+          type="file"
+          accept=".xlsx, .xls"
+          onChange={(e)=>{ setFile(e.target.files[0]); setMessage(''); }}
+          className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4
+                     file:rounded-full file:border-0 file:text-sm file:font-semibold
+                     file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100"
+        />
+
         <Btn onClick={handleUpload} disabled={!file || isUploading} className="w-full" variant="primary">
           {isUploading ? <Loader2 className="animate-spin" /> : '업로드 및 추가'}
         </Btn>
-        {message && <p className="text-sm text-center text-gray-600">{message}</p>}
+
+        {message && <p className="text-sm text-center text-gray-600 whitespace-pre-wrap">{message}</p>}
       </div>
     </section>
   );
