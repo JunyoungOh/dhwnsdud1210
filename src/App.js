@@ -1700,6 +1700,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeMain, setActiveMain]   = useState('alerts');
   const [functionsOpen, setFunctionsOpen] = useState(false);
+  const [functionsSub, setFunctionsSub] = useState('rec');
   const [idealSeed, setIdealSeed] = useState(null); // 검색결과로 이상형게임 시드
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
