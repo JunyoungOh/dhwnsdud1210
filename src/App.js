@@ -1942,9 +1942,6 @@ export default function App() {
                   } catch (e) { /* noop */ }
                   setAutoExpertiseProgress(s => ({ ...s, done: s.done + 1 }));
                 });
-                try { await Promise.all(tasks); } catch (e) { /* noop */ }
-                setAutoExpertiseInProgress(false);
-              })();
 
                 try { await Promise.all(tasks); } catch (e) { /* noop */ }
                 setAutoExpertiseInProgress(false);
