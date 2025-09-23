@@ -322,9 +322,18 @@ function detectExpertiseFromCareer(careerText = '') {
   for (const [cat, cores] of Object.entries(CORE_TOKENS)) {
     if (!cores || !cores.length) continue;
     const clist = cores.map(normalize);
-    const hasCore = clist.some(c => c && (hay.indexOf(` ${c} `) !== -1 || hay.indexOf(c) !== -1));
-    if (!hasCore && rawScores[cat].score > 0) {
-      rawScores[cat].score = Math.floor(rawScores[cat].score * 0.5); // 절반 감점
+    let coreHits = 0;
+    for (const c of clist) {
+      if (!c) continue;
+      if (hay.indexOf(` ${c} `) !== -1 || hay.indexOf(c) !== -1) coreHits += 1;
+    }
+    // HR는 코어 2개 미만이면 과감히 0점(오검출 억제)
+    if (cat === '인사/노무') {
+      if (coreHits < 2) rawScores[cat].score = 0;
+    } else {
+      if (coreHits === 0 && rawScores[cat].score > 0) {
+        rawScores[cat].score = Math.floor(rawScores[cat].score * 0.5);
+      }
     }
   }
 
@@ -342,13 +351,10 @@ function detectExpertiseFromCareer(careerText = '') {
    const strategy = rawScores['전략/BD']?.score || 0;
    const hr = rawScores['인사/노무']?.score || 0;
 
-  // C레벨이 충분히 강하면 HR보다 우선 (HR이 확실히 크면 예외)
-  if (bestCat === '인사/노무' && cLevel >= 5 && hr < cLevel * 0.7) {
-    bestCat = 'C레벨 Pool';
-  }
-  // 전략/BD가 강하면 HR보다 우선 (HR이 확실히 크면 예외)
-  if (bestCat === '인사/노무' && strategy >= 4 && hr < strategy * 0.7) {
-    bestCat = '전략/BD';
+  // C레벨/전략이 충분히 강하면 HR 선택을 배제(오검출 방지)
+  if (bestCat === '인사/노무') {
+    if (cLevel >= 5 && hr < cLevel * 0.9) return 'C레벨 Pool';
+    if (strategy >= 4 && hr < strategy * 0.9) return '전략/BD';
   }
 
   return bestCat;
