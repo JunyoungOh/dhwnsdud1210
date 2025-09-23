@@ -222,6 +222,60 @@ function similarityScore(a, b) {
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
+// ===== 전문영역 자동 인식 =====
+const EXPERTISE_KEYWORDS = {
+  '재무/투자': [
+    '투자','investment','재무','fp&a','금융','m&a','cfo','은행','벤처캐피탈','벤처캐피털','vc','증권','회계'
+  ],
+  '전략/BD': [
+    'cso','전략','컨설팅','business analyst','mckinsey','bcg','맥킨지','pe','private equity','m&a','ba',
+    'strategy','미래전략실','경영','베인','engagement manager','ceo staff','ceo','corporate finance','사업총괄','사업','bd'
+  ],
+  '테크/프로덕트': [
+    '개발자','pm','po','developer','engineer','cpo','product','cto','개발','product manager','product owner','architect'
+  ],
+  '브랜드/마케팅': [
+    '브랜딩','마케팅','브랜드','brand','branding','marketing','제일기획','ae','creative director'
+  ],
+  '인사/노무': [
+    '인사','노무','hr','er','human resource','employee','relation','노경','경영지원','노사','노무법인','노무사'
+  ],
+  'C레벨 Pool': [
+    'ceo','대표','대표이사','사장','총괄사장','창업자','founder','지사장'
+  ],
+  '홍보/대관': [
+    '홍보','대관','pr','커뮤니케이션','gr','communication'
+  ],
+};
+
+function detectExpertiseFromCareer(careerText = '') {
+  const text = String(careerText || '').toLowerCase();
+  if (!text.trim()) return null;
+  let best = null; // {name, score, lastPos}
+  const normalize = (s) => s.replace(/\s+/g, ' ').trim();
+
+  Object.entries(EXPERTISE_KEYWORDS).forEach(([name, kws]) => {
+    let count = 0;
+    let lastPos = -1;
+    kws.forEach((kwRaw) => {
+      const kw = normalize(kwRaw.toLowerCase());
+      // 부분문자열 매칭: 여러 번 등장 카운트
+      let idx = text.indexOf(kw);
+      while (idx !== -1) {
+        count += 1;
+        lastPos = Math.max(lastPos, idx);
+        idx = text.indexOf(kw, idx + kw.length);
+      }
+    });
+    if (count === 0) return;
+    // 우선순위: 출현 횟수 가중치 + 최근 등장 위치 가중치
+    // score = count*1000 + lastPos (최근일수록 lastPos가 큼)
+    const score = count * 1000 + Math.max(0, lastPos);
+    if (!best || score > best.score) best = { name, score, lastPos };
+  });
+  return best ? best.name : null;
+}
+
 // ======== 경로 자동 탐지 (기존 구조 고정) ========
 function buildPathCandidates(accessCode, aid) {
   return [
@@ -757,7 +811,14 @@ const ProfileCard = ({
         </div>
       </div>
 
-      {profile.expertise && <p className="text-sm font-semibold text-gray-600 mt-1">{profile.expertise}</p>}
+      {profile.expertise && (
+        <p className="text-sm font-semibold text-gray-600 mt-1">
+          {profile.expertise}
+          {profile.expertiseIsAuto && (
+            <span className="ml-2 text-xs text-gray-400 align-baseline">(auto)</span>
+          )}
+        </p>
+      )}
       <p className="text-sm text-gray-800 whitespace-pre-wrap">{profile.career}</p>
       {profile.otherInfo && <p className="text-xs text-gray-500 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
       {profile.meetingRecord && (
@@ -1379,7 +1440,12 @@ const ExcelUploader = ({ onBulkAdd }) => {
           const name = String(val(r, col.name) || '').trim();
           const career = String(val(r, col.career) || '').trim();
           const ageRaw = String(val(r, col.age) ?? '').trim();
-          const expertise = String(val(r, col.expertise) || '').trim();
+          let expertise = String(val(r, col.expertise) || '').trim();
+          let expertiseIsAuto = false;
+          if (!expertise) {
+            const detected = detectExpertiseFromCareer(career);
+            if (detected) { expertise = detected; expertiseIsAuto = true; }
+          }
           const priority = String(val(r, col.priority) || '').trim();
           const meetingRecord = String(val(r, col.meeting) || '').trim();
 
@@ -1415,6 +1481,7 @@ const ExcelUploader = ({ onBulkAdd }) => {
             age, // null 허용
             otherInfo: others || '', // 통합
             expertise,
+            expertiseIsAuto,
             priority,
             meetingRecord,
             eventDate,
@@ -1510,9 +1577,17 @@ const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, acc
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!newName.trim() || !newCareer.trim()) return;
+    const autoExp = (!newExpertise || !newExpertise.trim())
+      ? detectExpertiseFromCareer(newCareer)
+      : null;
     await onAddOne({
-      name: newName, career: newCareer, age: newAge ? Number(newAge) : null,
-      otherInfo: newOtherInfo || '', expertise: newExpertise || '', priority: newPriority || '',
+      name: newName,
+      career: newCareer,
+      age: newAge ? Number(newAge) : null,
+      otherInfo: newOtherInfo || '',
+      expertise: autoExp ? autoExp : (newExpertise || ''),
+      expertiseIsAuto: !!autoExp,
+      priority: newPriority || '',
       meetingRecord: newMeetingRecord || ''
     });
     setNewName(''); setNewCareer(''); setNewAge(''); setNewOtherInfo(''); setNewExpertise(''); setNewPriority(''); setNewMeetingRecord('');
@@ -1838,6 +1913,33 @@ export default function App() {
             setProfiles(data);
             setDataReady(true);
             setDataError(data.length === 0 ? '선택된 경로에 문서가 없습니다.' : '');
+
+            // 자동 백필: 전문영역이 없고 career가 있는 문서 대상, 중복 방지 플래그 사용
+            const needs = data.filter(p =>
+              !p.expertise && p.career && !p.expertiseAutoChecked
+            );
+            if (needs.length && activeColRef) {
+              // 과도한 쓰기 방지: 최대 50개씩 처리 (규모에 따라 조정)
+              const top = needs.slice(0, 50);
+              top.forEach(async (p) => {
+                const detected = detectExpertiseFromCareer(p.career);
+                if (detected) {
+                  try {
+                    await updateDoc(doc(activeColRef, p.id), {
+                      expertise: detected,
+                      expertiseIsAuto: true,
+                      expertiseAutoChecked: true,
+                    });
+                  } catch (e) { /* noop */ }
+                } else {
+                  try {
+                    await updateDoc(doc(activeColRef, p.id), {
+                      expertiseAutoChecked: true,
+                    });
+                  } catch (e) { /* noop */ }
+                }
+              });
+            }
           },
           (err) => {
             console.error('profiles onSnapshot error:', err);
@@ -1872,12 +1974,19 @@ export default function App() {
     if (!activeColRef) return;
     const parsed = parseDateTimeFromRecord(payload.meetingRecord);
     const eventDate = parsed ? parsed.date.toISOString() : null;
+    let expertise = payload.expertise || '';
+    let expertiseIsAuto = !!payload.expertiseIsAuto;
+    if (!expertise) {
+      const d = detectExpertiseFromCareer(payload.career);
+      if (d) { expertise = d; expertiseIsAuto = true; }
+    }
     const profileData = {
       name: payload.name,
       career: payload.career,
       age: payload.age ?? null,
       otherInfo: payload.otherInfo || '',
-      expertise: payload.expertise || '',
+      expertise,
+      expertiseIsAuto,
       priority: payload.priority || '',
       meetingRecord: payload.meetingRecord || '',
       eventDate,
