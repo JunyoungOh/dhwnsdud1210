@@ -1796,6 +1796,9 @@ export default function App() {
   const [dataError, setDataError] = useState('');
   const [resolvedPath, setResolvedPath] = useState('');
   const [autoExpertiseSkipped, setAutoExpertiseSkipped] = useState(false);
+  const [autoExpertiseInProgress, setAutoExpertiseInProgress] = useState(false);
+  const [autoExpertiseProgress, setAutoExpertiseProgress] = useState({ total: 0, done: 0 });
+  const [autoExpertiseSkipped, setAutoExpertiseSkipped] = useState(false);
 
   // 상세 모달
   const [detailOpen, setDetailOpen] = useState(false);
@@ -1921,24 +1924,29 @@ export default function App() {
             );
             // 로그인하지 않은 세션에서는 보안규칙상 update가 막히므로 스킵
             if (!auth.currentUser) {
-              setAutoExpertiseSkipped(true);
-              return;
-            }
-            if (needs.length && activeColRef) {
-
-              // 과도한 쓰기 방지: 최대 50개씩 처리 (규모에 따라 조정)
-              const top = needs.slice(0, 50);
-              top.forEach(async (p) => {
-                const detected = detectExpertiseFromCareer(p.career);
-                if (detected) {
+              if (needs.length) setAutoExpertiseSkipped(true);
+            } else if (needs.length && activeColRef) {
+              const top = needs.slice(0, 50); // 과도한 쓰기 방지
+              setAutoExpertiseInProgress(true);
+              setAutoExpertiseProgress({ total: top.length, done: 0 });
+              (async () => {
+                const tasks = top.map(async (p) => {
+                  const detected = detectExpertiseFromCareer(p.career);
                   try {
-                    await updateDoc(doc(activeColRef, p.id), {
+                    await updateDoc(doc(activeColRef, p.id), detected ? {
                       expertise: detected,
                       expertiseIsAuto: true,
                       expertiseAutoChecked: true,
+                    } : {
+                      expertiseAutoChecked: true,
                     });
                   } catch (e) { /* noop */ }
-                } else {
+                  setAutoExpertiseProgress(s => ({ ...s, done: s.done + 1 }));
+                });
+                try { await Promise.all(tasks); } catch (e) { /* noop */ }
+                setAutoExpertiseInProgress(false);
+              })();
+            }
                   try {
                     await updateDoc(doc(activeColRef, p.id), {
                       expertiseAutoChecked: true,
@@ -2272,6 +2280,22 @@ export default function App() {
                 {dataError && (
                   <div className="inline-block bg-red-50 text-red-700 border border-red-200 rounded px-2 py-1">
                     데이터 로드 오류: {dataError}
+                  </div>
+                )}
+                {autoExpertiseInProgress && (
+                  <div className="inline-flex items-center gap-2 bg-amber-50 text-amber-700 border border-amber-200 rounded px-2 py-1 ml-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>
+                      전문영역 자동보완 진행 중 …
+                      <b className="ml-1">
+                        {autoExpertiseProgress.done}/{autoExpertiseProgress.total}
+                      </b>
+                    </span>
+                  </div>
+                )}
+                {!autoExpertiseInProgress && autoExpertiseSkipped && (
+                  <div className="inline-block bg-amber-50 text-amber-700 border border-amber-200 rounded px-2 py-1 ml-2">
+                    로그인하지 않은 상태라 기존 프로필의 <b>전문영역 자동보완</b>은 건너뛰었습니다.
                   </div>
                 )}
                 {autoExpertiseSkipped && (
