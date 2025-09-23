@@ -903,7 +903,8 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
       </div>
 
       {searchTerm.trim() && (
-        <div className="mt-3 flex items-center justify-between">
+        <>
+          <div className="mt-3 flex items-center justify-between">
           <div className="text-sm text-gray-600">
             현재 검색 결과: <b>{visible.length}</b>명
           </div>
@@ -934,7 +935,8 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
           ) : (
             <div className="text-sm text-gray-500">검색 결과가 없습니다.</div>
           )}
-        </div>
+          </div>
+        </>
       )}
     </div>
   );
