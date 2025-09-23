@@ -2140,7 +2140,13 @@ export default function App() {
       return;
     }
     if (!activeColRef) return;
-    const targets = profiles.filter(p => !p.expertise && p.career); // 플래그 무시, 경력 기반 재스캔
+    // 1) 기존: 비어있는 것만
+    // const targets = profiles.filter(p => !p.expertise && p.career);
+    // 2) 개선: '비어있거나(auto인 것)'을 모두 재평가
+    const targets = profiles.filter(p =>
+      p.career &&
+      (!p.expertise || p.expertiseIsAuto === true)
+    );
     if (!targets.length) {
       (toast?.info?.('처리할 대상이 없습니다.') ?? toast('처리할 대상이 없습니다.'));
       return;
