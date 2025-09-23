@@ -224,70 +224,80 @@ function similarityScore(a, b) {
 
 // ===== 전문영역 자동 인식 =====
 const EXPERTISE_KEYWORDS = {
+  // ::가중치 (기본 1). 직함/핵심용어는 3, 강한 시그널은 2 권장
   '재무/투자': [
-    '투자','investment','재무','fp&a','금융','m&a','cfo','은행','벤처캐피탈','벤처캐피털','vc','증권','회계'
+    '투자::2','investment::2','재무::2','fp&a','finance','금융::2','m&a::3','cfo::3','은행','ib','ipo','valuation','밸류에이션',
+    '벤처캐피탈::2','벤처캐피털::2','vc::2','증권','애널리스트','fund','펀드','회계','auditor','회계사','cpa','머지앤드어퀴지션'
   ],
   '전략/BD': [
-    'cso','전략','컨설팅','business analyst','mckinsey','bcg','맥킨지','pe','private equity','m&a','ba',
-    'strategy','미래전략실','경영','베인','engagement manager','ceo staff','ceo','corporate finance','사업총괄','사업','bd'
+    'cso::3','전략::2','strategy::2','컨설팅::2','consultant::2','business analyst','mckinsey::3','맥킨지::3','bcg::3','bain::3','베인::3',
+    'pe::2','private equity::2','m&a::3','ba','미래전략실','경영전략','corp dev::2','corporate development::2',
+    'engagement manager::2','ceo staff::2','chief of staff::2','corporate finance','사업총괄::2','사업전략::2','bd::2','사업개발::2'
   ],
   '테크/프로덕트': [
-    '개발자','pm','po','developer','engineer','cpo','product','cto','개발','product manager','product owner','architect'
+    '개발자::2','developer::2','software engineer::3','engineer::2','swe::2','frontend','back-end','backend','full stack','infra',
+    'pm::2','po::2','product manager::3','product owner::2','cpo::3','cto::3','architect::2','tech lead::2','엔지니어','머신러닝','ml',
+    'data engineer','data scientist','ai','devops','sre','qa','테크리드','프로덕트::2','개발::2','프로덕트 매니저::3'
   ],
   '브랜드/마케팅': [
-    '브랜딩','마케팅','브랜드','brand','branding','marketing','제일기획','ae','creative director'
+    '브랜딩::2','마케팅::2','마케터','브랜드::2','brand::2','branding::2','marketing::2','performance marketing','growth::2',
+    'crm','seo','sem','content marketing','creative director::2','copywriter','미디어플래닝','캠페인','제일기획::2','ae::2','광고대행사'
   ],
   '인사/노무': [
-    '인사','노무','hr','er','human resource','employee','relation','노경','경영지원','노사','노무법인','노무사'
+    '인사::2','hr::2','people','talent acquisition','recruiter','ta','c&b','compensation','benefits','er::2','employee relations::2',
+    '노무::2','노사::2','노경::2','노무법인','노무사::2','hrbp::2','경영지원','조직문화','labor','human resource::2'
   ],
   'C레벨 Pool': [
-    'ceo','대표','대표이사','사장','총괄사장','창업자','founder','지사장'
+    'ceo::3','대표::3','대표이사::3','사장::3','총괄사장::3','창업자::3','founder::3','co-founder::3','지사장::3','총괄::2','cxo::3',
+    'chairman::3','vice president::2','svp::2','evp::2','board member::2','이사회::2'
   ],
   '홍보/대관': [
-    '홍보','대관','pr','커뮤니케이션','gr','communication'
+    '홍보::2','pr::2','communications::2','커뮤니케이션::2','gr::2','대관::2','public affairs::2','언론','보도자료','media relations'
   ],
 };
 
 function detectExpertiseFromCareer(careerText = '') {
   let text = String(careerText || '').toLowerCase();
   if (!text.trim()) return null;
-  // 본문 정규화: HTML 엔티티/전각 기호/구분점 → 통일
-  text = text
-    .replace(/&amp;|&#38;/g, '&')
-    .replace(/＆/g, '&')
-    .replace(/[·•\-_/|]/g, ' ')
+  const normalize = (s) => String(s || '').toLowerCase()
+    .replace(/&amp;|&#38;/g, '&')    // HTML 엔티티 → &
+    .replace(/＆/g, '&')             // 전각 앰퍼샌드
+    .replace(/[·•・∙··]/g, ' ')      // 점류 기호
+    .replace(/[_/|\\\-]/g, ' ')      // 구분자 → 공백
     .replace(/\s+/g, ' ')
     .trim();
-  const hay = ` ${text} `; // 경계 완화용 패딩
+  const hay = ` ${normalize(text)} `; // 경계 완화용 패딩
 
-  const norm = (s) => String(s || '').toLowerCase()
-    .replace(/&amp;|&#38;/g, '&')
-    .replace(/＆/g, '&')
-    .replace(/[·•\-_/|]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const parseKw = (raw) => {
+    // '키워드::가중치' 형태 지원
+    const m = String(raw).split('::');
+    const kw = normalize(m[0]);
+    const w = Number(m[1]) || 1;
+    return { kw, w };
+  };
 
   let best = null; // { name, score, lastPos }
 
   for (const [name, kws] of Object.entries(EXPERTISE_KEYWORDS)) {
-    let count = 0;
+    let score = 0;
     let lastPos = -1;
     for (const raw of kws) {
-      const kw = norm(raw);
+      const { kw, w } = parseKw(raw);
       if (!kw) continue;
-      // 1) 완전 단어 경계 시도
+      // 1) 단어 경계 우선
       let idx = hay.indexOf(` ${kw} `);
-      // 2) 경계 실패시 부분 매칭도 허용 (예: 'product manager' 일부만 써둔 케이스)
+      // 2) 경계 실패 시 부분 매칭 보조
       if (idx === -1) idx = hay.indexOf(kw);
       while (idx !== -1) {
-        count += 1;
+        score += (w || 1);
         lastPos = Math.max(lastPos, idx);
         idx = hay.indexOf(kw, idx + kw.length);
       }
     }
-    if (count > 0) {
-      const score = count * 1000 + Math.max(0, lastPos); // 출현 빈도 + 최근성
-      if (!best || score > best.score) best = { name, score, lastPos };
+    if (score > 0) {
+      // 출현 가중치 * 1000 + 최근성
+      const final = score * 1000 + Math.max(0, lastPos);
+      if (!best || final > best.score) best = { name, score: final, lastPos };
     }
   }
   return best ? best.name : null;
