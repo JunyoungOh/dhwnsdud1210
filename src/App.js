@@ -248,7 +248,6 @@ const EXPERTISE_KEYWORDS = {
     'talent acquisition','ta','recruiter','채용','교육','평가','보상','c&b','compensation','benefits',
     'employee relations','er','노사','노경','조직문화','경영지원','노무법인','노무사','인사총무','hr operations'
   ],
-  ],
   'C레벨 Pool': [
     'ceo::3','대표::3','대표이사::3','사장::3','총괄사장::3','창업자::3','founder::3','co-founder::3','지사장::3','총괄::2','cxo::3',
     'chairman::3','vice president::2','svp::2','evp::2','board member::2','이사회::2'
