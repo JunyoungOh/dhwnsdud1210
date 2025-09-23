@@ -267,19 +267,22 @@ const CORE_TOKENS = {
   '인사/노무': ['hr','인사','노무','hrbp','ta','talent acquisition','people team','people operations','employee relations'],
 };
 
-// 최근 경력 가중치 계산: 이력서/프로필이 보통 최근순이므로 "상단 라인"에 높은 가중치
+// 최근 경력 가중치 계산: 상단 라인 + 최근 연도 + '현재/재직' 마커 감지
 function computeLineSlices(rawText) {
   const raw = String(rawText || '');
   const chunks = raw
-    .split(/\r?\n+/)                     // 줄바꿈 기준 1차 분할
-    .flatMap(l => l.split(/[•·∙・\-\u2212]/)) // 불릿/대시 기준 2차 분할
+    .split(/\r?\n+/)                        // 줄바꿈 기준 1차 분할
+    .flatMap(l => l.split(/[•·∙・\-–—\u2212]/)) // 불릿/대시 기준 2차 분할
     .map(s => s.trim())
     .filter(Boolean);
-  // 상단일수록 큰 가중(최소 0.3 보장)
+
   const n = chunks.length || 1;
-  const base = (idx) => Math.max(0.3, 1.1 - (idx / Math.max(6, n)) * 0.8); // 1.1 → 0.3 사이
-  // 연도 보너스: 최신 연도 언급에 가산점
-  const yearRe = /(20\d{2})/g; // 2000년대만 고려
+
+  // 위치 기반 가중: 상단일수록 커짐 (최소 0.3 보장)
+  const base = (idx) => Math.max(0.3, 1.1 - (idx / Math.max(6, n)) * 0.8);
+
+  // 연도 보너스
+  const yearRe = /(20\d{2})/g; // 2000년대만
   const nowY = new Date().getFullYear();
   const recBonus = (line) => {
     let m, best = 0;
@@ -289,18 +292,36 @@ function computeLineSlices(rawText) {
       if (y >= 2000 && y <= nowY + 1) best = Math.max(best, y);
     }
     if (!best) return 0;
-    // 최근일수록 보너스↑ (예: 올해/작년 +0.5, 3년 이내 +0.35, 5년 이내 +0.2)
     const diff = Math.max(0, nowY - best);
     if (diff <= 1) return 0.5;
     if (diff <= 3) return 0.35;
     if (diff <= 5) return 0.2;
     return 0.1;
   };
-  return chunks.map((line, idx) => ({
-    line,
-    weight: base(idx) + recBonus(line), // 라인 위치 + 연도 보너스
-  }));
+
+  // '현재/재직/Present' 마커 감지
+  const currentMarkers = [
+    '현재', '재직', '근무중', 'present', 'now', 'current', 'on-going', 'ongoing'
+  ];
+  // 범용 기간 패턴: "YYYY.MM ~ 현재", "YYYY-MM – Present" 등
+  const currentRangeRe =
+    /(?:20\d{2}[./-](?:\d{1,2})?)\s*[~\-–—]\s*(?:현재|present|now|current)/i;
+
+  return chunks.map((line, idx) => {
+    const low = line.toLowerCase();
+    const isCurrent =
+      currentMarkers.some(m => low.includes(m)) || currentRangeRe.test(line);
+    const isTopRecent = idx < TOP_HEAD_RANGE; // 상단 몇 줄 보너스
+    const weight = base(idx) + recBonus(line);
+    return { line, idx, isCurrent, isTopRecent, weight };
+  });
 }
+
+// === 최근/현재 경력 가중치 상수 ===
+const CURRENT_MULT = 2.0;       // "현재/재직/Present" 라인 가중
+const CURRENT_HR_MULT = 2.5;    // HR 카테고리의 '현재 경력' 가중(오검출 억제 유지하면서 현재면 강하게)
+const TOP_HEAD_MULT = 1.4;      // 상단(가장 최근) 몇 줄 보너스
+const TOP_HEAD_RANGE = 3;       // 상단 N줄을 '최근 라인'으로 간주
 
 function detectExpertiseFromCareer(careerText = '') {
   let text = String(careerText || '').toLowerCase();
@@ -322,31 +343,41 @@ function detectExpertiseFromCareer(careerText = '') {
     return { kw, w };
   };
 
-  // 1) 라인/연도 가중치가 반영된 스코어링
+  // 라인/연도/현재 경력 가중치가 반영된 스코어링
   const rawScores = {}; // { cat: {score, lastPos, hits:{kw->count}} }
-  const slices = computeLineSlices(text); // 원문(raw text) 기준 분절
+  const slices = computeLineSlices(text); // 원문 기준 분절
+
   for (const [cat, kws] of Object.entries(EXPERTISE_KEYWORDS)) {
     let score = 0, lastPos = -1;
     const hits = {};
     for (const raw of kws) {
       const { kw, w } = parseKw(raw);
       if (!kw) continue;
-      // 라인 단위로 검색 후, 해당 라인의 가중치와 함께 누적
+
       for (let i = 0; i < slices.length; i++) {
-        const { line, weight } = slices[i];
+        const { line, weight, isCurrent, isTopRecent, idx } = slices[i];
         if (!line) continue;
+
+        // 라인 정규화 후 매칭
         const normLine = ` ${line.toLowerCase().replace(/[·•・∙]/g, ' ').replace(/\s+/g, ' ').trim()} `;
         let localCount = 0;
-        let idx = normLine.indexOf(` ${kw} `);
-        if (idx === -1) idx = normLine.indexOf(kw);
-        while (idx !== -1) {
+        let pos = normLine.indexOf(` ${kw} `);
+        if (pos === -1) pos = normLine.indexOf(kw);
+        while (pos !== -1) {
           localCount += 1;
-          // 전체 텍스트 기준의 마지막 등장 위치 추정(라인 인덱스를 이용해 상대 지표만 확보)
-          lastPos = Math.max(lastPos, (text.length - i)); // 상단일수록 값이 큼 → “최근” 우대
-          idx = normLine.indexOf(kw, idx + kw.length);
+          // 상단일수록 "최근"으로 간주 → 큰 lastPos (tie-break용)
+          lastPos = Math.max(lastPos, (text.length - idx));
+          pos = normLine.indexOf(kw, pos + kw.length);
         }
+
         if (localCount > 0) {
-          const perHit = (w || 1) * weight;
+          const baseHit = (w || 1) * weight;
+          const headBoost = isTopRecent ? TOP_HEAD_MULT : 1;
+          const currentBoost = isCurrent
+            ? (cat === '인사/노무' ? CURRENT_HR_MULT : CURRENT_MULT)
+            : 1;
+          const perHit = baseHit * headBoost * currentBoost;
+
           score += perHit * localCount;
           hits[kw] = (hits[kw] || 0) + localCount;
         }
@@ -375,9 +406,9 @@ function detectExpertiseFromCareer(careerText = '') {
       if (!c) continue;
       if (hay.indexOf(` ${c} `) !== -1 || hay.indexOf(c) !== -1) coreHits += 1;
     }
-    // HR는 코어 2개 미만이면 과감히 0점(오검출 억제)
+    // 코어 토큰 기반 억제/완화 (HR 하드컷 완화: 2개→1개)
     if (cat === '인사/노무') {
-      if (coreHits < 2) rawScores[cat].score = 0;
+      if (coreHits < 1) rawScores[cat].score = 0;
     } else {
       if (coreHits === 0 && rawScores[cat].score > 0) {
         rawScores[cat].score = Math.floor(rawScores[cat].score * 0.5);
