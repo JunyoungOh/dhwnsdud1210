@@ -1794,7 +1794,7 @@ export default function App() {
   const [dataReady, setDataReady] = useState(false);
 
   const [dataError, setDataError] = useState('');
-  const [resolvedPath, setResolvedPath] = useState('');
+  const [autoExpertiseSkipped, setAutoExpertiseSkipped] = useState(false);
 
   // 상세 모달
   const [detailOpen, setDetailOpen] = useState(false);
@@ -1918,7 +1918,13 @@ export default function App() {
             const needs = data.filter(p =>
               !p.expertise && p.career && !p.expertiseAutoChecked
             );
+            // 로그인하지 않은 세션에서는 보안규칙상 update가 막히므로 스킵
+            if (!auth.currentUser) {
+              setAutoExpertiseSkipped(true);
+              return;
+            }
             if (needs.length && activeColRef) {
+
               // 과도한 쓰기 방지: 최대 50개씩 처리 (규모에 따라 조정)
               const top = needs.slice(0, 50);
               top.forEach(async (p) => {
@@ -2265,6 +2271,11 @@ export default function App() {
                 {dataError && (
                   <div className="inline-block bg-red-50 text-red-700 border border-red-200 rounded px-2 py-1">
                     데이터 로드 오류: {dataError}
+                  </div>
+                )}
+                {autoExpertiseSkipped && (
+                  <div className="inline-block bg-amber-50 text-amber-700 border border-amber-200 rounded px-2 py-1 ml-2">
+                    로그인하지 않은 상태라 기존 프로필의 <b>전문영역 자동보완</b>은 건너뛰었습니다.
                   </div>
                 )}
               </div>
