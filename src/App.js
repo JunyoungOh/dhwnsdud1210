@@ -1925,7 +1925,7 @@ export default function App() {
             if (!auth.currentUser) {
               if (needs.length) setAutoExpertiseSkipped(true);
             } else if (needs.length && activeColRef) {
-              const top = needs.slice(0, 50); // 과도한 쓰기 방지
+              const top = needs.slice(0, 50);
               setAutoExpertiseInProgress(true);
               setAutoExpertiseProgress({ total: top.length, done: 0 });
               (async () => {
@@ -1942,6 +1942,10 @@ export default function App() {
                   } catch (e) { /* noop */ }
                   setAutoExpertiseProgress(s => ({ ...s, done: s.done + 1 }));
                 });
+                try { await Promise.all(tasks); } catch (e) { /* noop */ }
+                setAutoExpertiseInProgress(false);
+              })();
+
                 try { await Promise.all(tasks); } catch (e) { /* noop */ }
                 setAutoExpertiseInProgress(false);
               })();
