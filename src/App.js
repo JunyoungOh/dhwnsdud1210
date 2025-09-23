@@ -18,7 +18,7 @@ import {
   Edit, Trash2, ShieldAlert, X, Save, UploadCloud, BellRing, Share2,
   CalendarPlus, AlertCircle, Star, Menu,
   Layers, LineChart as LineChartIcon, Clock, Sparkles, ExternalLink,
-  ChevronDown
+  ChevronDown, Download
 } from 'lucide-react';
 
 import { parseNaturalQuery, matchProfileWithNL } from './utils/nlp';
@@ -1047,6 +1047,16 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
         />
       </div>
 
+      <div className="mt-3 flex justify-end">
+        <Btn
+          size="sm"
+          variant="subtle"
+          onClick={() => exportProfilesToXLSX(`profiles_${accessCode}_search`, visible)}
+          disabled={!searchTerm.trim() || !visible.length}
+        >
+          <Download className="w-4 h-4 mr-1" /> 검색 결과 엑셀
+        </Btn>
+      </div>
       {searchTerm.trim() && (
         <>
           <div className="mt-3 flex items-center justify-between">
@@ -1406,7 +1416,17 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, acc
   <section className="bg-white p-6 rounded-xl shadow-md animate-fade-in mt-4">
     <div className="flex justify-between items-center mb-4">
       <h3 className="text-lg font-bold text-gray-800">{title}</h3>
-      <Btn size="xs" variant="subtle" onClick={onClear}>필터 해제</Btn>
+      <div className="flex items-center gap-2">
+        <Btn
+          size="xs"
+          variant="subtle"
+          onClick={() => exportProfilesToXLSX(`profiles_${accessCode}_filter`, profiles)}
+          disabled={!profiles || !profiles.length}
+        >
+          <Download className="w-3 h-3 mr-1" /> 엑셀로 내보내기
+        </Btn>
+        <Btn size="xs" variant="subtle" onClick={onClear}>필터 해제</Btn>
+      </div>
     </div>
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {profiles.length > 0 ? (
@@ -1430,6 +1450,119 @@ const FilterResultSection = ({ title, profiles, onUpdate, onDelete, onClear, acc
   </section>
 );
 
+/* ===== 엑셀 내보내기 유틸 (하드닝 버전) =====
+   - 누락 필드/잘못된 타입에도 안전
+   - A:이름, B:경력, E:추정 나이, F:전문영역, H:우선순위, J:미팅기록, L:추가정보
+   - 사이 컬럼(C, D, G, I, K)은 빈 칸으로 유지
+   - window.XLSX 및 toast(프로젝트에 이미 존재) 사용
+*/
+function profilesToAoA(profiles) {
+  const header = [
+    '이름',      // A
+    '경력',      // B
+    '',          // C (빈 칸)
+    '',          // D (빈 칸)
+    '추정 나이', // E
+    '전문영역',  // F
+    '',          // G (빈 칸)
+    '우선순위',  // H
+    '',          // I (빈 칸)
+    '미팅기록',  // J
+    '',          // K (빈 칸)
+    '추가정보',  // L
+  ];
+  const rows = [header];
+
+  const safeText = (v) => {
+    if (v == null) return '';
+    if (typeof v === 'number') return Number.isFinite(v) ? String(v) : '';
+    if (typeof v === 'boolean') return v ? 'true' : 'false';
+    try { return String(v); } catch { return ''; }
+  };
+  const safeNum = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : '';
+  };
+
+  (Array.isArray(profiles) ? profiles : []).forEach((pRaw) => {
+    const p = pRaw || {};
+    const expertise =
+      p.expertise ? `${safeText(p.expertise)}${p.expertiseIsAuto ? ' (auto)' : ''}` : '';
+    const row = [
+      safeText(p.name),          // A
+      safeText(p.career),        // B
+      '',                        // C
+      '',                        // D
+      p.age === '' || p.age == null ? '' : safeNum(p.age), // E
+      expertise,                 // F
+      '',                        // G
+      safeText(p.priority),      // H
+      '',                        // I
+      safeText(p.meetingRecord), // J
+      '',                        // K
+      safeText(p.otherInfo),     // L
+    ];
+
+    // 항상 헤더 길이와 동일하게 보정
+    while (row.length < header.length) row.push('');
+    if (row.length > header.length) row.length = header.length;
+
+    rows.push(row);
+  });
+
+  return rows;
+}
+
+function exportProfilesToXLSX(fileBaseName, profiles) {
+  const list = Array.isArray(profiles) ? profiles.filter(Boolean) : [];
+  if (!list.length) {
+    (toast?.info?.('내보낼 데이터가 없습니다.') ?? toast('내보낼 데이터가 없습니다.'));
+    return;
+  }
+  if (!window.XLSX) {
+    (toast?.error?.('엑셀 라이브러리가 아직 로드되지 않았습니다. 잠시 후 다시 시도해주세요.') ?? toast('엑셀 라이브러리가 아직 로드되지 않았습니다. 잠시 후 다시 시도해주세요.'));
+    return;
+  }
+
+  try {
+    const aoa = profilesToAoA(list);
+    const ws = window.XLSX.utils.aoa_to_sheet(aoa);
+
+    // 열 너비(가독성)
+    ws['!cols'] = [
+      { wch: 16 }, // 이름
+      { wch: 60 }, // 경력
+      { wch: 2 },  // C 빈칸
+      { wch: 2 },  // D 빈칸
+      { wch: 10 }, // 추정 나이
+      { wch: 18 }, // 전문영역
+      { wch: 2 },  // G 빈칸
+      { wch: 10 }, // 우선순위
+      { wch: 2 },  // I 빈칸
+      { wch: 28 }, // 미팅기록
+      { wch: 2 },  // K 빈칸
+      { wch: 40 }, // 추가정보
+    ];
+
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, 'profiles');
+
+    const now = new Date();
+    const y = String(now.getFullYear());
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const fileName = `${fileBaseName}_${y}${m}${d}_${hh}${mm}.xlsx`;
+
+    window.XLSX.writeFile(wb, fileName);
+    (toast?.success?.('엑셀로 내보냈습니다.') ?? toast('엑셀로 내보냈습니다.'));
+  } catch (e) {
+    console.error('엑셀 내보내기 오류:', e);
+    (toast?.error?.('엑셀 내보내기 중 오류가 발생했습니다.') ?? toast('엑셀 내보내기 중 오류가 발생했습니다.'));
+  }
+}
+/* ===== /엑셀 내보내기 유틸 ===== */
 const ExcelUploader = ({ onBulkAdd }) => {
   const [file, setFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -2438,6 +2571,16 @@ export default function App() {
                 <h3 className="text-base font-medium text-gray-500">미팅 진행 프로필</h3>
                 <p className="text-3xl font-bold text-yellow-500 mt-1">{meetingCount}</p>
               </div>
+            </div>
+
+            <div className="mt-2 flex items-center justify-end">
+              <Btn
+                size="sm"
+                variant="subtle"
+                onClick={() => exportProfilesToXLSX(`profiles_${accessCode}_all`, profiles)}
+              >
+                <Download className="w-4 h-4 mr-1" /> 전체 엑셀
+              </Btn>
             </div>
           </header>
 
