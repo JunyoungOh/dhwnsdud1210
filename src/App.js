@@ -244,8 +244,10 @@ const EXPERTISE_KEYWORDS = {
     'crm','seo','sem','content marketing','creative director::2','copywriter','미디어플래닝','캠페인','제일기획::2','ae::2','광고대행사'
   ],
   '인사/노무': [
-    '인사::2','hr::2','people','talent acquisition','recruiter','ta','c&b','compensation','benefits','er::2','employee relations::2',
-    '노무::2','노사::2','노경::2','노무법인','노무사::2','hrbp::2','경영지원','조직문화','labor','human resource::2'
+    '인사','노무','hr','hrbp','hrm','hrd','people team','people operations','people ops',
+    'talent acquisition','ta','recruiter','채용','교육','평가','보상','c&b','compensation','benefits',
+    'employee relations','er','노사','노경','조직문화','경영지원','노무법인','노무사','인사총무','hr operations'
+  ],
   ],
   'C레벨 Pool': [
     'ceo::3','대표::3','대표이사::3','사장::3','총괄사장::3','창업자::3','founder::3','co-founder::3','지사장::3','총괄::2','cxo::3',
@@ -254,6 +256,16 @@ const EXPERTISE_KEYWORDS = {
   '홍보/대관': [
     '홍보::2','pr::2','communications::2','커뮤니케이션::2','gr::2','대관::2','public affairs::2','언론','보도자료','media relations'
   ],
+};
+
+// 카테고리별 '부정 키워드'(나오면 감점) — 특히 HR vs IR/PR 혼동 방지
+const NEGATIVE_KEYWORDS = {
+  '인사/노무': ['investor relations','ir','public relations','pr','media relations'],
+};
+
+// 카테고리별 '코어 토큰' — 이게 하나도 없으면 점수 하향 또는 0 처리
+const CORE_TOKENS = {
+  '인사/노무': ['hr','인사','노무','hrbp','ta','talent acquisition','people team','people operations','employee relations'],
 };
 
 function detectExpertiseFromCareer(careerText = '') {
@@ -269,6 +281,13 @@ function detectExpertiseFromCareer(careerText = '') {
   const hay = ` ${normalize(text)} `; // 경계 완화용 패딩
 
   const parseKw = (raw) => {
+    const m = String(raw).split('::');
+    const kw = normalize(m[0]);
+    const w = Number(m[1]) || 1;
+    return { kw, w };
+  };
+
+  const parseKw = (raw) => {
     // '키워드::가중치' 형태 지원
     const m = String(raw).split('::');
     const kw = normalize(m[0]);
@@ -276,31 +295,71 @@ function detectExpertiseFromCareer(careerText = '') {
     return { kw, w };
   };
 
-  let best = null; // { name, score, lastPos }
-
-  for (const [name, kws] of Object.entries(EXPERTISE_KEYWORDS)) {
-    let score = 0;
-    let lastPos = -1;
+  // 1) 기본 스코어링
+  const rawScores = {}; // { cat: {score, lastPos, hits:{kw->count}} }
+  for (const [cat, kws] of Object.entries(EXPERTISE_KEYWORDS)) {
+    let score = 0, lastPos = -1;
+    const hits = {};
     for (const raw of kws) {
       const { kw, w } = parseKw(raw);
       if (!kw) continue;
-      // 1) 단어 경계 우선
       let idx = hay.indexOf(` ${kw} `);
-      // 2) 경계 실패 시 부분 매칭 보조
       if (idx === -1) idx = hay.indexOf(kw);
       while (idx !== -1) {
         score += (w || 1);
+        hits[kw] = (hits[kw] || 0) + 1;
         lastPos = Math.max(lastPos, idx);
         idx = hay.indexOf(kw, idx + kw.length);
       }
     }
-    if (score > 0) {
-      // 출현 가중치 * 1000 + 최근성
-      const final = score * 1000 + Math.max(0, lastPos);
-      if (!best || final > best.score) best = { name, score: final, lastPos };
+    rawScores[cat] = { score, lastPos, hits };
+  }
+
+  // 2) 부정 키워드 페널티 (예: HR에서 IR/PR 흔적이 있으면 감점)
+  for (const [cat, negs] of Object.entries(NEGATIVE_KEYWORDS)) {
+    if (!negs || !negs.length) continue;
+    const nlist = negs.map(normalize);
+    let penalty = 0;
+    for (const n of nlist) {
+      if (n && (hay.indexOf(` ${n} `) !== -1 || hay.indexOf(n) !== -1)) penalty += 2;
+    }
+    if (penalty > 0) rawScores[cat].score = Math.max(0, rawScores[cat].score - penalty);
+  }
+
+  // 3) 코어 토큰이 하나도 없으면 카테고리 점수 하향 (HR 오검출 억제)
+  for (const [cat, cores] of Object.entries(CORE_TOKENS)) {
+    if (!cores || !cores.length) continue;
+    const clist = cores.map(normalize);
+    const hasCore = clist.some(c => c && (hay.indexOf(` ${c} `) !== -1 || hay.indexOf(c) !== -1));
+    if (!hasCore && rawScores[cat].score > 0) {
+      rawScores[cat].score = Math.floor(rawScores[cat].score * 0.5); // 절반 감점
     }
   }
-  return best ? best.name : null;
+
+  // 4) 최종 스코어로 1차 후보 선택
+  let bestCat = null, bestVal = -1, bestPos = -1;
+  for (const [cat, v] of Object.entries(rawScores)) {
+    if (v.score <= 0) continue;
+    const final = v.score * 1000 + Math.max(0, v.lastPos);
+    if (final > bestVal) { bestVal = final; bestCat = cat; bestPos = v.lastPos; }
+  }
+  if (!bestCat) return null;
+
+  // 5) 우선순위 규칙 — C레벨/전략이 강하면 HR로 덮지 않도록
+   const cLevel = rawScores['C레벨 Pool']?.score || 0;
+   const strategy = rawScores['전략/BD']?.score || 0;
+   const hr = rawScores['인사/노무']?.score || 0;
+
+  // C레벨이 충분히 강하면 HR보다 우선 (HR이 확실히 크면 예외)
+  if (bestCat === '인사/노무' && cLevel >= 5 && hr < cLevel * 0.7) {
+    bestCat = 'C레벨 Pool';
+  }
+  // 전략/BD가 강하면 HR보다 우선 (HR이 확실히 크면 예외)
+  if (bestCat === '인사/노무' && strategy >= 4 && hr < strategy * 0.7) {
+    bestCat = '전략/BD';
+  }
+
+  return bestCat;
 }
 
 // ======== 경로 자동 탐지 (기존 구조 고정) ========
