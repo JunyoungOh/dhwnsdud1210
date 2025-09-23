@@ -1947,14 +1947,6 @@ export default function App() {
                 setAutoExpertiseInProgress(false);
               })();
             }
-                  try {
-                    await updateDoc(doc(activeColRef, p.id), {
-                      expertiseAutoChecked: true,
-                    });
-                  } catch (e) { /* noop */ }
-                }
-              });
-            }
           },
           (err) => {
             console.error('profiles onSnapshot error:', err);
