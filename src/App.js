@@ -1794,6 +1794,7 @@ export default function App() {
   const [dataReady, setDataReady] = useState(false);
 
   const [dataError, setDataError] = useState('');
+  const [resolvedPath, setResolvedPath] = useState('');
   const [autoExpertiseSkipped, setAutoExpertiseSkipped] = useState(false);
 
   // 상세 모달
