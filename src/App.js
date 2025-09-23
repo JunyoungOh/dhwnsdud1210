@@ -280,13 +280,6 @@ function detectExpertiseFromCareer(careerText = '') {
   const hay = ` ${normalize(text)} `; // 경계 완화용 패딩
 
   const parseKw = (raw) => {
-    const m = String(raw).split('::');
-    const kw = normalize(m[0]);
-    const w = Number(m[1]) || 1;
-    return { kw, w };
-  };
-
-  const parseKw = (raw) => {
     // '키워드::가중치' 형태 지원
     const m = String(raw).split('::');
     const kw = normalize(m[0]);
