@@ -249,30 +249,47 @@ const EXPERTISE_KEYWORDS = {
 };
 
 function detectExpertiseFromCareer(careerText = '') {
-  const text = String(careerText || '').toLowerCase();
+  let text = String(careerText || '').toLowerCase();
   if (!text.trim()) return null;
-  let best = null; // {name, score, lastPos}
-  const normalize = (s) => s.replace(/\s+/g, ' ').trim();
+  // 본문 정규화: HTML 엔티티/전각 기호/구분점 → 통일
+  text = text
+    .replace(/&amp;|&#38;/g, '&')
+    .replace(/＆/g, '&')
+    .replace(/[·•\-_/|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const hay = ` ${text} `; // 경계 완화용 패딩
 
-  Object.entries(EXPERTISE_KEYWORDS).forEach(([name, kws]) => {
+  const norm = (s) => String(s || '').toLowerCase()
+    .replace(/&amp;|&#38;/g, '&')
+    .replace(/＆/g, '&')
+    .replace(/[·•\-_/|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  let best = null; // { name, score, lastPos }
+
+  for (const [name, kws] of Object.entries(EXPERTISE_KEYWORDS)) {
     let count = 0;
     let lastPos = -1;
-    kws.forEach((kwRaw) => {
-      const kw = normalize(kwRaw.toLowerCase());
-      // 부분문자열 매칭: 여러 번 등장 카운트
-      let idx = text.indexOf(kw);
+    for (const raw of kws) {
+      const kw = norm(raw);
+      if (!kw) continue;
+      // 1) 완전 단어 경계 시도
+      let idx = hay.indexOf(` ${kw} `);
+      // 2) 경계 실패시 부분 매칭도 허용 (예: 'product manager' 일부만 써둔 케이스)
+      if (idx === -1) idx = hay.indexOf(kw);
       while (idx !== -1) {
         count += 1;
         lastPos = Math.max(lastPos, idx);
-        idx = text.indexOf(kw, idx + kw.length);
+        idx = hay.indexOf(kw, idx + kw.length);
       }
-    });
-    if (count === 0) return;
-    // 우선순위: 출현 횟수 가중치 + 최근 등장 위치 가중치
-    // score = count*1000 + lastPos (최근일수록 lastPos가 큼)
-    const score = count * 1000 + Math.max(0, lastPos);
-    if (!best || score > best.score) best = { name, score, lastPos };
-  });
+    }
+    if (count > 0) {
+      const score = count * 1000 + Math.max(0, lastPos); // 출현 빈도 + 최근성
+      if (!best || score > best.score) best = { name, score, lastPos };
+    }
+  }
   return best ? best.name : null;
 }
 
@@ -2106,6 +2123,36 @@ export default function App() {
       (toast.error?.('캘린더 동기화에 실패했습니다. 콘솔을 확인하세요.') ?? toast('캘린더 동기화에 실패했습니다. 콘솔을 확인하세요.'));
     }
   };
+  
+  const runAutoExpertiseNow = async () => {
+    if (!auth.currentUser) {
+      (toast?.error?.('로그인 후 실행 가능합니다.') ?? toast('로그인 후 실행 가능합니다.'));
+      return;
+    }
+    if (!activeColRef) return;
+    const targets = profiles.filter(p => !p.expertise && p.career); // 플래그 무시, 경력 기반 재스캔
+    if (!targets.length) {
+      (toast?.info?.('처리할 대상이 없습니다.') ?? toast('처리할 대상이 없습니다.'));
+      return;
+    }
+    setAutoExpertiseInProgress(true);
+    setAutoExpertiseProgress({ total: targets.length, done: 0 });
+    for (const p of targets) {
+      const detected = detectExpertiseFromCareer(p.career);
+      try {
+        await updateDoc(doc(activeColRef, p.id), detected ? {
+          expertise: detected,
+          expertiseIsAuto: true,
+          expertiseAutoChecked: true,
+        } : {
+          expertiseAutoChecked: true,
+        });
+      } catch (e) { /* noop */ }
+      setAutoExpertiseProgress(s => ({ ...s, done: s.done + 1 }));
+    }
+    setAutoExpertiseInProgress(false);
+    (toast?.success?.('전문영역 자동보완이 완료되었습니다.') ?? toast('전문영역 자동보완이 완료되었습니다.'));
+  };
 
   // URL 파라미터
   const urlParams = useMemo(() => {
@@ -2273,6 +2320,16 @@ export default function App() {
                   <div className="inline-block bg-red-50 text-red-700 border border-red-200 rounded px-2 py-1">
                     데이터 로드 오류: {dataError}
                   </div>
+                )}
+                {isAdmin && (
+                  <button
+                    onClick={runAutoExpertiseNow}
+                    className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded px-2 py-1 ml-2 hover:bg-emerald-100"
+                    type="button"
+                    title="전문영역 자동보완을 즉시 재실행합니다"
+                  >
+                    전문영역 자동보완 재실행
+                  </button>
                 )}
                 {autoExpertiseInProgress && (
                   <div className="inline-flex items-center gap-2 bg-amber-50 text-amber-700 border border-amber-200 rounded px-2 py-1 ml-2">
