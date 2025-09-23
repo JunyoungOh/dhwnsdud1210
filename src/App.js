@@ -1798,7 +1798,6 @@ export default function App() {
   const [autoExpertiseSkipped, setAutoExpertiseSkipped] = useState(false);
   const [autoExpertiseInProgress, setAutoExpertiseInProgress] = useState(false);
   const [autoExpertiseProgress, setAutoExpertiseProgress] = useState({ total: 0, done: 0 });
-  const [autoExpertiseSkipped, setAutoExpertiseSkipped] = useState(false);
 
   // 상세 모달
   const [detailOpen, setDetailOpen] = useState(false);
