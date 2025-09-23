@@ -255,8 +255,19 @@ function sampleProfilesByCategory(profiles, category, optionValue, size) {
 function IdealGamePage({
   profiles,
   onUpdate, onDelete,
-  accessCode, onSyncOne, onShowSimilar, onToggleStar
+  accessCode, onSyncOne, onShowSimilar, onToggleStar,
+  seedList = null,
+  onClearSeed
 }) {
+  const computeTournamentSize = (n) => {
+    if (n >= 64) return 64;
+    if (n >= 32) return 32;
+    if (n >= 16) return 16;
+    if (n >= 8)  return 8;   // 안전장치: 검색 시드는 8/4/2도 허용
+    if (n >= 4)  return 4;
+    if (n >= 2)  return 2;
+    return 0;
+  };
   const [phase, setPhase] = React.useState('setup'); // setup | play | result
   const [category, setCategory] = React.useState('expertise'); // expertise | priority | random
   const expertiseOptions = React.useMemo(
@@ -320,6 +331,56 @@ function IdealGamePage({
 
   // UI
   if (phase === 'setup') {
+    if (Array.isArray(seedList) && seedList.length > 0) {
+      const count = seedList.length;
+      const tSize = computeTournamentSize(count);
+      return (
+        <section className="bg-white rounded-xl shadow-md p-6 space-y-4">
+          <h2 className="text-xl font-bold">이상형게임 시작</h2>
+          <p className="text-sm text-gray-700">
+            현재 검색 결과는 <b>{count}</b>명입니다.
+          </p>
+          {tSize === 0 ? (
+            <div className="text-sm text-red-600">
+              최소 2명 이상이어야 게임을 시작할 수 있어요. 검색 범위를 넓혀주세요.
+            </div>
+          ) : (
+            <div className="text-sm text-gray-700">
+              토너먼트는 <b>{tSize}</b>명 기준으로 진행됩니다.
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Btn
+              variant="primary"
+              type="button"
+              disabled={tSize === 0}
+              onClick={()=>{
+                const chosen = shuffleArray(seedList).slice(0, tSize);
+                const pairs = makePairs(chosen);
+                setCurrentRound(1);
+                setRoundPairs(pairs);
+                setWinners([]);
+                setChampion(null);
+                setPhase('play');
+                onClearSeed?.();
+              }}
+            >
+              네, 진행할게요
+            </Btn>
+            <Btn
+              variant="subtle"
+              type="button"
+              onClick={()=>{
+                onClearSeed?.();
+                setPhase('setup'); // 그대로 설정 화면 유지
+              }}
+            >
+              아니요
+            </Btn>
+          </div>
+        </section>
+      );
+    }
     return (
       <section className="bg-white rounded-xl shadow-md p-6 space-y-4">
         <h2 className="text-xl font-bold">이상형게임 설정</h2>
@@ -778,7 +839,7 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
   );
 };
 
-const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar, searchTerm, setSearchTerm }) => {
+const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onShowSimilar, onToggleStar, searchTerm, setSearchTerm, onStartIdealWithList }) => {
 
   const advancedResults = useMemo(() => {
     const term = searchTerm.trim();
@@ -842,6 +903,20 @@ const SearchPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
       </div>
 
       {searchTerm.trim() && (
+        <div className="mt-3 flex items-center justify-between">
+          <div className="text-sm text-gray-600">
+            현재 검색 결과: <b>{visible.length}</b>명
+          </div>
+          {visible.length > 1 && (
+            <Btn
+              variant="primary"
+              onClick={()=> onStartIdealWithList?.(visible)}
+              type="button"
+            >
+              이 검색결과로 이상형게임 시작
+            </Btn>
+          )}
+        </div>
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
           {visible.length ? (
             visible.map(p => (
@@ -1530,6 +1605,7 @@ function MainContent({
    // 검색/필터 글로벌 상태
    searchTerm, setSearchTerm,
    activeFilter, setActiveFilter,
+   idealSeed, setIdealSeed
  }) {
    if (activeMain === 'alerts') {
      return (
@@ -1550,6 +1626,7 @@ function MainContent({
          onShowSimilar={openSimilarModal} onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
          searchTerm={searchTerm}
          setSearchTerm={setSearchTerm}
+         onStartIdealWithList={(list)=>{ setIdealSeed(list); setActiveMain('ideal'); }}
        />
      );
    }
@@ -1590,6 +1667,8 @@ function MainContent({
          accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
          onShowSimilar={openSimilarModal}
          onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+         seedList={idealSeed}
+         onClearSeed={()=>setIdealSeed(null)}
        />
      );
    }
@@ -1619,7 +1698,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeMain, setActiveMain]   = useState('alerts');
   const [functionsOpen, setFunctionsOpen] = useState(false);
-  const [functionsSub, setFunctionsSub] = useState('rec');
+  const [idealSeed, setIdealSeed] = useState(null); // 검색결과로 이상형게임 시드
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
 
@@ -2196,6 +2275,8 @@ export default function App() {
                     setSearchTerm={setSearchTermGlobal}
                     activeFilter={functionsActiveFilter}
                     setActiveFilter={setFunctionsActiveFilter}
+                    idealSeed={idealSeed}
+                    setIdealSeed={setIdealSeed}
                   />
                 </div>
               )}
