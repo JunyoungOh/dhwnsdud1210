@@ -244,7 +244,7 @@ const EXPERTISE_KEYWORDS = {
     'crm','seo','sem','content marketing','creative director::2','copywriter','미디어플래닝','캠페인','제일기획::2','ae::2','광고대행사'
   ],
   '인사/노무': [
-    '인사','노무','hr','hrbp','hrm','hrd','people team','people operations','people ops',
+    '인사','노무','hr','hrbp','hrm','hrd','people team','people operations','people ops','chro',
     'talent acquisition','ta','recruiter','채용','교육','평가','보상','c&b','compensation','benefits',
     'employee relations','er','노사','노경','조직문화','경영지원','노무법인','노무사','인사총무','hr operations'
   ],
