@@ -267,6 +267,41 @@ const CORE_TOKENS = {
   '인사/노무': ['hr','인사','노무','hrbp','ta','talent acquisition','people team','people operations','employee relations'],
 };
 
+// 최근 경력 가중치 계산: 이력서/프로필이 보통 최근순이므로 "상단 라인"에 높은 가중치
+function computeLineSlices(rawText) {
+  const raw = String(rawText || '');
+  const chunks = raw
+    .split(/\r?\n+/)                     // 줄바꿈 기준 1차 분할
+    .flatMap(l => l.split(/[•·∙・\-\u2212]/)) // 불릿/대시 기준 2차 분할
+    .map(s => s.trim())
+    .filter(Boolean);
+  // 상단일수록 큰 가중(최소 0.3 보장)
+  const n = chunks.length || 1;
+  const base = (idx) => Math.max(0.3, 1.1 - (idx / Math.max(6, n)) * 0.8); // 1.1 → 0.3 사이
+  // 연도 보너스: 최신 연도 언급에 가산점
+  const yearRe = /(20\d{2})/g; // 2000년대만 고려
+  const nowY = new Date().getFullYear();
+  const recBonus = (line) => {
+    let m, best = 0;
+    const l = line.toLowerCase();
+    while ((m = yearRe.exec(l)) !== null) {
+      const y = Number(m[1]);
+      if (y >= 2000 && y <= nowY + 1) best = Math.max(best, y);
+    }
+    if (!best) return 0;
+    // 최근일수록 보너스↑ (예: 올해/작년 +0.5, 3년 이내 +0.35, 5년 이내 +0.2)
+    const diff = Math.max(0, nowY - best);
+    if (diff <= 1) return 0.5;
+    if (diff <= 3) return 0.35;
+    if (diff <= 5) return 0.2;
+    return 0.1;
+  };
+  return chunks.map((line, idx) => ({
+    line,
+    weight: base(idx) + recBonus(line), // 라인 위치 + 연도 보너스
+  }));
+}
+
 function detectExpertiseFromCareer(careerText = '') {
   let text = String(careerText || '').toLowerCase();
   if (!text.trim()) return null;
@@ -287,21 +322,34 @@ function detectExpertiseFromCareer(careerText = '') {
     return { kw, w };
   };
 
-  // 1) 기본 스코어링
+  // 1) 라인/연도 가중치가 반영된 스코어링
   const rawScores = {}; // { cat: {score, lastPos, hits:{kw->count}} }
+  const slices = computeLineSlices(text); // 원문(raw text) 기준 분절
   for (const [cat, kws] of Object.entries(EXPERTISE_KEYWORDS)) {
     let score = 0, lastPos = -1;
     const hits = {};
     for (const raw of kws) {
       const { kw, w } = parseKw(raw);
       if (!kw) continue;
-      let idx = hay.indexOf(` ${kw} `);
-      if (idx === -1) idx = hay.indexOf(kw);
-      while (idx !== -1) {
-        score += (w || 1);
-        hits[kw] = (hits[kw] || 0) + 1;
-        lastPos = Math.max(lastPos, idx);
-        idx = hay.indexOf(kw, idx + kw.length);
+      // 라인 단위로 검색 후, 해당 라인의 가중치와 함께 누적
+      for (let i = 0; i < slices.length; i++) {
+        const { line, weight } = slices[i];
+        if (!line) continue;
+        const normLine = ` ${line.toLowerCase().replace(/[·•・∙]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+        let localCount = 0;
+        let idx = normLine.indexOf(` ${kw} `);
+        if (idx === -1) idx = normLine.indexOf(kw);
+        while (idx !== -1) {
+          localCount += 1;
+          // 전체 텍스트 기준의 마지막 등장 위치 추정(라인 인덱스를 이용해 상대 지표만 확보)
+          lastPos = Math.max(lastPos, (text.length - i)); // 상단일수록 값이 큼 → “최근” 우대
+          idx = normLine.indexOf(kw, idx + kw.length);
+        }
+        if (localCount > 0) {
+          const perHit = (w || 1) * weight;
+          score += perHit * localCount;
+          hits[kw] = (hits[kw] || 0) + localCount;
+        }
       }
     }
     rawScores[cat] = { score, lastPos, hits };
