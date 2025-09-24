@@ -2224,6 +2224,20 @@ export default function App() {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setAuthStatus(user ? 'authenticated' : 'unauthenticated');
+      // 로그인/인증 직후 Firestore에 이메일/표시명 동기화 (merge)
+      try {
+        if (user) {
+          await setDoc(doc(db, 'users', user.uid), {
+            email: user.email || null,
+            displayName: user.displayName || null,
+            providerId: (user.providerData && user.providerData[0]?.providerId) || null,
+            lastLoginAt: new Date().toISOString(),
+          }, { merge: true });
+        }
+      } catch (e) {
+        // 실패해도 앱 진행엔 영향 없음 (콘솔만)
+        if (process.env.NODE_ENV !== 'production') console.warn('users/email upsert failed:', e);
+      }
     });
     return () => unsub();
   }, []);
