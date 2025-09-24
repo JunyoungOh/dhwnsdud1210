@@ -22,7 +22,7 @@ import {
 import { parseNaturalQuery, matchProfileWithNL } from './utils/nlp';
 import { MeetingsPage } from './utils/meetings';
 
-import AuthGate, { useUserCtx } from './auth/AuthGate';
+import { useUserCtx } from './auth/AuthGate';
 import UserAdmin from './admin/UserAdmin';
 
 /* === 새 UI 컴포넌트들 === */
@@ -106,7 +106,7 @@ const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아�
 
 /* === 관리자 여부 공용 훅 (개선본) === */
 function useIsAdmin() {
-  const ctx = useUserCtx?.();
+  const ctx = useUserCtx();
 
   const [uid, setUid] = React.useState(null);
   const [fireAdmin, setFireAdmin] = React.useState(null); // null=미확인
