@@ -40,7 +40,22 @@ export default function AuthGate({ children }) {
         const ref = doc(db, 'users', u.uid);
         const snap = await getDoc(ref);
         if (snap.exists()) {
-          setUserDoc(snap.data());
+           const cur = snap.data();
+           const needsNormalize =
+             (cur && (cur.approved === 'true' || cur.isAdmin === 'true'));
+           if (needsNormalize) {
+             await setDoc(ref, {
+               approved: cur.approved === 'true' ? true : cur.approved,
+               isAdmin:  cur.isAdmin  === 'true' ? true : cur.isAdmin,
+             }, { merge: true });
+             setUserDoc({
+               ...cur,
+               approved: cur.approved === 'true' ? true : cur.approved,
+               isAdmin:  cur.isAdmin  === 'true' ? true : cur.isAdmin,
+             });
+           } else {
+             setUserDoc(cur);
+           }
         } else {
           const base = { approved: false, role: 'user', allowedAccessCodes: [] };
           await setDoc(ref, base, { merge: true });
@@ -77,13 +92,24 @@ export default function AuthGate({ children }) {
     }
   };
 
-  const ctxValue = useMemo(() => ({
-    user,
-    userDoc,
-    isAdmin: !!(userDoc && userDoc.role === 'admin'),
-    approved: !!(userDoc && userDoc.approved === true),
-    signOut: () => signOut(auth),
-  }), [user, userDoc, auth]);
+  const ctxValue = useMemo(() => {
+    const isAdmin =
+      !!(userDoc && (
+        userDoc.role === 'admin' ||
+        userDoc.isAdmin === true || userDoc.isAdmin === 'true'  // 과거 호환
+      ));
+    const approved =
+      !!(userDoc && (
+        userDoc.approved === true || userDoc.approved === 'true' // 과거 호환
+      ));
+    return {
+      user,
+      userDoc,
+      isAdmin,
+      approved,
+      signOut: () => signOut(auth),
+    };
+  }, [user, userDoc, auth]);
 
   // 1) 로딩
   if (loading) {
@@ -121,7 +147,7 @@ export default function AuthGate({ children }) {
   }
 
   // 3) 로그인은 됐지만 승인 전
-  if (!ctxValue.approved) {
+  if (!ctxValue.approved && !ctxValue.isAdmin) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
         <div className="bg-white rounded-xl shadow p-8 max-w-md w-full text-center space-y-4">
