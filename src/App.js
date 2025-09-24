@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, signOut } from 'firebase/auth';
+import { getAuth, signOut, onAuthStateChanged } from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query,
   updateDoc, writeBatch, getDoc, getDocs, setLogLevel, limit, setDoc
@@ -60,9 +60,6 @@ const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
 const DISCOVERY_DOCS   = ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"];
 const SCOPES           = "https://www.googleapis.com/auth/calendar.events";
 
-const { isAdmin, isLoading, err, ctxAdmin, fireAdmin, uid } = useIsAdmin();
-console.log({ isAdmin, isLoading, err, ctxAdmin, fireAdmin, uid, from: 'App.js' });
-
 // ============ Firebase ============
 const firebaseConfig = {
   apiKey:            process.env.REACT_APP_FIREBASE_API_KEY,
@@ -110,13 +107,21 @@ const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아�
 function useIsAdmin() {
   const ctx = useUserCtx();
 
-  const [uid, setUid] = React.useState(null);
+  const [uid, setUid] = React.useState(() => ctx?.user?.uid || auth.currentUser?.uid || null);
   const [fireAdmin, setFireAdmin] = React.useState(null);
   const [err, setErr] = React.useState('');
 
   React.useEffect(() => {
-    setUid(ctx?.user?.uid || null);
-  }, [ctx?.user]);
+    if (ctx?.user?.uid) {
+      setUid(ctx.user.uid);
+      return;
+    }
+    setUid(auth.currentUser?.uid || null);
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      setUid(user?.uid || null);
+    });
+    return () => unsubAuth();
+  }, [ctx?.user?.uid]);
 
   React.useEffect(() => {
     setErr('');
@@ -2167,6 +2172,7 @@ export default function App() {
   // ✅ 관리자 여부 probe
   const adminProbe = useIsAdmin();
   const isAdmin = adminProbe.isAdmin;
+  const isAuthed = !!(ctx?.user || adminProbe.uid);
 
   const openProfileDetailById = (id) => {
     const p = profiles.find((x) => x.id === id);
@@ -2583,7 +2589,7 @@ export default function App() {
         <LoginScreen
           onLogin={handleLogin}
           onLogout={handleFirebaseLogout}
-          isAuthed={!!ctx?.user}
+          isAuthed={isAuthed}
         />
       </ErrorBoundary>
     );
@@ -2591,13 +2597,13 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-    <AuthGate>
-      {profileIdFromUrl && accessCodeFromUrl ? (
-        <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />
-      ) : !accessCode ? (
-        <LoginScreen onLogin={handleLogin} onLogout={handleFirebaseLogout} />
-      ) : (
-        <div className="bg-gray-50 min-h-screen font-sans">
+      <AuthGate>
+        {profileIdFromUrl && accessCodeFromUrl ? (
+          <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />
+        ) : !accessCode ? (
+          <LoginScreen onLogin={handleLogin} onLogout={handleFirebaseLogout} isAuthed={isAuthed} />
+        ) : (
+          <div className="bg-gray-50 min-h-screen font-sans">
           {showDeleteConfirm.show && (
             <ConfirmationModal
               message={`'${showDeleteConfirm.profileName}' 프로필을 정말로 삭제하시겠습니까?`}
