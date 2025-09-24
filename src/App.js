@@ -2152,6 +2152,8 @@ export default function App() {
   const [autoExpertiseInProgress, setAutoExpertiseInProgress] = useState(false);
   const [autoExpertiseProgress, setAutoExpertiseProgress] = useState({ total: 0, done: 0 });
 
+  const ctx = useUserCtx();
+
   // 상세 모달
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailProfile, setDetailProfile] = useState(null);
@@ -2510,7 +2512,6 @@ export default function App() {
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError]     = useState('');
-    const ctx = useUserCtx();
 
     useEffect(() => {
       (async () => {
