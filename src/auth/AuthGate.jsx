@@ -96,16 +96,25 @@ export default function AuthGate({ children }) {
     }
   };
 
-  const ctxValue = useMemo(
-    () => ({
+  const ctxValue = useMemo(() => {
+    const isAdminFromDoc = !!(userDoc && (
+      userDoc.role === 'admin' ||
+      userDoc.isAdmin === true ||
+      userDoc.isAdmin === 'true'
+    ));
+    const isApproved = !!(userDoc && (
+      userDoc.approved === true ||
+      userDoc.approved === 'true'
+    ));
+
+    return {
       user,
       userDoc,
-      isAdmin: !!(userDoc && userDoc.role === 'admin'),
-      approved: !!(userDoc && userDoc.approved === true),
+      isAdmin: isAdminFromDoc,
+      approved: isApproved,
       signOut: () => signOut(auth),
-    }),
-    [user, userDoc, auth]
-  );
+    };
+  }, [user, userDoc, auth]);
 
   // 1) 로딩
   if (loading) {
