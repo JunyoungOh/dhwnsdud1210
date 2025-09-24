@@ -112,12 +112,10 @@ function useIsAdmin() {
   const [fireAdmin, setFireAdmin] = React.useState(null); // null=미확인
   const [err, setErr] = React.useState('');
 
+  // 컨텍스트에서 uid를 그대로 사용
   React.useEffect(() => {
-    const off = onAuthStateChanged(auth, (u) => {
-      setUid(u?.uid || null);
-    });
-    return () => off();
-  }, []);
+    setUid(ctx?.user?.uid || null);
+  }, [ctx?.user]);
 
   React.useEffect(() => {
     setErr('');
@@ -2577,7 +2575,7 @@ export default function App() {
         <LoginScreen
           onLogin={handleLogin}
           onLogout={handleFirebaseLogout}
-          isAuthed={!!getAuth().currentUser}
+          isAuthed={!!userCtx?.user}
         />
       </ErrorBoundary>
     );
