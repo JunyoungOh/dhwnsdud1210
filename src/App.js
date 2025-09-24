@@ -499,6 +499,7 @@ function detectExpertiseFromCareer(careerText = '') {
   }
 
   return bestCat;
+}
 
 // ======== 경로 자동 탐지 (기존 구조 고정) ========
 function buildPathCandidates(accessCode, aid) {
