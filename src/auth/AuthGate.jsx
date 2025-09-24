@@ -1,4 +1,3 @@
-// src/auth/AuthGate.jsx
 import React, {
   createContext,
   useContext,
@@ -41,22 +40,31 @@ export default function AuthGate({ children }) {
         return;
       }
 
-      // users/{uid} 로드
+      // users/{uid} 로드 및 email 항상 동기화
       try {
-        const snap = await getDoc(doc(db, 'users', u.uid));
-        if (snap.exists()) {
-          setUserDoc(snap.data());
-        } else {
-          // 최초 로그인 사용자 기본 문서 생성(미승인)
-          const base = {
-            email: u.email || '',
+        const userRef = doc(db, 'users', u.uid);
+        const snap = await getDoc(userRef);
+        let userData = snap.exists() ? snap.data() : {};
+
+        // 이메일 동기화: Firestore에 email 필드가 없거나, 바뀐 경우 항상 업데이트
+        const emailToSet = u.email || '';
+        if (!userData.email || userData.email !== emailToSet) {
+          userData = { ...userData, email: emailToSet };
+          await setDoc(userRef, { email: emailToSet }, { merge: true });
+        }
+
+        // 최초 생성시 나머지 필드도 보장
+        if (!snap.exists()) {
+          userData = {
+            ...userData,
             approved: false,
             role: 'user',
             allowedAccessCodes: [],
           };
-          await setDoc(doc(db, 'users', u.uid), base, { merge: true });
-          setUserDoc(base);
+          await setDoc(userRef, userData, { merge: true });
         }
+
+        setUserDoc(userData);
       } catch (e) {
         setError('사용자 정보를 불러오지 못했습니다.');
       } finally {
