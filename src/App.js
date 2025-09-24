@@ -2591,7 +2591,7 @@ export default function App() {
       {profileIdFromUrl && accessCodeFromUrl ? (
         <ProfileDetailView profileId={profileIdFromUrl} accessCode={accessCodeFromUrl} />
       ) : !accessCode ? (
-        <LoginScreen onLogin={handleLogin} onLogout={handleFirebaseLogout} isAuthed={authStatus==='authenticated'} />
+        <LoginScreen onLogin={handleLogin} onLogout={handleFirebaseLogout} />
       ) : (
         <div className="bg-gray-50 min-h-screen font-sans">
           {showDeleteConfirm.show && (
