@@ -2039,7 +2039,7 @@ function MainContent({
    profilesWithHelpers, handleUpdate, handleDeleteRequest,
    accessCode, handleSyncOneToCalendar, openSimilarModal,
    setActiveMain, setFunctionsOpen,
-   isAdmin,
+   isAdmin, adminProbe,
    handleAddOne, handleBulkAdd,
    openProfileDetailById,
    // 검색/필터 글로벌 상태
@@ -2096,10 +2096,20 @@ function MainContent({
      );
    }
    if (activeMain === 'admin') {
-     if (isLoading) return <div>로딩 중...</div>;
-     if (err) return <div>권한 확인 에러: {err}</div>;
+     const adminStatus = adminProbe || {};
+     if (adminStatus.isLoading) return <div>로딩 중...</div>;
+     if (adminStatus.err) return <div>권한 확인 에러: {adminStatus.err}</div>;
      if (!isAdmin) return <div className="text-sm text-red-600">권한이 없습니다. (App gate)</div>;
-     return <UserAdmin ... />;
+     return (
+       <UserAdmin
+         isAdminOverride={isAdmin}
+         probe={{
+           from: 'App',
+           ts: new Date().toISOString(),
+           ...adminStatus,
+         }}
+       />
+     );
    }
    if (activeMain === 'ideal') {
      return (
@@ -2826,6 +2836,7 @@ export default function App() {
                     setActiveMain={setActiveMain}
                     setFunctionsOpen={setFunctionsOpen}
                     isAdmin={isAdmin}
+                    adminProbe={adminProbe}
                     handleAddOne={handleAddOne}
                     handleBulkAdd={handleBulkAdd}
                     openProfileDetailById={openProfileDetailById}
