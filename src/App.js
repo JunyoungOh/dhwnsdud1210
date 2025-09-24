@@ -2510,6 +2510,7 @@ export default function App() {
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError]     = useState('');
+    const ctx = useUserCtx();
 
     useEffect(() => {
       (async () => {
