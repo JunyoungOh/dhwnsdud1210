@@ -104,15 +104,13 @@ const TZ = 'Asia/Seoul';
 const COLORS = ['#FFBB28', '#FF8042', '#00C49F', '#8884D8', '#FF4444', '#82ca9d'];
 const TARGET_KEYWORDS = ['네이버', '카카오', '쿠팡', '라인', '우아한형제들', '당근', '토스'];
 
-/* === 관리자 여부 공용 훅 (개선본) === */
 function useIsAdmin() {
   const ctx = useUserCtx();
 
   const [uid, setUid] = React.useState(null);
-  const [fireAdmin, setFireAdmin] = React.useState(null); // null=미확인
+  const [fireAdmin, setFireAdmin] = React.useState(null);
   const [err, setErr] = React.useState('');
 
-  // 컨텍스트에서 uid를 그대로 사용
   React.useEffect(() => {
     setUid(ctx?.user?.uid || null);
   }, [ctx?.user]);
@@ -124,8 +122,11 @@ function useIsAdmin() {
     const unsub = onSnapshot(
       ref,
       (snap) => {
-        const v = snap.data()?.isAdmin;
-        setFireAdmin(v === true || v === 'true');
+        const data = snap.data();
+        // role: 'admin' 또는 isAdmin: true 둘 중 하나만 있어도 관리자
+        const v = (data?.isAdmin === true || data?.isAdmin === 'true') ||
+                  (data?.role === 'admin');
+        setFireAdmin(!!v);
       },
       (e) => {
         setFireAdmin(false);
