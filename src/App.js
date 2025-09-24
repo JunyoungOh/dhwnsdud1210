@@ -1,8 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
-import {
-  getAuth, signOut
-} from 'firebase/auth';
+import { getAuth, signOut } from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query,
   updateDoc, writeBatch, getDoc, getDocs, setLogLevel, limit, setDoc
