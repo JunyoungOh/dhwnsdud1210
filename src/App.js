@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
 import {
-  getAuth, onAuthStateChanged, signOut
+  getAuth, signOut
 } from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, query,
@@ -2128,7 +2128,6 @@ export default function App() {
   const [functionsActiveFilter, setFunctionsActiveFilter] = React.useState({ type:null, value:null }); // 그래프 필터 글로벌
   const [accessCode, setAccessCode] = useState(typeof window !== 'undefined' ? (localStorage.getItem('profileDbAccessCode') || null) : null);
   const [profiles, setProfiles]     = useState([]);
-  const [authStatus, setAuthStatus] = useState('authenticating');
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeMain, setActiveMain]   = useState('alerts');
@@ -2218,14 +2217,6 @@ export default function App() {
     return () => {
       [xlsx, gapiScript, gisScript].forEach(s => { if (s && document.body.contains(s)) document.body.removeChild(s); });
     };
-  }, []);
-
-  // Auth 상태
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      setAuthStatus(user ? 'authenticated' : 'unauthenticated');
-    });
-    return () => unsub();
   }, []);
 
   // 데이터 로드
@@ -2585,7 +2576,11 @@ export default function App() {
   if (!accessCode) {
     return (
       <ErrorBoundary>
-        <LoginScreen onLogin={handleLogin} onLogout={handleFirebaseLogout} isAuthed={authStatus==='authenticated'} />
+        <LoginScreen
+          onLogin={handleLogin}
+          onLogout={handleFirebaseLogout}
+          isAuthed={!!getAuth().currentUser}
+        />
       </ErrorBoundary>
     );
   }
