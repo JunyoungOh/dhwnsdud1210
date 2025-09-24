@@ -60,6 +60,9 @@ const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
 const DISCOVERY_DOCS   = ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"];
 const SCOPES           = "https://www.googleapis.com/auth/calendar.events";
 
+const { isAdmin, isLoading, err, ctxAdmin, fireAdmin, uid } = useIsAdmin();
+console.log({ isAdmin, isLoading, err, ctxAdmin, fireAdmin, uid, from: 'App.js' });
+
 // ============ Firebase ============
 const firebaseConfig = {
   apiKey:            process.env.REACT_APP_FIREBASE_API_KEY,
@@ -2088,8 +2091,10 @@ function MainContent({
      );
    }
    if (activeMain === 'admin') {
+     if (isLoading) return <div>로딩 중...</div>;
+     if (err) return <div>권한 확인 에러: {err}</div>;
      if (!isAdmin) return <div className="text-sm text-red-600">권한이 없습니다. (App gate)</div>;
-     return <UserAdmin isAdminOverride={isAdmin} probe={{ from:'App', isAdmin, ts:new Date().toISOString() }} />;
+     return <UserAdmin ... />;
    }
    if (activeMain === 'ideal') {
      return (
