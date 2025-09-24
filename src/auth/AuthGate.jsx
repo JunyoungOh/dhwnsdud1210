@@ -1,6 +1,18 @@
 // src/auth/AuthGate.jsx
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import {
+  getAuth,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+} from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
 
 const AuthCtx = createContext(null);
@@ -24,42 +36,26 @@ export default function AuthGate({ children }) {
       setUserDoc(null);
       setError('');
 
-      if (!u) { setLoading(false); return; }
+      if (!u) {
+        setLoading(false);
+        return;
+      }
 
+      // users/{uid} 로드
       try {
-        // 1) 매 로그인마다 이메일/표시명/프로바이더/시간을 Firestore에 merge 업서트
-        const patch = {
-          email: u.email || null,
-          displayName: u.displayName || null,
-          providerId: (u.providerData && u.providerData[0]?.providerId) || null,
-          lastLoginAt: new Date().toISOString(),
-        };
-        await setDoc(doc(db, 'users', u.uid), patch, { merge: true });
-
-        // 2) 문서 읽기 (없으면 기본값 merge)
-        const ref = doc(db, 'users', u.uid);
-        const snap = await getDoc(ref);
+        const snap = await getDoc(doc(db, 'users', u.uid));
         if (snap.exists()) {
-           const cur = snap.data();
-           const needsNormalize =
-             (cur && (cur.approved === 'true' || cur.isAdmin === 'true'));
-           if (needsNormalize) {
-             await setDoc(ref, {
-               approved: cur.approved === 'true' ? true : cur.approved,
-               isAdmin:  cur.isAdmin  === 'true' ? true : cur.isAdmin,
-             }, { merge: true });
-             setUserDoc({
-               ...cur,
-               approved: cur.approved === 'true' ? true : cur.approved,
-               isAdmin:  cur.isAdmin  === 'true' ? true : cur.isAdmin,
-             });
-           } else {
-             setUserDoc(cur);
-           }
+          setUserDoc(snap.data());
         } else {
-          const base = { approved: false, role: 'user', allowedAccessCodes: [] };
-          await setDoc(ref, base, { merge: true });
-          setUserDoc({ ...base, ...patch });
+          // 최초 로그인 사용자 기본 문서 생성(미승인)
+          const base = {
+            email: u.email || '',
+            approved: false,
+            role: 'user',
+            allowedAccessCodes: [],
+          };
+          await setDoc(doc(db, 'users', u.uid), base, { merge: true });
+          setUserDoc(base);
         }
       } catch (e) {
         setError('사용자 정보를 불러오지 못했습니다.');
@@ -84,7 +80,7 @@ export default function AuthGate({ children }) {
     e?.preventDefault?.();
     try {
       setError('');
-      const cred = await createUserWithEmailAndPassword(auth, email.trim(), pw);
+      await createUserWithEmailAndPassword(auth, email.trim(), pw);
       // 기본 users 문서는 onAuthStateChanged에서 생성/보정됨
       alert('가입 완료! 운영자의 승인 후 이용 가능합니다.');
     } catch (e) {
@@ -92,24 +88,16 @@ export default function AuthGate({ children }) {
     }
   };
 
-  const ctxValue = useMemo(() => {
-    const isAdmin =
-      !!(userDoc && (
-        userDoc.role === 'admin' ||
-        userDoc.isAdmin === true || userDoc.isAdmin === 'true'  // 과거 호환
-      ));
-    const approved =
-      !!(userDoc && (
-        userDoc.approved === true || userDoc.approved === 'true' // 과거 호환
-      ));
-    return {
+  const ctxValue = useMemo(
+    () => ({
       user,
       userDoc,
-      isAdmin,
-      approved,
+      isAdmin: !!(userDoc && userDoc.role === 'admin'),
+      approved: !!(userDoc && userDoc.approved === true),
       signOut: () => signOut(auth),
-    };
-  }, [user, userDoc, auth]);
+    }),
+    [user, userDoc, auth]
+  );
 
   // 1) 로딩
   if (loading) {
@@ -125,10 +113,27 @@ export default function AuthGate({ children }) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
         <div className="w-full max-w-md bg-white rounded-xl shadow p-6 space-y-4">
-          <h2 className="text-xl font-bold">{mode === 'signin' ? '로그인' : '가입'}</h2>
-          <form onSubmit={mode==='signin' ? handleSignIn : handleSignUp} className="space-y-3">
-            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="이메일" className="w-full border rounded p-2"/>
-            <input type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="비밀번호" className="w-full border rounded p-2"/>
+          <h2 className="text-xl font-bold">
+            {mode === 'signin' ? '로그인' : '가입'}
+          </h2>
+          <form
+            onSubmit={mode === 'signin' ? handleSignIn : handleSignUp}
+            className="space-y-3"
+          >
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="이메일"
+              className="w-full border rounded p-2"
+            />
+            <input
+              type="password"
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+              placeholder="비밀번호"
+              className="w-full border rounded p-2"
+            />
             <button className="w-full bg-yellow-400 hover:bg-yellow-500 text-white rounded p-2">
               {mode === 'signin' ? '로그인' : '가입하기'}
             </button>
@@ -136,9 +141,25 @@ export default function AuthGate({ children }) {
           </form>
           <div className="text-sm text-gray-600">
             {mode === 'signin' ? (
-              <>계정이 없으신가요? <button className="text-yellow-600" onClick={()=>setMode('signup')}>가입하기</button></>
+              <>
+                계정이 없으신가요?{' '}
+                <button
+                  className="text-yellow-600"
+                  onClick={() => setMode('signup')}
+                >
+                  가입하기
+                </button>
+              </>
             ) : (
-              <>이미 계정이 있으신가요? <button className="text-yellow-600" onClick={()=>setMode('signin')}>로그인</button></>
+              <>
+                이미 계정이 있으신가요?{' '}
+                <button
+                  className="text-yellow-600"
+                  onClick={() => setMode('signin')}
+                >
+                  로그인
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -147,7 +168,7 @@ export default function AuthGate({ children }) {
   }
 
   // 3) 로그인은 됐지만 승인 전
-  if (!ctxValue.approved && !ctxValue.isAdmin) {
+  if (!ctxValue.approved) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
         <div className="bg-white rounded-xl shadow p-8 max-w-md w-full text-center space-y-4">
@@ -155,7 +176,12 @@ export default function AuthGate({ children }) {
           <p className="text-gray-600 text-sm">
             운영자의 승인 후 이용할 수 있습니다. 문의: 관리자에게 연락 바랍니다.
           </p>
-          <button className="text-sm text-gray-500 underline" onClick={()=>ctxValue.signOut()}>로그아웃</button>
+          <button
+            className="text-sm text-gray-500 underline"
+            onClick={() => ctxValue.signOut()}
+          >
+            로그아웃
+          </button>
         </div>
       </div>
     );
