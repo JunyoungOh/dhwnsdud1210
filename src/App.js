@@ -323,6 +323,43 @@ const CURRENT_HR_MULT = 2.5;    // HR 카테고리의 '현재 경력' 가중(오
 const TOP_HEAD_MULT = 1.4;      // 상단(가장 최근) 몇 줄 보너스
 const TOP_HEAD_RANGE = 3;       // 상단 N줄을 '최근 라인'으로 간주
 
+// --- 키워드 매칭 유틸: 단어 경계 + 예외 컨텍스트 ---
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// "product"가 'product sales/marketing' 같은 컨텍스트면 테크로 카운트 금지
+function isProductSalesContext(line) {
+  const l = line.toLowerCase();
+  return /\bproduct\b\s*(sales|marketing|mgr\.?\s*sales|bizdev)/i.test(l);
+}
+
+// HR 컨텍스트(같은 라인에 HR/HRBP/People 등)면 테크 토큰 가중치 크게 줄이기
+function isHRContext(line) {
+  const l = line.toLowerCase();
+  return /\b(hr|hrbp|people|인사|노무|c&b|comp(?:ensation)?\s*&\s*benefits|employee\s*relations|er|인사총무)\b/i.test(l);
+}
+
+// 라인에서 키워드 카운트(단어 경계). 카테고리별 특수 처리 가능.
+function countKeywordOnLine(line, kw, cat) {
+  const l = String(line || '');
+  const low = ` ${l.toLowerCase().replace(/[·•・∙]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+
+  // 'product' 특수 처리: 세일즈 컨텍스트면 0, 역할명과 함께일 때만 인정
+  if (cat === '테크/프로덕트' && kw === 'product') {
+    if (isProductSalesContext(low)) return 0;
+    // 역할명 패턴(제품 직군): product manager/owner/lead/director/cpo/pm/po
+    const roleOk = /\b(product\s+(manager|owner|lead|director)|cpo|pm|po)\b/i.test(low);
+    if (!roleOk) return 0;
+  }
+
+  // 단어 경계 매칭
+  const re = new RegExp(`\\b${escapeRegExp(kw)}\\b`, 'gi');
+  let m, c = 0;
+  while ((m = re.exec(low)) !== null) c += 1;
+  return c;
+}
+
 function detectExpertiseFromCareer(careerText = '') {
   let text = String(careerText || '').toLowerCase();
   if (!text.trim()) return null;
@@ -343,13 +380,16 @@ function detectExpertiseFromCareer(careerText = '') {
     return { kw, w };
   };
 
-  // 라인/연도/현재 경력 가중치가 반영된 스코어링
-  const rawScores = {}; // { cat: {score, lastPos, hits:{kw->count}} }
+  // 라인/연도/현재 경력 가중치가 반영된 스코어링 (교체본)
+  const rawScores = {}; // { cat: {score, lastPos, hits:{kw->count}, currentHit, anyTopHit} }
   const slices = computeLineSlices(text); // 원문 기준 분절
 
   for (const [cat, kws] of Object.entries(EXPERTISE_KEYWORDS)) {
     let score = 0, lastPos = -1;
     const hits = {};
+    let currentHit = false;
+    let anyTopHit = false;
+
     for (const raw of kws) {
       const { kw, w } = parseKw(raw);
       if (!kw) continue;
@@ -358,16 +398,12 @@ function detectExpertiseFromCareer(careerText = '') {
         const { line, weight, isCurrent, isTopRecent, idx } = slices[i];
         if (!line) continue;
 
-        // 라인 정규화 후 매칭
-        const normLine = ` ${line.toLowerCase().replace(/[·•・∙]/g, ' ').replace(/\s+/g, ' ').trim()} `;
-        let localCount = 0;
-        let pos = normLine.indexOf(` ${kw} `);
-        if (pos === -1) pos = normLine.indexOf(kw);
-        while (pos !== -1) {
-          localCount += 1;
-          // 상단일수록 "최근"으로 간주 → 큰 lastPos (tie-break용)
-          lastPos = Math.max(lastPos, (text.length - idx));
-          pos = normLine.indexOf(kw, pos + kw.length);
+        // 단어 경계 기반 카운트 (+ product sales 예외/HR 라인 감쇠는 헬퍼 내부/아래 로직에서 처리)
+        let localCount = countKeywordOnLine(line, kw, cat);
+
+        // 테크/프로덕트 키워드가 HR 컨텍스트 라인에서 나오면 강한 감쇠(누수 방지)
+        if (localCount > 0 && cat === '테크/프로덕트' && isHRContext(line)) {
+          localCount = Math.max(0, Math.floor(localCount * 0.25)); // 75% 감쇠
         }
 
         if (localCount > 0) {
@@ -376,15 +412,23 @@ function detectExpertiseFromCareer(careerText = '') {
           const currentBoost = isCurrent
             ? (cat === '인사/노무' ? CURRENT_HR_MULT : CURRENT_MULT)
             : 1;
+
           const perHit = baseHit * headBoost * currentBoost;
 
           score += perHit * localCount;
           hits[kw] = (hits[kw] || 0) + localCount;
+
+          if (isCurrent) currentHit = true;
+          if (isTopRecent) anyTopHit = true;
+
+          // 상단일수록 "최근"으로 간주 → 큰 lastPos (tie-break용)
+          lastPos = Math.max(lastPos, (text.length - idx));
         }
       }
     }
-    rawScores[cat] = { score, lastPos, hits };
+    rawScores[cat] = { score, lastPos, hits, currentHit, anyTopHit };
   }
+
 
   // 2) 부정 키워드 페널티 (예: HR에서 IR/PR 흔적이 있으면 감점)
   for (const [cat, negs] of Object.entries(NEGATIVE_KEYWORDS)) {
@@ -406,15 +450,28 @@ function detectExpertiseFromCareer(careerText = '') {
       if (!c) continue;
       if (hay.indexOf(` ${c} `) !== -1 || hay.indexOf(c) !== -1) coreHits += 1;
     }
-    // 코어 토큰 기반 억제/완화 (HR 하드컷 완화: 2개→1개)
+    // 코어 토큰 집계는 기존 로직대로 coreHits 계산했다고 가정
     if (cat === '인사/노무') {
+      // 선택 C: HR은 코어 1개 '미만'이면 0점
       if (coreHits < 1) rawScores[cat].score = 0;
     } else {
+      // 타 카테고리: 코어 0개면 50% 감점(완전 0점은 아님)
       if (coreHits === 0 && rawScores[cat].score > 0) {
         rawScores[cat].score = Math.floor(rawScores[cat].score * 0.5);
       }
     }
-  }
+    // === HR 현재/상단 우세 시 테크 누수 억제 ===
+    const hr = rawScores['인사/노무'];
+    const tech = rawScores['테크/프로덕트'];
+    if (hr && tech) {
+      // HR이 현재 라인 또는 상단 라인에서 히트했고 점수도 어느 정도면
+      const hrStrong = (hr.currentHit || hr.anyTopHit) && hr.score >= 2;
+      // 테크가 '현재' 히트가 없고(=과거 히트만) HR보다 점수가 낮거나 비슷하면 강한 감쇠
+      const techPastOnly = tech.currentHit ? false : true;
+      if (hrStrong && techPastOnly && tech.score > 0 && tech.score <= hr.score * 1.1) {
+        tech.score = Math.max(1, Math.floor(tech.score * 0.3)); // 70% 감쇠
+      }
+    }
 
   // 4) 최종 스코어로 1차 후보 선택
   let bestCat = null, bestVal = -1, bestPos = -1;
