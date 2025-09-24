@@ -23,16 +23,28 @@ export default function AuthGate({ children }) {
       setUser(u);
       setUserDoc(null);
       setError('');
+
       if (!u) { setLoading(false); return; }
-      // users/{uid} 로드
+
       try {
-        const snap = await getDoc(doc(db, 'users', u.uid));
-        if (snap.exists()) setUserDoc(snap.data());
-        else {
-          // 최초 로그인 사용자 기본 문서 생성(미승인)
-          const base = { email: u.email || '', approved: false, role: 'user', allowedAccessCodes: [] };
-          await setDoc(doc(db, 'users', u.uid), base, { merge: true });
-          setUserDoc(base);
+        // 1) 매 로그인마다 이메일/표시명/프로바이더/시간을 Firestore에 merge 업서트
+        const patch = {
+          email: u.email || null,
+          displayName: u.displayName || null,
+          providerId: (u.providerData && u.providerData[0]?.providerId) || null,
+          lastLoginAt: new Date().toISOString(),
+        };
+        await setDoc(doc(db, 'users', u.uid), patch, { merge: true });
+
+        // 2) 문서 읽기 (없으면 기본값 merge)
+        const ref = doc(db, 'users', u.uid);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          setUserDoc(snap.data());
+        } else {
+          const base = { approved: false, role: 'user', allowedAccessCodes: [] };
+          await setDoc(ref, base, { merge: true });
+          setUserDoc({ ...base, ...patch });
         }
       } catch (e) {
         setError('사용자 정보를 불러오지 못했습니다.');
