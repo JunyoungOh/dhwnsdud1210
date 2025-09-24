@@ -22,7 +22,7 @@ import {
 import { parseNaturalQuery, matchProfileWithNL } from './utils/nlp';
 import { MeetingsPage } from './utils/meetings';
 
-import { useUserCtx } from './auth/AuthGate';
+import AuthGate, { useUserCtx } from './auth/AuthGate';
 import UserAdmin from './admin/UserAdmin';
 
 /* === 새 UI 컴포넌트들 === */
@@ -2575,7 +2575,7 @@ export default function App() {
         <LoginScreen
           onLogin={handleLogin}
           onLogout={handleFirebaseLogout}
-          isAuthed={!!userCtx?.user}
+          isAuthed={!!ctx?.user}
         />
       </ErrorBoundary>
     );
