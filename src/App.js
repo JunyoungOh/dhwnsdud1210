@@ -430,9 +430,10 @@ function detectExpertiseFromCareer(careerText = '') {
   }
 
 
-  // 2) 부정 키워드 페널티 (예: HR에서 IR/PR 흔적이 있으면 감점)
+  // 2) 부정 키워드 페널티
   for (const [cat, negs] of Object.entries(NEGATIVE_KEYWORDS)) {
     if (!negs || !negs.length) continue;
+    if (!rawScores[cat]) continue;
     const nlist = negs.map(normalize);
     let penalty = 0;
     for (const n of nlist) {
@@ -441,16 +442,18 @@ function detectExpertiseFromCareer(careerText = '') {
     if (penalty > 0) rawScores[cat].score = Math.max(0, rawScores[cat].score - penalty);
   }
 
-  // 3) 코어 토큰이 하나도 없으면 카테고리 점수 하향 (HR 오검출 억제)
+  // 3) 코어 토큰이 하나도 없으면 카테고리 점수 하향 (HR 오검출 억제: 선택 C 반영)
   for (const [cat, cores] of Object.entries(CORE_TOKENS)) {
     if (!cores || !cores.length) continue;
+    if (!rawScores[cat]) continue;
+
     const clist = cores.map(normalize);
     let coreHits = 0;
     for (const c of clist) {
       if (!c) continue;
       if (hay.indexOf(` ${c} `) !== -1 || hay.indexOf(c) !== -1) coreHits += 1;
     }
-    // 코어 토큰 집계는 기존 로직대로 coreHits 계산했다고 가정
+
     if (cat === '인사/노무') {
       // 선택 C: HR은 코어 1개 '미만'이면 0점
       if (coreHits < 1) rawScores[cat].score = 0;
@@ -460,41 +463,42 @@ function detectExpertiseFromCareer(careerText = '') {
         rawScores[cat].score = Math.floor(rawScores[cat].score * 0.5);
       }
     }
-    // === HR 현재/상단 우세 시 테크 누수 억제 ===
-    const hr = rawScores['인사/노무'];
+  }
+
+  // ✅ HR 현재/상단 우세 시 테크 누수 억제 (코어 패널티 적용 "후", 루프 바깥에서)
+  {
+    const hr   = rawScores['인사/노무'];
     const tech = rawScores['테크/프로덕트'];
     if (hr && tech) {
-      // HR이 현재 라인 또는 상단 라인에서 히트했고 점수도 어느 정도면
       const hrStrong = (hr.currentHit || hr.anyTopHit) && hr.score >= 2;
-      // 테크가 '현재' 히트가 없고(=과거 히트만) HR보다 점수가 낮거나 비슷하면 강한 감쇠
       const techPastOnly = tech.currentHit ? false : true;
       if (hrStrong && techPastOnly && tech.score > 0 && tech.score <= hr.score * 1.1) {
         tech.score = Math.max(1, Math.floor(tech.score * 0.3)); // 70% 감쇠
       }
     }
+  }
 
   // 4) 최종 스코어로 1차 후보 선택
   let bestCat = null, bestVal = -1, bestPos = -1;
   for (const [cat, v] of Object.entries(rawScores)) {
-    if (v.score <= 0) continue;
+    if (!v || v.score <= 0) continue;
     const final = v.score * 1000 + Math.max(0, v.lastPos);
     if (final > bestVal) { bestVal = final; bestCat = cat; bestPos = v.lastPos; }
   }
   if (!bestCat) return null;
 
   // 5) 우선순위 규칙 — C레벨/전략이 강하면 HR로 덮지 않도록
-   const cLevel = rawScores['C레벨 Pool']?.score || 0;
-   const strategy = rawScores['전략/BD']?.score || 0;
-   const hr = rawScores['인사/노무']?.score || 0;
+  const cLevelScore   = rawScores['C레벨 Pool']?.score || 0;
+  const strategyScore = rawScores['전략/BD']?.score || 0;
+  const hrScore       = rawScores['인사/노무']?.score || 0;
 
-  // C레벨/전략이 충분히 강하면 HR 선택을 배제(오검출 방지)
   if (bestCat === '인사/노무') {
-    if (cLevel >= 5 && hr < cLevel * 0.9) return 'C레벨 Pool';
-    if (strategy >= 4 && hr < strategy * 0.9) return '전략/BD';
+    // ⬇︎ 여기서 'hr' → 'hrScore'로 비교 (오타 수정)
+    if (cLevelScore >= 5 && hrScore < cLevelScore * 0.9) return 'C레벨 Pool';
+    if (strategyScore >= 4 && hrScore < strategyScore * 0.9) return '전략/BD';
   }
 
   return bestCat;
-}
 
 // ======== 경로 자동 탐지 (기존 구조 고정) ========
 function buildPathCandidates(accessCode, aid) {
