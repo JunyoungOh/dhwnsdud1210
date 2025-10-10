@@ -567,6 +567,56 @@ function IdealGamePage({
   const [winners, setWinners] = React.useState([]);       // 누적 선택된 승자 (한 라운드)
   const [champion, setChampion] = React.useState(null);
 
+  React.useEffect(() => {
+    if (phase === 'setup') return;
+    const profileMap = new Map(profiles.map((p) => [p.id, p]));
+
+    setRoundPairs((prev) => {
+      if (!Array.isArray(prev) || prev.length === 0) return prev;
+      let changed = false;
+      const next = prev.map((pair) => {
+        if (!Array.isArray(pair) || pair.length === 0) return pair;
+        let pairChanged = false;
+        const syncedPair = pair.map((p) => {
+          if (!p?.id) return p;
+          const updated = profileMap.get(p.id);
+          if (updated && updated !== p) {
+            pairChanged = true;
+            changed = true;
+            return updated;
+          }
+          return p;
+        });
+        return pairChanged ? syncedPair : pair;
+      });
+      return changed ? next : prev;
+    });
+
+    setWinners((prev) => {
+      if (!Array.isArray(prev) || prev.length === 0) return prev;
+      let changed = false;
+      const next = prev.map((p) => {
+        if (!p?.id) return p;
+        const updated = profileMap.get(p.id);
+        if (updated && updated !== p) {
+          changed = true;
+          return updated;
+        }
+        return p;
+      });
+      return changed ? next : prev;
+    });
+
+    setChampion((prev) => {
+      if (!prev?.id) return prev;
+      const updated = profileMap.get(prev.id);
+      if (updated && updated !== prev) {
+        return updated;
+      }
+      return prev;
+    });
+  }, [profiles, phase]);
+
   // 라운드 페어링 만들기
   const makePairs = React.useCallback((list) => {
     const pairs = [];
