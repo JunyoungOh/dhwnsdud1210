@@ -1,7 +1,14 @@
-const WEBHOOK_URL = (process.env.REACT_APP_KAKAOWORK_WEBHOOK_URL || '').trim();
+const PROXY_ENDPOINT = (process.env.REACT_APP_KAKAOWORK_PROXY_ENDPOINT || '/.netlify/functions/send-kakaowork').trim();
 const MAX_TEXT_LENGTH = 500;
 const REMINDER_TITLE = '오늘 미팅 리마인드 드려요!';
 const REMINDER_TIME_ZONE = 'Asia/Seoul';
+
+const isTruthy = (value = '') => {
+  const normalized = String(value).trim().toLowerCase();
+  return ['1', 'true', 'yes', 'y', 'on', 'enable', 'enabled'].includes(normalized);
+};
+
+const KAKAOWORK_AVAILABLE = isTruthy(process.env.REACT_APP_KAKAOWORK_ENABLED);
 
 function truncateForKakao(text) {
   if (!text) return '';
@@ -99,8 +106,12 @@ function buildMeetingReminderMessage(profile, meetingLines, { shareUrl } = {}) {
 }
 
 async function postToKakaoWork(text) {
-  if (!WEBHOOK_URL) {
-    throw new Error('카카오워크 Webhook URL이 설정되지 않았습니다.');
+  if (!KAKAOWORK_AVAILABLE) {
+    throw new Error('카카오워크 Webhook 사용이 비활성화되어 있습니다.');
+  }
+
+  if (!PROXY_ENDPOINT) {
+    throw new Error('카카오워크 Webhook 프록시 엔드포인트가 설정되지 않았습니다.');
   }
 
   if (typeof fetch !== 'function') {
@@ -111,11 +122,10 @@ async function postToKakaoWork(text) {
     throw new Error('전송할 메시지가 없습니다.');
   }
 
-  const payload = { text };
-  const response = await fetch(WEBHOOK_URL, {
+  const response = await fetch(PROXY_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ text }),
   });
 
   if (!response.ok) {
@@ -128,7 +138,7 @@ async function postToKakaoWork(text) {
 }
 
 export function hasKakaoWorkWebhook() {
-  return Boolean(WEBHOOK_URL);
+  return KAKAOWORK_AVAILABLE;
 }
 
 export async function sendProfileToKakaoWork(profile, { shareUrl } = {}) {
@@ -151,10 +161,6 @@ export function buildMeetingReminderMessages(profiles, { date = new Date(), shar
     if (text) acc.push({ profile, text, lines });
     return acc;
   }, []);
-}
-
-export function getKakaoWorkWebhookUrl() {
-  return WEBHOOK_URL;
 }
 
 export {
