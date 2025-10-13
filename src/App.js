@@ -172,6 +172,16 @@ function formatDateOnlyInTZ(date, timeZone = TZ) {
   }).formatToParts(date).reduce((acc, p) => (acc[p.type] = p.value, acc), {});
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
+function getKakaoWorkErrorMessage(error, fallback = '카카오워크 전송에 실패했습니다.') {
+  if (!error) return fallback;
+  if (typeof error === 'string') {
+    const trimmed = error.trim();
+    return trimmed || fallback;
+  }
+  const message = typeof error?.message === 'string' ? error.message.trim() : '';
+  if (message) return message;
+  return fallback;
+}
 function parseDateTimeFromRecord(recordText) {
   if (!recordText) return null;
   const text = typeof recordText === 'string' ? recordText : String(recordText || '');
@@ -1010,7 +1020,8 @@ const ProfileCard = ({
       (toast.success?.('카카오워크로 알림을 전송했습니다.') ?? toast('카카오워크로 알림을 전송했습니다.'));
     } catch (error) {
       console.error('카카오워크 전송 실패:', error);
-      (toast.error?.('카카오워크 전송에 실패했습니다.') ?? toast('카카오워크 전송에 실패했습니다.'));
+      const message = getKakaoWorkErrorMessage(error);
+      (toast.error?.(message) ?? toast(message));
     } finally {
       setSendingKakao(false);
     }
@@ -2770,7 +2781,8 @@ export default function App() {
         (toast.success?.('카카오워크로 알림을 전송했습니다.') ?? toast('카카오워크로 알림을 전송했습니다.'));
       } catch (e) {
         console.error('카카오워크 전송 실패:', e);
-        (toast.error?.('카카오워크 전송에 실패했습니다.') ?? toast('카카오워크 전송에 실패했습니다.'));
+        const message = getKakaoWorkErrorMessage(e);
+        (toast.error?.(message) ?? toast(message));
       } finally {
         setSendingKakao(false);
       }
