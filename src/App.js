@@ -996,7 +996,7 @@ const ProfileCard = ({
 
   const handleSendToKakao = async () => {
     if (!kakaoWebhookAvailable) {
-      (toast.error?.('카카오워크 Webhook URL이 설정되어 있지 않습니다.') ?? toast('카카오워크 Webhook URL이 설정되어 있지 않습니다.'));
+      (toast.error?.('카카오워크 연동이 비활성화되어 있습니다.') ?? toast('카카오워크 연동이 비활성화되어 있습니다.'));
       return;
     }
     if (!shareUrl) {
@@ -1101,7 +1101,7 @@ const ProfileCard = ({
                 {/* 🔔 카카오워크로 전송 */}
                 <button
                   type="button"
-                  title={kakaoWebhookAvailable ? '카카오워크로 알림 보내기' : '환경 변수에 Webhook URL을 설정하면 사용 가능합니다.'}
+                  title={kakaoWebhookAvailable ? '카카오워크로 알림 보내기' : '배포 환경 변수에서 카카오워크 연동을 활성화하면 사용 가능합니다.'}
                   onClick={handleSendToKakao}
                   disabled={!kakaoWebhookAvailable || sendingKakao}
                   className={`${ICON_BTN} ${(!kakaoWebhookAvailable || sendingKakao) ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -2756,7 +2756,7 @@ export default function App() {
     const handleSendToKakao = async () => {
       if (!profile) return;
       if (!kakaoWebhookAvailable) {
-        (toast.error?.('카카오워크 Webhook URL이 설정되어 있지 않습니다.') ?? toast('카카오워크 Webhook URL이 설정되어 있지 않습니다.'));
+        (toast.error?.('카카오워크 연동이 비활성화되어 있습니다.') ?? toast('카카오워크 연동이 비활성화되어 있습니다.'));
         return;
       }
       if (!shareUrl) {
@@ -2775,6 +2775,7 @@ export default function App() {
         setSendingKakao(false);
       }
     };
+    
     useEffect(() => {
       (async () => {
         try {
@@ -2805,7 +2806,7 @@ export default function App() {
               onClick={handleSendToKakao}
               disabled={!kakaoWebhookAvailable || sendingKakao}
               className="flex items-center gap-2"
-              title={kakaoWebhookAvailable ? '카카오워크로 프로필 정보를 전송합니다.' : '환경 변수에 Webhook URL을 설정하면 사용 가능합니다.'}
+              title={kakaoWebhookAvailable ? '카카오워크로 프로필 정보를 전송합니다.' : '배포 환경 변수에서 카카오워크 연동을 활성화하면 사용 가능합니다.'}
             >
               {sendingKakao ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -2813,7 +2814,7 @@ export default function App() {
                 <BellRing className="w-4 h-4" />
               )}
               프로필 전송
-            </Btn>    
+            </Btn>  
           </div>
           {profile.expertise && <p className="text-lg font-semibold text-gray-700 mt-4">{profile.expertise}</p>}
           <div className="mt-6 space-y-4">
