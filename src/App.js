@@ -2743,7 +2743,38 @@ export default function App() {
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError]     = useState('');
+    const [sendingKakao, setSendingKakao] = useState(false);
 
+    const kakaoWebhookAvailable = hasKakaoWorkWebhook();
+
+    const shareUrl = useMemo(() => {
+      if (!profileId || !accessCode) return '';
+      if (typeof window === 'undefined') return '';
+      return `${window.location.origin}${window.location.pathname}?profile=${profileId}&code=${accessCode}`;
+    }, [profileId, accessCode]);
+
+    const handleSendToKakao = async () => {
+      if (!profile) return;
+      if (!kakaoWebhookAvailable) {
+        (toast.error?.('카카오워크 Webhook URL이 설정되어 있지 않습니다.') ?? toast('카카오워크 Webhook URL이 설정되어 있지 않습니다.'));
+        return;
+      }
+      if (!shareUrl) {
+        (toast.error?.('공유 링크를 생성할 수 없습니다.') ?? toast('공유 링크를 생성할 수 없습니다.'));
+        return;
+      }
+
+      setSendingKakao(true);
+      try {
+        await sendProfileToKakaoWork(profile, { shareUrl });
+        (toast.success?.('카카오워크로 알림을 전송했습니다.') ?? toast('카카오워크로 알림을 전송했습니다.'));
+      } catch (e) {
+        console.error('카카오워크 전송 실패:', e);
+        (toast.error?.('카카오워크 전송에 실패했습니다.') ?? toast('카카오워크 전송에 실패했습니다.'));
+      } finally {
+        setSendingKakao(false);
+      }
+    };
     useEffect(() => {
       (async () => {
         try {
@@ -2769,6 +2800,20 @@ export default function App() {
               <h1 className="text-3xl font-bold text-yellow-600">{profile.name}</h1>
               <span className="text-xl text-gray-500 font-medium">{profile.age ? `${profile.age}세` : ''}</span>
             </div>
+            <Btn
+              variant="primary"
+              onClick={handleSendToKakao}
+              disabled={!kakaoWebhookAvailable || sendingKakao}
+              className="flex items-center gap-2"
+              title={kakaoWebhookAvailable ? '카카오워크로 프로필 정보를 전송합니다.' : '환경 변수에 Webhook URL을 설정하면 사용 가능합니다.'}
+            >
+              {sendingKakao ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <BellRing className="w-4 h-4" />
+              )}
+              프로필 전송
+            </Btn>    
           </div>
           {profile.expertise && <p className="text-lg font-semibold text-gray-700 mt-4">{profile.expertise}</p>}
           <div className="mt-6 space-y-4">
