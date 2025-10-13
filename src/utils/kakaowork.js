@@ -1,4 +1,5 @@
-const PROXY_ENDPOINT = (process.env.REACT_APP_KAKAOWORK_PROXY_ENDPOINT || '/.netlify/functions/send-kakaowork').trim();
+const RAW_PROXY_ENDPOINT = process.env.REACT_APP_KAKAOWORK_PROXY_ENDPOINT;
+const PROXY_ENDPOINT = (RAW_PROXY_ENDPOINT || '/.netlify/functions/send-kakaowork').trim();
 const MAX_TEXT_LENGTH = 500;
 const REMINDER_TITLE = '오늘 미팅 리마인드 드려요!';
 const REMINDER_TIME_ZONE = 'Asia/Seoul';
@@ -8,7 +9,15 @@ const isTruthy = (value = '') => {
   return ['1', 'true', 'yes', 'y', 'on', 'enable', 'enabled'].includes(normalized);
 };
 
-const KAKAOWORK_AVAILABLE = isTruthy(process.env.REACT_APP_KAKAOWORK_ENABLED);
+const parseEnableFlag = (value) => {
+  if (value === undefined) return true;
+  const normalized = typeof value === 'string' ? value.trim() : String(value).trim();
+  if (!normalized) return true;
+  return isTruthy(normalized);
+};
+
+const rawEnableFlag = process.env.REACT_APP_KAKAOWORK_ENABLED;
+const KAKAOWORK_AVAILABLE = !!PROXY_ENDPOINT && parseEnableFlag(rawEnableFlag);
 
 function truncateForKakao(text) {
   if (!text) return '';
