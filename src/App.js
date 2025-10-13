@@ -21,6 +21,12 @@ import {
 
 import { parseNaturalQuery, matchProfileWithNL } from './utils/nlp';
 import { MeetingsPage } from './utils/meetings';
+import {
+  sendProfileToKakaoWork,
+  hasKakaoWorkWebhook,
+  sendMeetingReminderToKakaoWork,
+  findMeetingLinesForDate,
+} from './utils/kakaowork';
 
 import AuthGate, { useUserCtx } from './auth/AuthGate';
 import UserAdmin from './admin/UserAdmin';
@@ -932,7 +938,8 @@ const ProfileCard = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
   const [syncing, setSyncing] = useState(false);
-
+  const [sendingKakao, setSendingKakao] = useState(false);
+  
   useEffect(() => { setEditedProfile(profile); }, [profile]);
 
   const priorityTone = {
@@ -941,6 +948,13 @@ const ProfileCard = ({
     '1': 'success',
   };
 
+  const shareUrl = useMemo(() => {
+    if (typeof window === 'undefined') return '';
+    return `${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`;
+  }, [profile.id, accessCode]);
+
+  const kakaoWebhookAvailable = hasKakaoWorkWebhook();
+  
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setEditedProfile(prev => ({ ...prev, [name]: name === 'age' ? (value ? Number(value) : '') : value }));
@@ -970,13 +984,38 @@ const ProfileCard = ({
   };
 
   const handleShare = () => {
-    const shareUrl = `${window.location.origin}${window.location.pathname}?profile=${profile.id}&code=${accessCode}`;
+    if (!shareUrl) {
+      (toast.error?.('공유 링크를 생성할 수 없습니다.') ?? toast('공유 링크를 생성할 수 없습니다.'));
+      return;
+    }    
     navigator.clipboard.writeText(shareUrl).then(
       () => (toast.success?.('공유 링크가 복사되었습니다.') ?? toast('공유 링크가 복사되었습니다.')),
       () => (toast.error?.('링크 복사에 실패했습니다.') ?? toast('링크 복사에 실패했습니다.'))
     );
   };
 
+  const handleSendToKakao = async () => {
+    if (!kakaoWebhookAvailable) {
+      (toast.error?.('카카오워크 Webhook URL이 설정되어 있지 않습니다.') ?? toast('카카오워크 Webhook URL이 설정되어 있지 않습니다.'));
+      return;
+    }
+    if (!shareUrl) {
+      (toast.error?.('공유 링크를 생성할 수 없습니다.') ?? toast('공유 링크를 생성할 수 없습니다.'));
+      return;
+    }
+
+    setSendingKakao(true);
+    try {
+      await sendProfileToKakaoWork(profile, { shareUrl });
+      (toast.success?.('카카오워크로 알림을 전송했습니다.') ?? toast('카카오워크로 알림을 전송했습니다.'));
+    } catch (error) {
+      console.error('카카오워크 전송 실패:', error);
+      (toast.error?.('카카오워크 전송에 실패했습니다.') ?? toast('카카오워크 전송에 실패했습니다.'));
+    } finally {
+      setSendingKakao(false);
+    }
+  };
+  
   const handleSyncClick = async () => {
     if (!onSyncOne) return;
     setSyncing(true);
@@ -1057,6 +1096,21 @@ const ProfileCard = ({
                   className={ICON_BTN}
                 >
                   <Layers size={16} className="text-indigo-500" />
+                </button>
+
+                {/* 🔔 카카오워크로 전송 */}
+                <button
+                  type="button"
+                  title={kakaoWebhookAvailable ? '카카오워크로 알림 보내기' : '환경 변수에 Webhook URL을 설정하면 사용 가능합니다.'}
+                  onClick={handleSendToKakao}
+                  disabled={!kakaoWebhookAvailable || sendingKakao}
+                  className={`${ICON_BTN} ${(!kakaoWebhookAvailable || sendingKakao) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {sendingKakao ? (
+                    <Loader2 size={16} className="text-amber-500 animate-spin" />
+                  ) : (
+                    <BellRing size={16} className="text-amber-500" />
+                  )}
                 </button>
 
                 {/* 🔗 공유 링크 복사 */}
@@ -2242,6 +2296,111 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    if (!dataReady) return undefined;
+    if (!profiles.length) return undefined;
+    if (!hasKakaoWorkWebhook()) return undefined;
+
+    const timeZone = 'Asia/Seoul';
+    const shareBase = `${window.location.origin}${window.location.pathname}`;
+
+    const buildShareUrl = (profile) => {
+      if (!shareBase || !profile?.id) return '';
+      const params = new URLSearchParams();
+      params.set('profile', profile.id);
+      if (accessCode) params.set('code', accessCode);
+      return `${shareBase}?${params.toString()}`;
+    };
+
+    const getNowParts = () => {
+      const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+      const parts = formatter
+        .formatToParts(new Date())
+        .reduce((acc, part) => {
+          acc[part.type] = part.value;
+          return acc;
+        }, {});
+      const year = parts.year || '0000';
+      const month = parts.month || '00';
+      const day = parts.day || '00';
+      return {
+        dateKey: `${year}${month}${day}`,
+        hour: Number.parseInt(parts.hour ?? '0', 10),
+      };
+    };
+
+    let sending = false;
+    let cancelled = false;
+
+    const attemptSendReminder = async () => {
+      if (cancelled || sending) return;
+
+      const { dateKey, hour } = getNowParts();
+      if (!Number.isFinite(hour) || hour < 9) return;
+
+      const storageKey = `kakaoMeetingReminderSent-${dateKey}`;
+      try {
+        if (window.localStorage.getItem(storageKey)) return;
+      } catch (error) {
+        console.warn('로컬 스토리지를 사용할 수 없습니다:', error);
+      }
+
+      const today = new Date();
+      const reminders = profiles
+        .map((profile) => {
+          const lines = findMeetingLinesForDate(profile?.meetingRecord, today);
+          return lines.length ? { profile, lines } : null;
+        })
+        .filter(Boolean);
+
+      if (!reminders.length) {
+        try {
+          window.localStorage.setItem(storageKey, 'none');
+        } catch (error) {
+          console.warn('리마인더 전송 기록을 저장하지 못했습니다:', error);
+        }
+        return;
+      }
+
+      sending = true;
+      try {
+        for (const entry of reminders) {
+          if (cancelled) break;
+          const shareUrl = buildShareUrl(entry.profile);
+          await sendMeetingReminderToKakaoWork(entry.profile, entry.lines, { shareUrl });
+        }
+        if (!cancelled) {
+          try {
+            window.localStorage.setItem(storageKey, 'sent');
+          } catch (error) {
+            console.warn('리마인더 전송 기록을 저장하지 못했습니다:', error);
+          }
+        }
+      } catch (error) {
+        console.error('카카오워크 미팅 리마인더 전송 실패:', error);
+      } finally {
+        sending = false;
+      }
+    };
+
+    attemptSendReminder();
+    const intervalId = window.setInterval(attemptSendReminder, 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [dataReady, profiles, accessCode]);
+  
   // 외부 스크립트 로드
   useEffect(() => {
     const xlsx = document.createElement('script');
