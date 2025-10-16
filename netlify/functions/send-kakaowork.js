@@ -1,12 +1,9 @@
+const { isKakaoWorkAvailable, postToKakaoWork } = require('../lib/kakaowork');
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type',
   'Access-Control-Allow-Methods': 'POST,OPTIONS',
-};
-
-const isTruthy = (value = '') => {
-  const normalized = String(value).trim().toLowerCase();
-  return ['1', 'true', 'yes', 'y', 'on', 'enable', 'enabled'].includes(normalized);
 };
 
 exports.handler = async (event) => {
@@ -22,11 +19,7 @@ exports.handler = async (event) => {
     };
   }
 
-  const webhookUrl = process.env.KAKAOWORK_WEBHOOK_URL || '';
-  const enabledVar = process.env.KAKAOWORK_WEBHOOK_ENABLED;
-  const webhookEnabled = enabledVar === undefined ? true : isTruthy(enabledVar);
-
-  if (!webhookUrl || !webhookEnabled) {
+  if (!isKakaoWorkAvailable()) {
     return {
       statusCode: 500,
       headers: corsHeaders,
@@ -64,25 +57,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    });
-
-    if (!response.ok) {
-      const detail = await response.text().catch(() => '');
-      console.error('Failed to relay KakaoWork webhook.', response.status, detail);
-      return {
-        statusCode: response.status,
-        headers: corsHeaders,
-        body: JSON.stringify({
-          error: 'Failed to deliver KakaoWork webhook request.',
-          statusText: response.statusText,
-        }),
-      };
-    }
-
+    await postToKakaoWork(text);
     return {
       statusCode: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
