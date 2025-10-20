@@ -1039,7 +1039,7 @@ const ProfileCard = ({
 
   if (isEditing) {
     return (
-      <div className="bg-white rounded-xl shadow border p-4">
+      <div className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm">
         <div className="grid md:grid-cols-2 gap-3">
           <div className="space-y-2">
             <input name="name" value={editedProfile.name || ''} onChange={handleInputChange} placeholder="이름" className="w-full p-2 border rounded text-sm font-bold" />
@@ -1055,7 +1055,7 @@ const ProfileCard = ({
             <textarea name="meetingRecord" value={editedProfile.meetingRecord || ''} onChange={handleInputChange} placeholder="미팅기록 (예: (25.08.14) 오후 7:00)" className="w-full p-2 border rounded text-sm h-20" />
           </div>
         </div>
-        <div className="mt-3 flex justify-end gap-2">
+        <div className="mt-4 flex justify-end gap-2">
           <Btn variant="subtle" onClick={() => setIsEditing(false)}><X size={18} /> 취소</Btn>
           <Btn variant="success" onClick={handleSave}><Save size={18} /> 저장</Btn>
         </div>
@@ -1064,11 +1064,11 @@ const ProfileCard = ({
   }
 
   return (
-    <div className="bg-white rounded-xl shadow border p-4 relative flex flex-col gap-3">
+    <div className="relative flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm">
       <div className="flex items-start justify-between">
         <div className="flex items-baseline gap-2">
-          <h3 className="font-bold text-yellow-600 text-lg">{profile.name}</h3>
-          {profile.age && <span className="text-sm text-gray-500">{profile.age}세</span>}
+          <h3 className="text-lg font-semibold text-slate-900">{profile.name}</h3>
+          {profile.age && <span className="text-sm text-slate-500">{profile.age}세</span>}
           {profile.priority && (
             <Badge tone={priorityTone[profile.priority] || 'neutral'}>
               {profile.priority}
@@ -1081,8 +1081,8 @@ const ProfileCard = ({
           */}
           {(() => {
             const ICON_BTN =
-              "inline-flex items-center justify-center w-8 h-8 rounded-md " +
-              "hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-yellow-400/40";
+              "inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors " +
+              "hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300/60";
 
             return (
               <>
@@ -1096,7 +1096,7 @@ const ProfileCard = ({
                 >
                   <Star
                     size={16}
-                    className={profile.starred ? 'stroke-yellow-500 fill-yellow-400' : 'stroke-gray-400'}
+                    className={profile.starred ? 'stroke-violet-500 fill-violet-400' : 'stroke-slate-400'}
                   />
                 </button>
 
@@ -1115,12 +1115,12 @@ const ProfileCard = ({
                   title={kakaoWebhookAvailable ? '카카오워크로 알림 보내기' : '배포 환경 변수에서 카카오워크 연동을 활성화하면 사용 가능합니다.'}
                   onClick={handleSendToKakao}
                   disabled={!kakaoWebhookAvailable || sendingKakao}
-                  className={`${ICON_BTN} ${(!kakaoWebhookAvailable || sendingKakao) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className={`${ICON_BTN} ${(!kakaoWebhookAvailable || sendingKakao) ? 'cursor-not-allowed opacity-50' : ''}`}
                 >
                   {sendingKakao ? (
-                    <Loader2 size={16} className="text-amber-500 animate-spin" />
+                    <Loader2 size={16} className="animate-spin text-indigo-200" />
                   ) : (
-                    <BellRing size={16} className="text-amber-500" />
+                    <BellRing size={16} className="text-indigo-300" />
                   )}
                 </button>
 
@@ -1157,33 +1157,33 @@ const ProfileCard = ({
       </div>
 
       {profile.expertise && (
-        <p className="text-sm font-semibold text-gray-600 mt-1">
+        <p className="mt-1 text-sm font-semibold text-slate-600">
           {profile.expertise}
           {profile.expertiseIsAuto && (
-            <span className="ml-2 text-xs text-gray-400 align-baseline">(auto)</span>
+            <span className="ml-2 align-baseline text-xs text-slate-400">(auto)</span>
           )}
         </p>
       )}
-      <p className="text-sm text-gray-800 whitespace-pre-wrap">{profile.career}</p>
-      {profile.otherInfo && <p className="text-xs text-gray-500 pt-2 border-t whitespace-pre-wrap">{profile.otherInfo}</p>}
+      <p className="whitespace-pre-wrap text-sm text-slate-700">{profile.career}</p>
+      {profile.otherInfo && <p className="border-t pt-2 text-xs text-slate-500 whitespace-pre-wrap">{profile.otherInfo}</p>}
       {profile.meetingRecord && (
-        <div className="pt-2 border-t">
-          <p className="text-xs font-semibold text-gray-500">미팅기록:</p>
-          <p className="text-xs text-gray-600 whitespace-pre-wrap">{profile.meetingRecord}</p>
+        <div className="border-t pt-2">
+          <p className="text-xs font-semibold text-slate-500">미팅기록:</p>
+          <p className="text-xs text-slate-600 whitespace-pre-wrap">{profile.meetingRecord}</p>
         </div>
       )}
 
       {/* 하단 바 */}
-      <div className="mt-2 pt-2 border-t flex items-center justify-between">
+      <div className="flex items-center justify-between border-t pt-3">
         <div className="flex items-center gap-2">
           {typeof renderFooterLeft === 'function' ? renderFooterLeft() : null}
         </div>
         <div className="flex items-center gap-3">
           {profile.gcalEventId ? (
-            <a href={profile.gcalHtmlLink || '#'} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+            <a href={profile.gcalHtmlLink || '#'} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs text-indigo-500 hover:underline">
               <ExternalLink size={14}/> Google Calendar
             </a>
-          ) : <span className="text-xs text-gray-400">캘린더 미연동</span>}
+          ) : <span className="text-xs text-slate-400">캘린더 미연동</span>}
           {/* ⬇ 글자 크기 축소(약 10px) */}
           <Btn
             variant="primary"
@@ -1191,7 +1191,7 @@ const ProfileCard = ({
             disabled={syncing}
             className="!h-10 !px-5 text-[13px] leading-none"
           >
-            {syncing ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <CalendarPlus className="w-4 h-4 mr-1" />}
+            {syncing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CalendarPlus className="mr-1 h-4 w-4" />}
             {profile.gcalEventId ? '캘린더 수정' : '캘린더 등록'}
           </Btn>
         </div>
@@ -1995,13 +1995,13 @@ const ExcelUploader = ({ onBulkAdd }) => {
   };
 
   return (
-    <section className="bg-white p-6 rounded-xl shadow-md">
-      <h2 className="text-xl font-bold mb-4 flex items-center">
-        <UploadCloud className="mr-2 text-yellow-500" aria-hidden/>엑셀로 일괄 등록
+    <section className="rounded-2xl border border-slate-200 bg-white/80 p-6 shadow-sm">
+      <h2 className="mb-4 flex items-center text-xl font-semibold text-slate-900">
+        <UploadCloud className="mr-2 text-slate-600" aria-hidden/>엑셀로 일괄 등록
       </h2>
 
       <div className="space-y-4">
-        <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md border">
+        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-xs text-slate-600">
           <p className="font-semibold">엑셀 양식 안내 (헤더 자동추적)</p>
           <ul className="list-disc ml-4 mt-1 space-y-1">
             <li>1행은 헤더입니다. 열 위치와 상관없이 아래 단어를 인식합니다.</li>
@@ -2022,16 +2022,16 @@ const ExcelUploader = ({ onBulkAdd }) => {
           type="file"
           accept=".xlsx, .xls"
           onChange={(e)=>{ setFile(e.target.files[0]); setMessage(''); }}
-          className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4
+          className="block w-full text-sm text-slate-600 file:mr-4 file:py-2 file:px-4
                      file:rounded-full file:border-0 file:text-sm file:font-semibold
-                     file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100"
+                     file:bg-slate-900/5 file:text-slate-700 hover:file:bg-slate-900/10"
         />
 
         <Btn onClick={handleUpload} disabled={!file || isUploading || !window.XLSX} className="w-full" variant="primary">
           {isUploading ? <Loader2 className="animate-spin" /> : (!window.XLSX ? '로딩 중…' : '업로드 및 추가')}
         </Btn>
 
-        {message && <p className="text-sm text-center text-gray-600 whitespace-pre-wrap">{message}</p>}
+        {message && <p className="text-sm text-center text-slate-600 whitespace-pre-wrap">{message}</p>}
       </div>
     </section>
   );
@@ -2112,25 +2112,52 @@ const ManagePage = ({ profiles, onUpdate, onDelete, onAddOne, handleBulkAdd, acc
           ))}
         </div>
 
-        <nav className="mt-6 flex items-center justify-center gap-1">
-          <button onClick={()=>setCurrentPage(1)} disabled={currentPage===1}
-            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">≪</button>
-          <button onClick={()=>setCurrentPage(p=>Math.max(1,p-1))} disabled={currentPage===1}
-            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">〈</button>
+        <nav className="mt-6 flex items-center justify-center gap-1 text-sm">
+          <button
+            onClick={() => setCurrentPage(1)}
+            disabled={currentPage === 1}
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            ≪
+          </button>
+          <button
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            〈
+          </button>
 
-          <div className="flex items-center gap-1 overflow-x-auto max-w-[70vw]">
-            {pages.map(n => (
-              <button key={n} onClick={()=>setCurrentPage(n)}
-                className={`px-3 py-1 rounded-md border text-sm ${currentPage===n?'bg-yellow-400 text-white border-yellow-400':'bg-white hover:bg-gray-50'}`}>
+          <div className="flex max-w-[70vw] items-center gap-1 overflow-x-auto">
+            {pages.map((n) => (
+              <button
+                key={n}
+                onClick={() => setCurrentPage(n)}
+                className={`rounded-lg border px-3 py-1 transition-colors ${
+                  currentPage === n
+                    ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                }`}
+              >
                 {n}
               </button>
             ))}
           </div>
 
-          <button onClick={()=>setCurrentPage(p=>Math.min(totalPages,p+1))} disabled={currentPage===totalPages}
-            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">〉</button>
-          <button onClick={()=>setCurrentPage(totalPages)} disabled={currentPage===totalPages}
-            className="p-2 rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">≫</button>
+          <button
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            〉
+          </button>
+          <button
+            onClick={() => setCurrentPage(totalPages)}
+            disabled={currentPage === totalPages}
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            ≫
+          </button>
         </nav>
       </section>
     </div>
@@ -2144,11 +2171,15 @@ function AdminOnlyButton({ activeMain, setActiveMain, setFunctionsOpen }) {
   return (
     <button
       onClick={() => { setActiveMain('admin'); setFunctionsOpen(false); }}
-      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${
-        activeMain === 'admin' ? 'bg-yellow-400 text-white' : 'hover:bg-gray-100'
+      className={`w-full rounded-lg px-3 py-2 text-left font-medium transition-colors ${
+        activeMain === 'admin'
+          ? 'bg-slate-900 text-white shadow-sm'
+          : 'text-slate-600 hover:bg-slate-100'
       }`}
     >
-      <Users size={16}/> 사용자 관리
+      <span className="flex items-center gap-2">
+        <Users size={16}/> 사용자 관리
+      </span>
     </button>
   );
 }
@@ -2896,7 +2927,7 @@ export default function App() {
         ) : !accessCode ? (
           <LoginScreen onLogin={handleLogin} onLogout={handleFirebaseLogout} isAuthed={isAuthed} />
         ) : (
-          <div className="bg-gray-50 min-h-screen font-sans">
+          <div className="bg-[#F7F8FB] text-slate-900 min-h-screen font-sans">
           {showDeleteConfirm.show && (
             <ConfirmationModal
               message={`'${showDeleteConfirm.profileName}' 프로필을 정말로 삭제하시겠습니까?`}
@@ -2906,173 +2937,286 @@ export default function App() {
           )}
 
           {/* 상단 헤더 */}
-          <header className="px-4 sm:px-6 py-3 border-b bg-yellow-400 text-white sticky top-0 z-20">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <button className="md:hidden p-2 rounded-md border bg-white" onClick={()=>setSidebarOpen(s=>!s)} aria-label="사이드바 토글">
-                  <Menu size={18}/>
-                </button>
-                <Users className="text-white w-7 h-7" aria-hidden />
-                <h1 className="text-xl font-bold text-white">프로필 대시보드</h1>
-                <span className="text-xs sm:text-sm bg-white/25 border border-white/40 px-2 sm:px-3 py-1 rounded-full font-mono">
-                  {accessCode}
-                </span>
-              </div>
-              <div className="hidden md:flex items-center gap-3">
-                {googleApiReady === false && (
-                  <span className="text-xs text-red-500">
-                    Google Calendar 연동 비활성화됨{googleError ? ` (${googleError})` : ' (초기화 실패)'}
-                  </span>
-                )}
-                {googleApiReady === true && (
-                  isGoogleSignedIn ? (
-                    <Btn
-                      size="sm"
-                      variant="subtle"
-                      onClick={() => { if (window.gapi?.client) window.gapi.client.setToken(null); setIsGoogleSignedIn(false); }}
-                    >
-                      Google 로그아웃
-                    </Btn>
-                  ) : (
-                    <Btn
-                      size="sm"
-                      variant="subtle"
-                      onClick={() => tokenClient?.requestAccessToken({ prompt: 'consent' })}
-                    >
-                      Google 로그인
-                    </Btn>
-                  )
-                )}
-                <Btn
-                  size="sm"
-                  variant="subtle"
-                  onClick={() => { setAccessCode(null); if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode'); }}
-                >
-                  <LogOut className="w-4 h-4 mr-1.5" /> 로그아웃
-                </Btn>
-              </div>
-            </div>
-
-            {/* 디버그 배너 */}
-            {( (isAdmin && resolvedPath) || dataError ) && (
-              <div className="mt-2 text-xs">
-                {isAdmin && resolvedPath && (
-                  <div className="inline-block bg-blue-50 text-blue-700 border border-blue-200 rounded px-2 py-1 mr-2">
-                    현재 읽는 경로: <span className="font-mono">{resolvedPath}</span>
-                  </div>
-                )}
-                {dataError && (
-                  <div className="inline-block bg-red-50 text-red-700 border border-red-200 rounded px-2 py-1">
-                    데이터 로드 오류: {dataError}
-                  </div>
-                )}
-                {isAdmin && (
+          <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
+            <div className="mx-auto max-w-7xl px-5 sm:px-10 py-6 space-y-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
                   <button
-                    onClick={runAutoExpertiseNow}
-                    className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded px-2 py-1 ml-2 hover:bg-emerald-100"
-                    type="button"
-                    title="전문영역 자동보완을 즉시 재실행합니다"
+                    className="md:hidden p-2 rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm"
+                    onClick={() => setSidebarOpen((s) => !s)}
+                    aria-label="사이드바 토글"
                   >
-                    전문영역 자동보완 재실행
+                    <Menu size={18} />
                   </button>
-                )}
-                {autoExpertiseInProgress && (
-                  <div className="inline-flex items-center gap-2 bg-amber-50 text-amber-700 border border-amber-200 rounded px-2 py-1 ml-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>
-                      전문영역 자동보완 진행 중 …
-                      <b className="ml-1">
-                        {autoExpertiseProgress.done}/{autoExpertiseProgress.total}
-                      </b>
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-sm">
+                      <Users className="w-6 h-6" aria-hidden />
+                    </div>
+                    <div>
+                      <h1 className="text-2xl font-semibold tracking-tight">프로필 대시보드</h1>
+                      <p className="text-sm text-slate-500">Linear의 정제된 흐름과 Notion의 여백감을 더한 새 인터페이스</p>
+                    </div>
+                    <span className="ml-2 inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-mono text-slate-600">
+                      {accessCode}
                     </span>
                   </div>
-                )}
-                {!autoExpertiseInProgress && autoExpertiseSkipped && (
-                  <div className="inline-block bg-amber-50 text-amber-700 border border-amber-200 rounded px-2 py-1 ml-2">
-                    로그인하지 않은 상태라 기존 프로필의 <b>전문영역 자동보완</b>은 건너뛰었습니다.
-                  </div>
-                )}
-                {autoExpertiseSkipped && (
-                  <div className="inline-block bg-amber-50 text-amber-700 border border-amber-200 rounded px-2 py-1 ml-2">
-                    로그인하지 않은 상태라 기존 프로필의 <b>전문영역 자동보완</b>은 건너뛰었습니다.
-                  </div>
-                )}
+                </div>
+                <div className="hidden md:flex items-center gap-3 text-sm">
+                  {googleApiReady === false && (
+                    <span className="text-xs text-rose-500">
+                      Google Calendar 연동 비활성화됨{googleError ? ` (${googleError})` : ' (초기화 실패)'}
+                    </span>
+                  )}
+                  {googleApiReady === true && (
+                    isGoogleSignedIn ? (
+                      <Btn
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          if (window.gapi?.client) window.gapi.client.setToken(null);
+                          setIsGoogleSignedIn(false);
+                        }}
+                      >
+                        Google 로그아웃
+                      </Btn>
+                    ) : (
+                      <Btn
+                        size="sm"
+                        variant="outline"
+                        onClick={() => tokenClient?.requestAccessToken({ prompt: 'consent' })}
+                      >
+                        Google 로그인
+                      </Btn>
+                    )
+                  )}
+                  <Btn
+                    size="sm"
+                    variant="primary"
+                    onClick={() => {
+                      setAccessCode(null);
+                      if (typeof window !== 'undefined') localStorage.removeItem('profileDbAccessCode');
+                    }}
+                  >
+                    <LogOut className="w-4 h-4 mr-1.5" /> 로그아웃
+                  </Btn>
+                </div>
               </div>
-            )}
 
-            {/* 카운트 박스 */}
-            <div className="mt-3 flex items-center gap-4">
-              <div className="bg-white p-4 rounded-xl shadow-sm border">
-                <h3 className="text-base font-medium text-gray-500">총 등록된 프로필</h3>
-                <p className="text-3xl font-bold text-yellow-500 mt-1">{totalCount}</p>
-              </div>
-              <div className="bg-white p-4 rounded-xl shadow-sm border">
-                <h3 className="text-base font-medium text-gray-500">미팅 진행 프로필</h3>
-                <p className="text-3xl font-bold text-yellow-500 mt-1">{meetingCount}</p>
-              </div>
-            </div>
+              {/* 디버그 배너 */}
+              {((isAdmin && resolvedPath) || dataError) && (
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                  {isAdmin && resolvedPath && (
+                    <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-indigo-600">
+                      <span className="font-medium">현재 경로</span>
+                      <span className="font-mono">{resolvedPath}</span>
+                    </div>
+                  )}
+                  {dataError && (
+                    <div className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-600">
+                      데이터 로드 오류: {dataError}
+                    </div>
+                  )}
+                  {isAdmin && (
+                    <button
+                      onClick={runAutoExpertiseNow}
+                      className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-600 hover:bg-emerald-100"
+                      type="button"
+                      title="전문영역 자동보완을 즉시 재실행합니다"
+                    >
+                      전문영역 자동보완 재실행
+                    </button>
+                  )}
+                  {autoExpertiseInProgress && (
+                    <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>
+                        자동보완 진행 중 ·
+                        <b className="ml-1">
+                          {autoExpertiseProgress.done}/{autoExpertiseProgress.total}
+                        </b>
+                      </span>
+                    </div>
+                  )}
+                  {!autoExpertiseInProgress && autoExpertiseSkipped && (
+                    <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">
+                      로그인하지 않은 상태라 기존 프로필의 <b>전문영역 자동보완</b>은 건너뛰었습니다.
+                    </div>
+                  )}
+                </div>
+              )}
 
-            <div className="mt-2 flex items-center justify-end">
-              <Btn
-                size="sm"
-                variant="subtle"
-                onClick={() => exportProfilesToXLSX(`profiles_${accessCode}_all`, profiles)}
-              >
-                <Download className="w-4 h-4 mr-1" /> 전체 엑셀
-              </Btn>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm">
+                  <p className="text-sm text-slate-500">총 등록된 프로필</p>
+                  <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{totalCount}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm">
+                  <p className="text-sm text-slate-500">미팅 진행 프로필</p>
+                  <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{meetingCount}</p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                <Btn
+                  size="sm"
+                  variant="outline"
+                  onClick={() => exportProfilesToXLSX(`profiles_${accessCode}_all`, profiles)}
+                >
+                  <Download className="w-4 h-4 mr-1" /> 전체 엑셀
+                </Btn>
+              </div>
             </div>
           </header>
 
           <div className="flex">
             {/* 사이드바 */}
-            <aside className={`fixed md:static top-[180px] z-30 md:z-auto left-0 h-[calc(100vh-180px)] md:h-auto w-64 bg-white border-r transform transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
-              <nav className="p-3 space-y-1 overflow-y-auto h-full">
-                <button onClick={()=>{ setActiveMain('alerts'); setFunctionsOpen(false); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='alerts'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-                  <BellRing size={16}/> 알림
+            <aside className={`fixed md:static top-[180px] z-30 md:z-auto left-0 h-[calc(100vh-180px)] md:h-auto w-64 bg-white/80 backdrop-blur border-r border-slate-200 shadow-sm transform transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+              <nav className="flex h-full flex-col gap-1 overflow-y-auto p-4 text-sm">
+                <button
+                  onClick={() => {
+                    setActiveMain('alerts');
+                    setFunctionsOpen(false);
+                  }}
+                  className={`w-full rounded-lg px-3 py-2 text-left font-medium transition-colors ${
+                    activeMain === 'alerts'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <BellRing size={16} /> 알림
+                  </span>
                 </button>
-                <button onClick={()=>{ setActiveMain('search'); setFunctionsOpen(false); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='search'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-                  <SearchIcon size={16}/> 검색
+                <button
+                  onClick={() => {
+                    setActiveMain('search');
+                    setFunctionsOpen(false);
+                  }}
+                  className={`w-full rounded-lg px-3 py-2 text-left font-medium transition-colors ${
+                    activeMain === 'search'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <SearchIcon size={16} /> 검색
+                  </span>
                 </button>
-                <button onClick={()=>{ setActiveMain('starred'); setFunctionsOpen(false); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='starred'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-                  <Star size={16}/> 주목 중인 프로필들
+                <button
+                  onClick={() => {
+                    setActiveMain('starred');
+                    setFunctionsOpen(false);
+                  }}
+                  className={`w-full rounded-lg px-3 py-2 text-left font-medium transition-colors ${
+                    activeMain === 'starred'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Star size={16} /> 주목 중인 프로필들
+                  </span>
                 </button>
-                <button onClick={()=>{ setActiveMain('meetings'); setFunctionsOpen(false); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='meetings'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-                  <Calendar size={16}/> 미팅 데이터
+                <button
+                  onClick={() => {
+                    setActiveMain('meetings');
+                    setFunctionsOpen(false);
+                  }}
+                  className={`w-full rounded-lg px-3 py-2 text-left font-medium transition-colors ${
+                    activeMain === 'meetings'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Calendar size={16} /> 미팅 데이터
+                  </span>
                 </button>
 
                 {/* Functions 토글 */}
-                <button onClick={()=>{ setActiveMain('functions'); setFunctionsOpen(v=>!v); }}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm ${activeMain==='functions'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}>
-                  <span className="flex items-center gap-2"><Sparkles size={16}/> Functions</span>
-                  <ChevronDown className={`w-4 h-4 transition-transform ${functionsOpen ? 'rotate-180' : ''}`} />
+                <button
+                  onClick={() => {
+                    setActiveMain('functions');
+                    setFunctionsOpen((v) => !v);
+                  }}
+                  className={`w-full rounded-lg px-3 py-2 text-left font-medium transition-colors ${
+                    activeMain === 'functions'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <span className="flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <Sparkles size={16} /> Functions
+                    </span>
+                    <ChevronDown className={`w-4 h-4 transition-transform ${functionsOpen ? 'rotate-180 text-white' : ''}`} />
+                  </span>
                 </button>
 
                 {functionsOpen && (
-                  <div className="pl-4 space-y-1">
-                    <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('rec'); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='rec'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
-                      <Sparkles size={16}/> 추천
+                  <div className="ml-2 flex flex-col gap-1 border-l border-slate-200 pl-3">
+                    <button
+                      onClick={() => {
+                        setActiveMain('functions');
+                        setFunctionsSub('rec');
+                      }}
+                      className={`w-full rounded-lg px-3 py-2 text-left transition-colors ${
+                        activeMain === 'functions' && functionsSub === 'rec'
+                          ? 'bg-slate-900/10 text-slate-900'
+                          : 'text-slate-500 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Sparkles size={16} /> 추천
+                      </span>
                     </button>
-                    <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('long'); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='long'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
-                      <Clock size={16}/> 장기관리
+                    <button
+                      onClick={() => {
+                        setActiveMain('functions');
+                        setFunctionsSub('long');
+                      }}
+                      className={`w-full rounded-lg px-3 py-2 text-left transition-colors ${
+                        activeMain === 'functions' && functionsSub === 'long'
+                          ? 'bg-slate-900/10 text-slate-900'
+                          : 'text-slate-500 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Clock size={16} /> 장기관리
+                      </span>
                     </button>
-                    <button onClick={()=>{ setActiveMain('functions'); setFunctionsSub('graphs'); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='functions'&&functionsSub==='graphs'?'bg-yellow-100 text-yellow-800':'hover:bg-gray-100'}`}>
-                      <LineChartIcon size={16}/> 그래프&필터
+                    <button
+                      onClick={() => {
+                        setActiveMain('functions');
+                        setFunctionsSub('graphs');
+                      }}
+                      className={`w-full rounded-lg px-3 py-2 text-left transition-colors ${
+                        activeMain === 'functions' && functionsSub === 'graphs'
+                          ? 'bg-slate-900/10 text-slate-900'
+                          : 'text-slate-500 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <LineChartIcon size={16} /> 그래프&필터
+                      </span>
                     </button>
                   </div>
                 )}
                   
                 <button
-                  onClick={()=>{ setActiveMain('ideal'); setFunctionsOpen(false); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${activeMain==='ideal'?'bg-yellow-400 text-white':'hover:bg-gray-100'}`}
+                  onClick={() => {
+                    setActiveMain('ideal');
+                    setFunctionsOpen(false);
+                  }}
+                  className={`w-full rounded-lg px-3 py-2 text-left font-medium transition-colors ${
+                    activeMain === 'ideal'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
                 >
-                  <Sparkles size={16}/> 이상형게임
+                  <span className="flex items-center gap-2">
+                    <Sparkles size={16} /> 이상형게임
+                  </span>
                 </button>
 
                 {/* 관리자 전용 */}
@@ -3085,19 +3229,21 @@ export default function App() {
                 {/* ✅ 항상 제일 아래: 프로필 관리 */}
                 <button
                   onClick={() => { setActiveMain('manage'); setFunctionsOpen(false); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${
-                    activeMain==='manage' ? 'bg-yellow-400 text-white' : 'hover:bg-gray-100'
+                  className={`w-full rounded-lg px-3 py-2 text-left font-medium transition-colors ${
+                    activeMain==='manage' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
                   }`}
                 >
-                  <UserPlus size={16}/> 프로필 관리
+                  <span className="flex items-center gap-2">
+                    <UserPlus size={16}/> 프로필 관리
+                  </span>
                 </button>
               </nav>
             </aside>
 
             {/* 본문 */}
-            <main className="flex-1 p-4 sm:p-6 md:ml-0 ml-0 mt-3 md:mt-4">
+            <main className="flex-1 px-4 sm:px-8 py-6 md:ml-0 ml-0">
               {!dataReady ? (
-                <div className="max-w-[1200px] mx-auto space-y-3">
+                <div className="mx-auto max-w-5xl space-y-4">
                   {/* 스켈레톤 로딩 */}
                   <SkeletonRow />
                   <SkeletonRow />
@@ -3105,7 +3251,24 @@ export default function App() {
                   <SkeletonRow />
                 </div>
               ) : (
-                <div className="max-w-[1200px] mx-auto">
+                <div className="mx-auto max-w-6xl space-y-10">
+                  <section className="rounded-3xl border border-white/20 bg-gradient-to-r from-violet-500 via-indigo-500 to-sky-500 p-8 text-white shadow-xl">
+                    <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="max-w-2xl space-y-3">
+                        <p className="text-xs uppercase tracking-[0.3em] text-white/70">AI Copilot · Soon</p>
+                        <h2 className="text-2xl font-semibold leading-snug">AI 기능 준비 중입니다</h2>
+                        <p className="text-sm text-white/80 sm:text-base">
+                          프로필 추천, 우선순위 재정렬, 미팅 노트 요약 등 Superhuman 스타일의 보라·청색 포인트를 입힌 AI 도우미를 준비하고 있어요.
+                          출시 시점을 빠르게 안내드릴게요.
+                        </p>
+                      </div>
+                      <div className="flex items-center">
+                        <div className="inline-flex items-center gap-2 rounded-2xl bg-white/15 px-5 py-3 text-sm font-medium text-white/90 backdrop-blur">
+                          <Sparkles className="h-5 w-5" /> Coming soon
+                        </div>
+                      </div>
+                    </div>
+                  </section>
                   <MainContent
                     activeMain={activeMain}
                     functionsSub={functionsSub}
