@@ -2954,7 +2954,7 @@ export default function App() {
                     </div>
                     <div>
                       <h1 className="text-2xl font-semibold tracking-tight">프로필 대시보드</h1>
-                      <p className="text-sm text-slate-500">Linear의 정제된 흐름과 Notion의 여백감을 더한 새 인터페이스</p>
+                      <p className="text-sm text-slate-500">영입팀의 업무를 돕기 위한 인터페이스</p>
                     </div>
                     <span className="ml-2 inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-mono text-slate-600">
                       {accessCode}
