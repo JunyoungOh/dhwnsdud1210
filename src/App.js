@@ -1212,9 +1212,14 @@ const AlertsPage = ({ profiles, onUpdate, onDelete, accessCode, onSyncOne, onSho
   ), [profiles, todayStart, tomorrowStart]);
 
   const upcomingProfiles = useMemo(() => (
-    profiles.filter(p => p.eventDate && new Date(p.eventDate) > now && new Date(p.eventDate) < threeDaysLater)
-            .sort((a,b) => new Date(a.eventDate) - new Date(b.eventDate))
-  ), [profiles, now, threeDaysLater]);
+    profiles
+      .filter((p) => {
+        if (!p.eventDate) return false;
+        const date = new Date(p.eventDate);
+        return date >= tomorrowStart && date < threeDaysLater;
+      })
+      .sort((a, b) => new Date(a.eventDate) - new Date(b.eventDate))
+  ), [profiles, tomorrowStart, threeDaysLater]);
 
   return (
     <div className="space-y-8">
@@ -2290,6 +2295,9 @@ export default function App() {
 
   const ctx = useUserCtx();
 
+  // 카카오워크 리마인더가 동일한 날짜에 중복 발송되는 것을 방지하기 위한 인메모리 가드
+  const reminderStateRef = React.useRef({ dateKey: '', sent: false });
+
   // 상세 모달
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailProfile, setDetailProfile] = useState(null);
@@ -2358,12 +2366,18 @@ export default function App() {
       const { dateKey, hour } = getNowParts();
       if (!Number.isFinite(hour) || hour < 9) return;
 
+      if (reminderStateRef.current.dateKey !== dateKey) {
+        reminderStateRef.current = { dateKey, sent: false };
+      }
+
       const storageKey = `kakaoMeetingReminderSent-${dateKey}`;
       try {
         if (window.localStorage.getItem(storageKey)) return;
       } catch (error) {
         console.warn('로컬 스토리지를 사용할 수 없습니다:', error);
       }
+
+      if (reminderStateRef.current.sent) return;
 
       const today = new Date();
       const reminders = profiles
@@ -2379,6 +2393,7 @@ export default function App() {
         } catch (error) {
           console.warn('리마인더 전송 기록을 저장하지 못했습니다:', error);
         }
+        reminderStateRef.current = { dateKey, sent: true };
         return;
       }
 
@@ -2395,6 +2410,7 @@ export default function App() {
           } catch (error) {
             console.warn('리마인더 전송 기록을 저장하지 못했습니다:', error);
           }
+          reminderStateRef.current = { dateKey, sent: true };
         }
       } catch (error) {
         console.error('카카오워크 미팅 리마인더 전송 실패:', error);
