@@ -19,6 +19,8 @@ const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const DEFAULT_SCOPES = ['https://www.googleapis.com/auth/datastore'];
 const DEFAULT_APP_ID = 'profile-db-app-junyoungoh';
 const DEFAULT_STATUS_DOC_PATH = (appId) => buildDocPath('artifacts', appId, 'meta', 'kakaoReminderStatus');
+const DEFAULT_SEND_HOUR = 9;
+const DEFAULT_SEND_MINUTE = 0;
 
 function buildDocPath(...segments) {
   return segments.map((seg) => encodeURIComponent(seg)).join('/');
@@ -254,6 +256,42 @@ function formatDateKey(date, timeZone) {
   return `${parts.year || '0000'}${parts.month || '00'}${parts.day || '00'}`;
 }
 
+function getLocalTimeParts(date, timeZone) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = formatter
+    .formatToParts(date)
+    .reduce((acc, part) => ({ ...acc, [part.type]: part.value }), {});
+  const hour = Number.parseInt(parts.hour ?? '0', 10);
+  const minute = Number.parseInt(parts.minute ?? '0', 10);
+  return {
+    hour: Number.isFinite(hour) ? hour : 0,
+    minute: Number.isFinite(minute) ? minute : 0,
+  };
+}
+
+function parseTimeComponent(value, { min, max, fallback }) {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function isPastTargetTime({ date, timeZone, hour: targetHour, minute: targetMinute }) {
+  const { hour, minute } = getLocalTimeParts(date, timeZone);
+  if (hour > targetHour) return true;
+  if (hour < targetHour) return false;
+  return minute >= targetMinute;
+}
+
 async function getReminderStatus({ token, projectId, docPath }) {
   const url = `${FIRESTORE_BASE_URL}/projects/${projectId}/databases/(default)/documents/${docPath}`;
   const response = await fetch(url, {
@@ -384,6 +422,16 @@ exports.handler = async (event = {}) => {
     const statusDocPath = process.env.MEETING_REMINDER_STATUS_DOC_PATH || DEFAULT_STATUS_DOC_PATH(appId);
     const timeZone = process.env.MEETING_REMINDER_TIME_ZONE || DEFAULT_TIME_ZONE;
     const shareBase = process.env.PROFILE_SHARE_BASE_URL || '';
+    const targetHour = parseTimeComponent(process.env.MEETING_REMINDER_TARGET_HOUR, {
+      min: 0,
+      max: 23,
+      fallback: DEFAULT_SEND_HOUR,
+    });
+    const targetMinute = parseTimeComponent(process.env.MEETING_REMINDER_TARGET_MINUTE, {
+      min: 0,
+      max: 59,
+      fallback: DEFAULT_SEND_MINUTE,
+    });
 
     const accessToken = await fetchAccessToken(serviceAccount);
 
@@ -414,14 +462,29 @@ exports.handler = async (event = {}) => {
       docPath: statusDocPath,
     });
 
-    const today = new Date();
-    const todayKey = formatDateKey(today, timeZone);
+    const now = new Date();
+    const todayKey = formatDateKey(now, timeZone);
 
     if (!force && statusSnapshot?.lastSentDateKey === todayKey) {
       return {
         statusCode: 200,
         headers: CORS_HEADERS,
         body: JSON.stringify({ ok: true, sent: 0, skipped: true, reason: 'already_sent' }),
+      };
+    }
+
+    if (!force && !isPastTargetTime({ date: now, timeZone, hour: targetHour, minute: targetMinute })) {
+      return {
+        statusCode: 200,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({
+          ok: true,
+          sent: 0,
+          skipped: true,
+          reason: 'before_target_time',
+          targetHour,
+          targetMinute,
+        }),
       };
     }
 
@@ -441,7 +504,7 @@ exports.handler = async (event = {}) => {
       });
 
       const reminders = buildMeetingReminderMessages(profiles, {
-        date: today,
+        date: now,
         shareUrlBuilder: shareUrlBuilder ? (profile) => shareUrlBuilder(profile, accessCode) : undefined,
         timeZone,
       });
@@ -467,6 +530,8 @@ exports.handler = async (event = {}) => {
         lastSentCount: totalSent,
         lastAccessCodes: accessCodes,
         lastSummary: perAccessCodeSummary,
+        targetHour,
+        targetMinute,
       },
     });
 
@@ -492,5 +557,6 @@ exports.handler = async (event = {}) => {
 };
 
 exports.config = {
-  schedule: '0 0 * * *',
+  // Runs daily at 00:00 UTC (09:00 KST)
+  schedule: '0 0 0 * * *',
 };
