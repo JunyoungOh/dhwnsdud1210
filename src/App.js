@@ -65,6 +65,10 @@ const GOOGLE_API_KEY   = process.env.REACT_APP_GOOGLE_API_KEY;
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
 const DISCOVERY_DOCS   = ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"];
 const SCOPES           = "https://www.googleapis.com/auth/calendar.events";
+const ENABLE_LOCAL_KAKAOWORK_MEETING_REMINDER =
+  String(process.env.REACT_APP_ENABLE_LOCAL_KAKAOWORK_MEETING_REMINDER || '')
+    .trim()
+    .toLowerCase() === 'true';
 
 // ============ Firebase ============
 const firebaseConfig = {
@@ -2347,6 +2351,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!ENABLE_LOCAL_KAKAOWORK_MEETING_REMINDER) return undefined;
     if (typeof window === 'undefined') return undefined;
     if (!dataReady) return undefined;
     if (!profiles.length) return undefined;
