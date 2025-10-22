@@ -3113,23 +3113,20 @@ export default function App() {
 
     let latest = null;
     meetingRowsForSummary.forEach((row) => {
-      const candidates = [];
-      const teamDate = keyToDate(row?.team?.key);
-      if (teamDate && teamDate < tomorrowStart) {
-        candidates.push({
-          date: teamDate,
-          type: '팀황 미팅',
-          label: row?.team?.label || '',
-        });
-      }
-      const kayDate = keyToDate(row?.kay?.key);
-      if (kayDate && kayDate < tomorrowStart) {
-        candidates.push({
-          date: kayDate,
-          type: '케이 미팅',
-          label: row?.kay?.label || '',
-        });
-      }
+      const candidates = Array.isArray(row?.latestByOwner)
+        ? row.latestByOwner
+            .map((entry) => {
+              const date = keyToDate(entry?.key);
+              if (!date || date >= tomorrowStart) return null;
+              return {
+                date,
+                type: `${entry?.owner || '담당자 미상'} 미팅`,
+                label: entry?.label || '',
+              };
+            })
+            .filter(Boolean)
+        : [];
+
       if (!candidates.length) return;
       candidates.sort((a, b) => b.date - a.date);
       const pick = candidates[0];
