@@ -1,0 +1,261 @@
+import JSZip from 'jszip';
+
+const API_BASE_URL = 'https://opendart.fss.or.kr/api';
+const CORP_CODE_CACHE_KEY = 'opendart:corp-code-cache:v1';
+const CORP_CODE_CACHE_TTL = 1000 * 60 * 60 * 24; // 24시간
+
+export const REPORT_CODES = {
+  '11011': '사업보고서',
+  '11012': '반기보고서',
+  '11013': '1분기보고서',
+  '11014': '3분기보고서',
+};
+
+export const REPORT_CODE_OPTIONS = Object.entries(REPORT_CODES).map(([code, label]) => ({
+  code,
+  label,
+}));
+
+const getApiKey = () => {
+  const key = process.env.REACT_APP_OPENDART_API_KEY;
+  if (!key) {
+    throw new Error('Open DART API 키가 설정되지 않았습니다. 환경변수를 확인해주세요.');
+  }
+  return key;
+};
+
+const toArray = (list) => Array.prototype.slice.call(list);
+
+const normalizeName = (value = '') =>
+  value
+    .normalize('NFKC')
+    .replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, '')
+    .replace(/[^\p{L}\p{N}]/gu, '')
+    .toLowerCase();
+
+const buildBigrams = (value = '') => {
+  const normalized = normalizeName(value);
+  if (normalized.length <= 1) {
+    return new Set([normalized]);
+  }
+  const set = new Set();
+  for (let i = 0; i < normalized.length - 1; i += 1) {
+    set.add(normalized.slice(i, i + 2));
+  }
+  return set;
+};
+
+const similarityScore = (a = '', b = '') => {
+  const normalizedA = normalizeName(a);
+  const normalizedB = normalizeName(b);
+  if (!normalizedA && !normalizedB) return 1;
+  if (!normalizedA || !normalizedB) return 0;
+  if (normalizedA === normalizedB) return 1;
+
+  const setA = buildBigrams(normalizedA);
+  const setB = buildBigrams(normalizedB);
+  const intersection = new Set();
+  setA.forEach((value) => {
+    if (setB.has(value)) intersection.add(value);
+  });
+  const unionSize = new Set([...setA, ...setB]).size;
+  if (unionSize === 0) return 0;
+  return intersection.size / unionSize;
+};
+
+const parseCorpCodes = (xmlText) => {
+  if (!xmlText) return [];
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlText, 'application/xml');
+  const listNodes = toArray(doc.getElementsByTagName('list'));
+  return listNodes
+    .map((node) => {
+      const corpCode = node.getElementsByTagName('corp_code')[0]?.textContent?.trim();
+      const corpName = node.getElementsByTagName('corp_name')[0]?.textContent?.trim();
+      const stockCode = node.getElementsByTagName('stock_code')[0]?.textContent?.trim();
+      const modifyDate = node.getElementsByTagName('modify_date')[0]?.textContent?.trim();
+      if (!corpCode || !corpName) return null;
+      return { corpCode, corpName, stockCode, modifyDate };
+    })
+    .filter(Boolean);
+};
+
+export const fetchCorpCodeMap = async ({ forceRefresh = false } = {}) => {
+  if (typeof window !== 'undefined' && !forceRefresh) {
+    try {
+      const cachedText = window.localStorage.getItem(CORP_CODE_CACHE_KEY);
+      if (cachedText) {
+        const cached = JSON.parse(cachedText);
+        if (cached && Array.isArray(cached.items) && cached.storedAt) {
+          const age = Date.now() - cached.storedAt;
+          if (age < CORP_CODE_CACHE_TTL) {
+            return cached.items;
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('[OpenDART] 캐시를 읽을 수 없습니다.', error);
+    }
+  }
+
+  const apiKey = getApiKey();
+  const url = `${API_BASE_URL}/corpCode.xml?crtfc_key=${apiKey}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Open DART corpCode.xml 요청에 실패했습니다. (HTTP ${response.status})`);
+  }
+
+  const buffer = await response.arrayBuffer();
+  const zip = await JSZip.loadAsync(buffer);
+  const xmlFile = zip.file(/\.xml$/i)?.[0];
+  if (!xmlFile) {
+    throw new Error('corpCode.zip 파일에서 XML을 찾을 수 없습니다.');
+  }
+
+  const xmlText = await xmlFile.async('text');
+  const items = parseCorpCodes(xmlText);
+
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(
+        CORP_CODE_CACHE_KEY,
+        JSON.stringify({ items, storedAt: Date.now() })
+      );
+    } catch (error) {
+      console.warn('[OpenDART] 캐시를 저장할 수 없습니다.', error);
+    }
+  }
+
+  return items;
+};
+
+export const findBestCorpMatch = (companyName, corpList = []) => {
+  if (!companyName || !corpList.length) return null;
+  const normalizedTarget = normalizeName(companyName);
+  if (!normalizedTarget) return null;
+
+  const exact = corpList.find((item) => normalizeName(item.corpName) === normalizedTarget);
+  if (exact) {
+    return { ...exact, score: 1 };
+  }
+
+  const contains = corpList.find((item) => normalizeName(item.corpName).includes(normalizedTarget));
+  if (contains) {
+    return { ...contains, score: 0.9 };
+  }
+
+  let best = null;
+  corpList.forEach((item) => {
+    const score = similarityScore(companyName, item.corpName);
+    if (!best || score > best.score) {
+      best = { ...item, score };
+    }
+  });
+
+  if (!best || best.score < 0.3) {
+    return null;
+  }
+  return best;
+};
+
+const mapFullTime = (value) => {
+  const normalized = (value || '').toString().trim().toUpperCase();
+  if (!normalized) return '';
+  if (['Y', 'YES', 'TRUE', '1'].includes(normalized)) return '상근';
+  if (['N', 'NO', 'FALSE', '0'].includes(normalized)) return '비상근';
+  return value;
+};
+
+const mapRegisteredStatus = (value) => {
+  const normalized = (value || '').toString().trim().toUpperCase();
+  if (!normalized) return '';
+  if (normalized === 'Y') return '등기';
+  if (normalized === 'N') return '미등기';
+  return value;
+};
+
+const coerceDateString = (value) => {
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (/^\d{4}[.-]?\d{2}[.-]?\d{2}$/.test(trimmed)) {
+    const digits = trimmed.replace(/[^\d]/g, '');
+    return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+  }
+  return trimmed;
+};
+
+const normalizeExecutiveEntry = (entry = {}) => {
+  const tenureEndDate = coerceDateString(entry.tenure_end_on);
+  const notes = [
+    entry.adres ? `주소: ${entry.adres}` : '',
+    entry.resp_task ? `담당: ${entry.resp_task}` : '',
+    tenureEndDate ? `임기만료일: ${tenureEndDate}` : '',
+  ]
+    .filter(Boolean)
+    .join(' / ');
+
+  return {
+    name: (entry.nm || '').trim(),
+    gender: (entry.sexdstn || '').trim(),
+    birth: (entry.brth_yy || '').trim(),
+    title: (entry.ofcps || '').trim(),
+    duty: (entry.chrg_job || '').trim(),
+    registeredStatus: mapRegisteredStatus(entry.rgist_exctv_at),
+    fullTime: mapFullTime(entry.fte_at),
+    career: (entry.main_career || '').trim(),
+    tenure: (entry.hffc_pd || '').trim() || (tenureEndDate ? `임기만료일 ${tenureEndDate}` : ''),
+    notes: notes || undefined,
+    raw: entry,
+  };
+};
+
+export const fetchExecutiveStatus = async ({ corpCode, bsnsYear, reprtCode, signal } = {}) => {
+  if (!corpCode) throw new Error('corp_code 값이 필요합니다.');
+  if (!bsnsYear) throw new Error('bsns_year 값이 필요합니다.');
+  if (!reprtCode) throw new Error('reprt_code 값이 필요합니다.');
+
+  const apiKey = getApiKey();
+  const params = new URLSearchParams({
+    crtfc_key: apiKey,
+    corp_code: corpCode,
+    bsns_year: String(bsnsYear),
+    reprt_code: String(reprtCode),
+  });
+
+  const response = await fetch(`${API_BASE_URL}/exctvSttus.json?${params.toString()}`, { signal });
+  if (!response.ok) {
+    throw new Error(`Open DART exctvSttus 요청에 실패했습니다. (HTTP ${response.status})`);
+  }
+
+  const data = await response.json();
+  if (!data) {
+    throw new Error('Open DART 응답을 해석할 수 없습니다.');
+  }
+
+  if (data.status && data.status !== '000') {
+    const message = data.message || 'Open DART API 요청이 실패했습니다.';
+    throw new Error(`${message} (status=${data.status})`);
+  }
+
+  const list = Array.isArray(data.list) ? data.list : [];
+  const normalized = list.map((item) => normalizeExecutiveEntry(item));
+
+  const registered = normalized.filter((item) => item.registeredStatus === '등기');
+  const unregistered = normalized.filter((item) => item.registeredStatus !== '등기');
+
+  return {
+    meta: {
+      corpName: data.corp_name,
+      corpCode,
+      bsnsYear: String(bsnsYear),
+      reprtCode: String(reprtCode),
+      message: data.message,
+    },
+    registered,
+    unregistered,
+    raw: data,
+  };
+};
+
+export const getReportLabel = (code) => REPORT_CODES[code] || code;
