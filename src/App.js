@@ -37,6 +37,7 @@ import Badge from './components/ui/Badge';
 import SkeletonRow from './components/ui/SkeletonRow';
 import { toast } from './components/ui/Toast';
 import TabSummary from './components/TabSummary';
+import GroupDataHub from './components/GroupDataHub';
 
 // ✅ App.js 상단, import 라인들 바로 아래에 추가
 class ErrorBoundary extends React.Component {
@@ -2405,12 +2406,15 @@ function AdminOnlyButton({ activeMain, setActiveMain, setFunctionsOpen }) {
        />
      );
    }
-   if (activeMain === 'meetings') {
-     return <MeetingsPage profiles={profilesWithHelpers} onOpenDetail={openProfileDetailById} />;
-   }
-   if (activeMain === 'manage') {
-     return (
-       <ManagePage
+  if (activeMain === 'meetings') {
+    return <MeetingsPage profiles={profilesWithHelpers} onOpenDetail={openProfileDetailById} />;
+  }
+  if (activeMain === 'groupData') {
+    return <GroupDataHub />;
+  }
+  if (activeMain === 'manage') {
+    return (
+      <ManagePage
          profiles={profilesWithHelpers}
          onUpdate={handleUpdate} onDelete={handleDeleteRequest}
          onAddOne={handleAddOne}
@@ -3571,6 +3575,22 @@ export default function App() {
                 >
                   <span className="flex items-center gap-2">
                     <Calendar size={16} /> 미팅 데이터
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setActiveMain('groupData');
+                    setFunctionsOpen(false);
+                  }}
+                  className={`w-full rounded-lg px-3 py-2 text-left font-medium transition-colors ${
+                    activeMain === 'groupData'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Layers size={16} /> 그룹사 데이터
                   </span>
                 </button>
 
