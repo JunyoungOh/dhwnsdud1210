@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, signOut, onAuthStateChanged } from 'firebase/auth';
 import {
@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 
 import { parseNaturalQuery, matchProfileWithNL } from './utils/nlp';
-import { MeetingsPage } from './utils/meetings';
+import { MeetingsPage, buildMeetingRows } from './utils/meetings';
 import {
   sendProfileToKakaoWork,
   hasKakaoWorkWebhook,
@@ -36,6 +36,7 @@ import Btn from './components/ui/Btn';
 import Badge from './components/ui/Badge';
 import SkeletonRow from './components/ui/SkeletonRow';
 import { toast } from './components/ui/Toast';
+import TabSummary from './components/TabSummary';
 
 // ✅ App.js 상단, import 라인들 바로 아래에 추가
 class ErrorBoundary extends React.Component {
@@ -218,6 +219,115 @@ function parseDateTimeFromRecord(recordText) {
     if (!best || d > best.date) best = { date: d, hadTime };
   }
   return best ? best : null;
+}
+
+function safeDateFrom(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value.toDate === 'function') {
+    const d = value.toDate();
+    return d instanceof Date && !Number.isNaN(d.getTime()) ? d : null;
+  }
+  if (typeof value === 'string') {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof value === 'number') {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof value === 'object' && typeof value.seconds === 'number') {
+    const d = new Date(value.seconds * 1000);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+function startOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+const DISPLAY_DATE_FORMATTER = new Intl.DateTimeFormat('ko', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+function formatDisplayDate(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+  return DISPLAY_DATE_FORMATTER.format(date);
+}
+
+function extractMeetingHistoryDates(recordText) {
+  if (!recordText) return [];
+  const dates = [];
+  const regex = /\((\d{2,4})(?:\.(\d{1,2}))?(?:\.(\d{1,2}))?\)/g;
+  let match;
+  while ((match = regex.exec(recordText)) !== null) {
+    const rawYear = match[1];
+    const yearNum = parseInt(rawYear, 10);
+    if (Number.isNaN(yearNum)) continue;
+    const year = rawYear.length === 2 ? 2000 + yearNum : yearNum;
+    const month = match[2] ? Math.max(1, Math.min(12, parseInt(match[2], 10))) : 1;
+    const day = match[3] ? Math.max(1, Math.min(31, parseInt(match[3], 10))) : 1;
+    const parsed = new Date(year, month - 1, day);
+    if (!Number.isNaN(parsed.getTime())) {
+      dates.push(parsed);
+    }
+  }
+  return dates;
+}
+
+function resolveProfileCreatedAt(profile) {
+  if (!profile) return null;
+  const candidates = [
+    profile.createdAt,
+    profile.created_at,
+    profile.created,
+    profile.addedAt,
+    profile.added_at,
+    profile.createdOn,
+    profile.created_on,
+    profile.metadata?.createdAt,
+    profile.metadata?.created_at,
+    profile.__meta?.createdAt,
+    profile.__meta?.created_at,
+  ];
+  for (const value of candidates) {
+    const date = safeDateFrom(value);
+    if (date) return date;
+  }
+  return null;
+}
+
+function pickBulkSource(profile) {
+  if (!profile) return '';
+  const candidates = [
+    profile.bulkSource,
+    profile.bulk_source,
+    profile.bulkFile,
+    profile.bulkFileName,
+    profile.bulk_file,
+    profile.bulk_filename,
+    profile.bulkSheet,
+    profile.bulk_sheet,
+    profile.bulkImportedFrom,
+    profile.bulk_imported_from,
+    profile.lastBulkSource,
+    profile.last_bulk_source,
+  ];
+  for (const value of candidates) {
+    if (value) return String(value);
+  }
+  return '';
 }
 function tokenizeProfile(p) {
   const base = [p.name||'', p.expertise||'', p.career||'', p.otherInfo||''].join(' ').toLowerCase();
@@ -561,7 +671,8 @@ function IdealGamePage({
   onUpdate, onDelete,
   accessCode, onSyncOne, onShowSimilar, onToggleStar,
   seedList = null,
-  onClearSeed
+  onClearSeed,
+  onRecordWin,
 }) {
   const computeTournamentSize = (n) => {
     if (n >= 64) return 64;
@@ -671,6 +782,9 @@ function IdealGamePage({
         if (next.length === 1) {
           setChampion(next[0]);
           setPhase('result');
+          if (typeof onRecordWin === 'function') {
+            onRecordWin(next[0]);
+          }
           return next;
         }
         // 다음 라운드 세팅
@@ -1982,7 +2096,13 @@ const ExcelUploader = ({ onBulkAdd }) => {
         }
 
         // 3) 업로드 (기존 정책 유지: 이름이 같으면 덮어쓰기)
-        const msg = await onBulkAdd(newProfiles);
+        const importedAt = new Date().toISOString();
+        const msg = await onBulkAdd(newProfiles, {
+          sourceFile: file?.name || sheetName || '',
+          sheetName,
+          importedAt,
+          rowCount: newProfiles.length,
+        });
         setMessage(msg);
         setFile(null);
         (toast.success?.(msg) ?? toast(msg));
@@ -2189,7 +2309,7 @@ function AdminOnlyButton({ activeMain, setActiveMain, setFunctionsOpen }) {
 }
 
 // ===== MainContent (App 바깥으로 호이스팅) =====
-function MainContent({
+ function MainContent({
    activeMain, functionsSub, setFunctionsSub,
    profilesWithHelpers, handleUpdate, handleDeleteRequest,
    accessCode, handleSyncOneToCalendar, openSimilarModal,
@@ -2200,7 +2320,8 @@ function MainContent({
    // 검색/필터 글로벌 상태
    searchTerm, setSearchTerm,
    activeFilter, setActiveFilter,
-   idealSeed, setIdealSeed
+   idealSeed, setIdealSeed,
+   onRecordIdealWin,
  }) {
    if (activeMain === 'alerts') {
      return (
@@ -2266,19 +2387,20 @@ function MainContent({
        />
      );
    }
-   if (activeMain === 'ideal') {
-     return (
-       <IdealGamePage
-         profiles={profilesWithHelpers}
-         onUpdate={handleUpdate} onDelete={handleDeleteRequest}
-         accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
-         onShowSimilar={openSimilarModal}
-         onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
-         seedList={idealSeed}
-         onClearSeed={()=>setIdealSeed(null)}
-       />
-     );
-   }
+  if (activeMain === 'ideal') {
+    return (
+      <IdealGamePage
+        profiles={profilesWithHelpers}
+        onUpdate={handleUpdate} onDelete={handleDeleteRequest}
+        accessCode={accessCode} onSyncOne={handleSyncOneToCalendar}
+        onShowSimilar={openSimilarModal}
+        onToggleStar={(id, val)=>handleUpdate(id,{ starred: !!val })}
+        seedList={idealSeed}
+        onClearSeed={()=>setIdealSeed(null)}
+        onRecordWin={onRecordIdealWin}
+      />
+    );
+  }
 
    // functions (graphs/rec/long)
    return (
@@ -2306,7 +2428,18 @@ export default function App() {
   const [functionsOpen, setFunctionsOpen] = useState(false);
   const [functionsSub, setFunctionsSub] = useState('rec');
   const [idealSeed, setIdealSeed] = useState(null); // 검색결과로 이상형게임 시드
-
+  const [idealWins, setIdealWins] = useState(() => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = window.localStorage.getItem('profileDbIdealWins');
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return typeof parsed === 'object' && parsed ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+  
   const [showDeleteConfirm, setShowDeleteConfirm] = useState({ show: false, profileId: null, profileName: '' });
 
   const [similarOpen, setSimilarOpen] = useState(false);
@@ -2349,6 +2482,33 @@ export default function App() {
       setDetailOpen(true);
     }
   };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem('profileDbIdealWins', JSON.stringify(idealWins || {}));
+    } catch {
+      /* noop */
+    }
+  }, [idealWins]);
+
+  const handleRecordIdealWin = useCallback((profile) => {
+    if (!profile?.id) return;
+    const nowIso = new Date().toISOString();
+    setIdealWins((prev) => {
+      const base = (typeof prev === 'object' && prev) ? prev : {};
+      const prevEntry = base[profile.id] || {};
+      return {
+        ...base,
+        [profile.id]: {
+          count: (prevEntry.count || 0) + 1,
+          name: profile.name || prevEntry.name || '',
+          expertise: profile.expertise || prevEntry.expertise || '',
+          lastWinAt: nowIso,
+        },
+      };
+    });
+  }, [setIdealWins]);
 
   useEffect(() => {
     if (!ENABLE_LOCAL_KAKAOWORK_MEETING_REMINDER) return undefined;
@@ -2628,6 +2788,7 @@ export default function App() {
       const d = detectExpertiseFromCareer(payload.career);
       if (d) { expertise = d; expertiseIsAuto = true; }
     }
+    const nowIso = new Date().toISOString();
     const profileData = {
       name: payload.name,
       career: payload.career,
@@ -2638,22 +2799,47 @@ export default function App() {
       priority: payload.priority || '',
       meetingRecord: payload.meetingRecord || '',
       eventDate,
-      starred: false
+      starred: false,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      createdBy: 'manual',
     };
     await addDoc(activeColRef, profileData);
   };
 
-  const handleBulkAdd = async (newProfiles) => {
+  const handleBulkAdd = async (newProfiles, meta = {}) => {
     if (!activeColRef || newProfiles.length === 0) return '업로드할 프로필이 없습니다.';
     const snap = await getDocs(query(activeColRef));
     const nameToId = new Map(snap.docs.map(d => [d.data().name, d.id]));
     const batch = writeBatch(db);
     let updated=0, added=0;
+    const nowIso = new Date().toISOString();
+    const importedAt = meta?.importedAt || nowIso;
     newProfiles.forEach(p => {
       const id = nameToId.get(p.name);
-      const payload = { starred:false, ...p };
-      if (id) { batch.set(doc(activeColRef, id), payload, { merge: true }); updated++; }
-      else { batch.set(doc(activeColRef), payload); added++; }
+      const basePayload = { starred:false, ...p, updatedAt: nowIso };
+      if (id) {
+        const payload = { ...basePayload };
+        if (meta?.sourceFile) payload.lastBulkSource = meta.sourceFile;
+        if (meta?.sheetName) payload.lastBulkSheet = meta.sheetName;
+        if (meta?.rowCount != null) payload.lastBulkRowCount = meta.rowCount;
+        payload.lastBulkImportedAt = importedAt;
+        batch.set(doc(activeColRef, id), payload, { merge: true });
+        updated++;
+      }
+      else {
+        const payload = {
+          ...basePayload,
+          createdAt: nowIso,
+          createdBy: 'bulk',
+          bulkImportedAt: importedAt,
+        };
+        if (meta?.sourceFile) payload.bulkSource = meta.sourceFile;
+        if (meta?.sheetName) payload.bulkSheet = meta.sheetName;
+        if (meta?.rowCount != null) payload.bulkRowCount = meta.rowCount;
+        batch.set(doc(activeColRef), payload);
+        added++;
+      }
     });
     await batch.commit();
     return `${added}건 추가, ${updated}건 업데이트 완료.`;
@@ -2800,6 +2986,175 @@ export default function App() {
     () => profiles.filter(p => !!p.eventDate).length,
     [profiles]
   );
+
+  const alertsSummary = useMemo(() => {
+    if (!profiles.length) {
+      return { waitingCount: 0, today: [], upcoming: [] };
+    }
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const tomorrowStart = addDays(todayStart, 1);
+    const upcomingLimit = addDays(todayStart, 4);
+    const todayList = [];
+    const upcomingList = [];
+    let waitingCount = 0;
+
+    profiles.forEach((p) => {
+      let eventDate = safeDateFrom(p.eventDate);
+      if (!eventDate && p.meetingRecord) {
+        const parsed = parseDateTimeFromRecord(p.meetingRecord);
+        if (parsed?.date) eventDate = parsed.date;
+      }
+      if (!eventDate) return;
+      if (eventDate < todayStart) return;
+      waitingCount += 1;
+      const chip = { id: p.id, name: p.name || '이름 미상' };
+      if (eventDate >= todayStart && eventDate < tomorrowStart) {
+        todayList.push(chip);
+      } else if (eventDate >= tomorrowStart && eventDate < upcomingLimit) {
+        upcomingList.push(chip);
+      }
+    });
+
+    return { waitingCount, today: todayList, upcoming: upcomingList };
+  }, [profiles]);
+
+  const starredSummary = useMemo(() => {
+    const starred = profiles.filter((p) => p.starred);
+    const priorityCounts = { '3': 0, '2': 0, '1': 0, other: 0 };
+    const expertiseCounts = new Map();
+
+    starred.forEach((p) => {
+      const priority = (p.priority || '').trim();
+      if (priority === '3' || priority === '2' || priority === '1') {
+        priorityCounts[priority] += 1;
+      } else {
+        priorityCounts.other += 1;
+      }
+      const expertise = (p.expertise || '미지정').trim() || '미지정';
+      expertiseCounts.set(expertise, (expertiseCounts.get(expertise) || 0) + 1);
+    });
+
+    const topExpertise = Array.from(expertiseCounts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 6)
+      .map(([name, count]) => ({ name, count }));
+
+    return { total: starred.length, priorityCounts, topExpertise };
+  }, [profiles]);
+
+  const meetingRowsForSummary = useMemo(
+    () => buildMeetingRows(profilesWithHelpers || []),
+    [profilesWithHelpers]
+  );
+
+  const meetingSummary = useMemo(() => {
+    let latestMeeting = null;
+    for (const row of meetingRowsForSummary) {
+      if (row.sortKey > 0) {
+        const useKay = row.kay?.key >= row.team?.key;
+        const chosen = useKay ? row.kay : row.team;
+        if (chosen?.key > 0) {
+          latestMeeting = {
+            name: row.name || '이름 미상',
+            label: chosen.label || '',
+            type: useKay ? '케이 미팅' : '팀황 미팅',
+          };
+        }
+        break;
+      }
+    }
+
+    const threshold = startOfDay(addDays(new Date(), -90));
+    let busiest = null;
+    profiles.forEach((p) => {
+      const dates = extractMeetingHistoryDates(p.meetingRecord);
+      if (!dates.length) return;
+      const recent = dates.filter((d) => d >= threshold);
+      if (!recent.length) return;
+      recent.sort((a, b) => b - a);
+      const latestDate = recent[0];
+      if (
+        !busiest ||
+        recent.length > busiest.count ||
+        (recent.length === busiest.count && latestDate > busiest.latest)
+      ) {
+        busiest = {
+          name: p.name || '이름 미상',
+          count: recent.length,
+          latest: latestDate,
+        };
+      }
+    });
+
+    return { latestMeeting, busiestCandidate: busiest };
+  }, [meetingRowsForSummary, profiles]);
+
+  const idealSummary = useMemo(() => {
+    const entryList = idealWins && typeof idealWins === 'object'
+      ? Object.entries(idealWins)
+      : [];
+    if (!entryList.length) {
+      return { list: [] };
+    }
+    const profileMap = new Map(profiles.map((p) => [p.id, p]));
+    const list = entryList
+      .map(([id, info]) => {
+        const base = (info && typeof info === 'object') ? info : { count: info };
+        const profile = profileMap.get(id);
+        const count = Number(base.count) || 0;
+        if (count <= 0) return null;
+        return {
+          id,
+          name: profile?.name || base.name || '이름 미상',
+          expertise: profile?.expertise || base.expertise || '',
+          count,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+      .slice(0, 5);
+
+    return { list };
+  }, [idealWins, profiles]);
+
+  const manageSummary = useMemo(() => {
+    if (!profiles.length) return { recent: [], bulkList: [] };
+    const monthAgo = startOfDay(addDays(new Date(), -30));
+    const recent = [];
+    const bulkMap = new Map();
+
+    profiles.forEach((p) => {
+      const createdAt = resolveProfileCreatedAt(p);
+      if (createdAt && createdAt >= monthAgo) {
+        recent.push({ id: p.id, name: p.name || '이름 미상', createdAt });
+      }
+
+      const source = pickBulkSource(p);
+      const createdBy = typeof p.createdBy === 'string' ? p.createdBy.toLowerCase() : '';
+      const hasBulkMarker = Boolean(
+        source && (
+          createdBy === 'bulk' ||
+          p.bulkImportedAt ||
+          p.lastBulkImportedAt ||
+          p.bulkRowCount ||
+          p.lastBulkRowCount
+        )
+      );
+      if (hasBulkMarker && source) {
+        bulkMap.set(source, (bulkMap.get(source) || 0) + 1);
+      }
+    });
+
+    recent.sort((a, b) => b.createdAt - a.createdAt);
+    const recentTop = recent.slice(0, 8);
+    const bulkList = Array.from(bulkMap.entries())
+      .map(([source, count]) => ({ source, count }))
+      .sort((a, b) => b.count - a.count || a.source.localeCompare(b.source))
+      .slice(0, 6);
+
+    return { recent: recentTop, bulkList };
+  }, [profiles]);
 
   // 상세보기 (공유 링크로 접근 시)
   function ProfileDetailView({ profileId, accessCode }) {
@@ -3257,23 +3612,15 @@ export default function App() {
                 </div>
               ) : (
                 <div className="mx-auto max-w-6xl space-y-10">
-                  <section className="rounded-3xl border border-white/20 bg-gradient-to-r from-violet-500 via-indigo-500 to-sky-500 p-8 text-white shadow-xl">
-                    <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="max-w-2xl space-y-3">
-                        <p className="text-xs uppercase tracking-[0.3em] text-white/70">AI Copilot · Soon</p>
-                        <h2 className="text-2xl font-semibold leading-snug">AI 기능 준비 중입니다</h2>
-                        <p className="text-sm text-white/80 sm:text-base">
-                          프로필 추천, 우선순위 재정렬, 미팅 노트 요약 등 Superhuman 스타일의 보라·청색 포인트를 입힌 AI 도우미를 준비하고 있어요.
-                          출시 시점을 빠르게 안내드릴게요.
-                        </p>
-                      </div>
-                      <div className="flex items-center">
-                        <div className="inline-flex items-center gap-2 rounded-2xl bg-white/15 px-5 py-3 text-sm font-medium text-white/90 backdrop-blur">
-                          <Sparkles className="h-5 w-5" /> Coming soon
-                        </div>
-                      </div>
-                    </div>
-                  </section>
+                  <TabSummary
+                    activeMain={activeMain}
+                    alertsSummary={alertsSummary}
+                    starredSummary={starredSummary}
+                    meetingSummary={meetingSummary}
+                    idealSummary={idealSummary}
+                    manageSummary={manageSummary}
+                    formatDisplayDate={formatDisplayDate}
+                  />
                   <MainContent
                     activeMain={activeMain}
                     functionsSub={functionsSub}
@@ -3298,6 +3645,7 @@ export default function App() {
                     setActiveFilter={setFunctionsActiveFilter}
                     idealSeed={idealSeed}
                     setIdealSeed={setIdealSeed}
+                    onRecordIdealWin={handleRecordIdealWin}
                   />
                 </div>
               )}
