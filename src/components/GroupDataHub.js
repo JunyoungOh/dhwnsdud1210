@@ -771,8 +771,8 @@ export default function GroupDataHub() {
             </div>
             <p className="text-xs text-slate-500">
               회사명을 입력하면 corpCode.xml 캐시를 통해 고유번호를 찾고, exctvSttus API로 임원 리스트를 가져옵니다. API 키는
-              <code className="rounded bg-white/70 px-1">REACT_APP_OPENDART_API_KEY</code>
-              환경변수에 설정되어 있어야 합니다.
+              <code className="rounded bg-white/70 px-1">OPENDART_API_KEY</code>
+              환경변수로 Netlify Functions에 설정되어 있어야 합니다.
             </p>
             <div className="grid gap-3 md:grid-cols-3">
               <label className="md:col-span-2">
