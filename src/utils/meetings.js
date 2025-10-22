@@ -24,31 +24,65 @@ export function pickParenDate(line) {
   return parseParenDate(line);
 }
 
-/** ‘팀’/‘케이’가 포함된 줄들 중 가장 최근 날짜를 뽑아냄 */
-export function extractMeetingDates(meetingRecordText) {
-  const res = {
-    team: { key: 0, label: '' },
-    kay:  { key: 0, label: '' },
-  };
-  if (!meetingRecordText) return res;
+function splitOwners(rawOwner) {
+  if (!rawOwner) return ['담당자 미상'];
+  let ownerText = rawOwner
+    .replace(/[\[\]{}]/g, ' ')
+    .replace(/미팅\s*$/iu, '')
+    .replace(/meeting\s*$/iu, '')
+    .replace(/[-:·•]+$/g, '')
+    .replace(/^[·•\-:]+/g, '')
+    .trim();
+
+  if (!ownerText) return ['담당자 미상'];
+
+  const candidates = ownerText
+    .split(/[,/&]|\s+&\s+|\s*\/\s*/g)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  if (candidates.length) {
+    return candidates.map((token) => token.replace(/미팅$/u, '').trim() || '담당자 미상');
+  }
+
+  return [ownerText];
+}
+
+function extractLatestMeetingsByOwner(meetingRecordText) {
+  if (!meetingRecordText) return [];
 
   const lines = meetingRecordText
     .split(/\r?\n/)
-    .map(s => s.trim())
+    .map((s) => s.trim())
     .filter(Boolean);
+
+  const latestMap = new Map();
 
   for (const line of lines) {
     const d = pickParenDate(line);
-    if (!d) continue;
+    if (!d || !d.key) continue;
 
-    if (line.includes('팀')) {
-      if (d.key > res.team.key) res.team = d;
+    let ownerSource = '';
+    const parenIndex = line.indexOf('(');
+    if (parenIndex > 0) {
+      ownerSource = line.slice(0, parenIndex);
     }
-    if (line.includes('케이')) {
-      if (d.key > res.kay.key) res.kay = d;
+    if (!ownerSource.trim()) {
+      ownerSource = line.replace(/\((\d{2,4})(?:\.(\d{1,2}))?(?:\.(\d{1,2}))?\)/, '').trim();
     }
+
+    const owners = splitOwners(ownerSource);
+    owners.forEach((owner) => {
+      const existing = latestMap.get(owner);
+      if (!existing || d.key > existing.key) {
+        latestMap.set(owner, { owner, key: d.key, label: d.label });
+      }
+    });
   }
-  return res;
+
+  return Array.from(latestMap.values())
+    .filter((entry) => entry && entry.key)
+    .sort((a, b) => b.key - a.key);
 }
 
 /** 표에 필요한 행 데이터 생성 */
@@ -57,8 +91,9 @@ export function buildMeetingRows(profiles) {
   for (const p of profiles) {
     if (!p.meetingRecord) continue;
 
-    const { team, kay } = extractMeetingDates(p.meetingRecord);
-    const sortKey = Math.max(team.key, kay.key);
+    const latestByOwner = extractLatestMeetingsByOwner(p.meetingRecord);
+    const latest = latestByOwner[0] || { owner: '', key: 0, label: '' };
+    const sortKey = latest.key || 0;
 
     // ‘현경력’: 경력 첫 줄의 첫 단어
     let currentWord = '';
@@ -72,8 +107,8 @@ export function buildMeetingRows(profiles) {
       name: p.name || '',
       current: currentWord,
       priority: p.priority || '',
-      team, // { key, label }
-      kay,  // { key, label }
+      latest,
+      latestByOwner,
       history: p.meetingRecord || '',
       sortKey,
     });
@@ -96,16 +131,17 @@ export function MeetingsPage({ profiles, onOpenDetail }) {
             <tr>
               <th className="border px-3 py-2 text-left">이름</th>
               <th className="border px-3 py-2 text-left">현경력</th>
-              <th className="border px-3 py-2 text-left">최근 팀황 미팅</th>
-              <th className="border px-3 py-2 text-left">최근 케이 미팅</th>
+              <th className="border px-3 py-2 text-left">최근 미팅 담당자</th>
+              <th className="border px-3 py-2 text-left">최근 미팅 일자</th>
               <th className="border px-3 py-2 text-left">우선순</th>
+              <th className="border px-3 py-2 text-left">담당자별 최신 미팅</th>
               <th className="border px-3 py-2 text-left">전체 미팅 히스토리</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="border px-3 py-6 text-center text-gray-500">
+                <td colSpan={7} className="border px-3 py-6 text-center text-gray-500">
                   미팅 기록이 있는 프로필이 없습니다.
                 </td>
               </tr>
@@ -124,9 +160,14 @@ export function MeetingsPage({ profiles, onOpenDetail }) {
                   )}
                 </td>
                 <td className="border px-3 py-2">{r.current}</td>
-                <td className="border px-3 py-2">{r.team.label || '-'}</td>
-                <td className="border px-3 py-2">{r.kay.label || '-'}</td>
+                <td className="border px-3 py-2">{r.latest?.owner || '-'}</td>
+                <td className="border px-3 py-2">{r.latest?.label || '-'}</td>
                 <td className="border px-3 py-2">{r.priority || '-'}</td>
+                <td className="border px-3 py-2 whitespace-pre-wrap">
+                  {r.latestByOwner?.length
+                    ? r.latestByOwner.map((entry) => `${entry.owner}: ${entry.label}`).join('\n')
+                    : '-'}
+                </td>
                 <td className="border px-3 py-2 whitespace-pre-wrap">{r.history || '-'}</td>
               </tr>
             ))}
