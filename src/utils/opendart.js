@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 
-const API_BASE_URL = 'https://opendart.fss.or.kr/api';
+const PROXY_ENDPOINT = '/.netlify/functions/opendart-proxy';
 const CORP_CODE_CACHE_KEY = 'opendart:corp-code-cache:v1';
 const CORP_CODE_CACHE_TTL = 1000 * 60 * 60 * 24; // 24시간
 
@@ -16,12 +16,63 @@ export const REPORT_CODE_OPTIONS = Object.entries(REPORT_CODES).map(([code, labe
   label,
 }));
 
-const getApiKey = () => {
-  const key = process.env.REACT_APP_OPENDART_API_KEY;
-  if (!key) {
-    throw new Error('Open DART API 키가 설정되지 않았습니다. 환경변수를 확인해주세요.');
+const decodeBase64ToUint8Array = (base64) => {
+  if (!base64) return new Uint8Array();
+
+  const decodeWithAtob = (value) => {
+    const binaryString = value;
+    const length = binaryString.length;
+    const bytes = new Uint8Array(length);
+    for (let i = 0; i < length; i += 1) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  };
+
+  if (typeof window !== 'undefined' && typeof window.atob === 'function') {
+    return decodeWithAtob(window.atob(base64));
   }
-  return key;
+
+  if (typeof atob === 'function') {
+    return decodeWithAtob(atob(base64));
+  }
+
+  if (typeof Buffer !== 'undefined') {
+    return new Uint8Array(Buffer.from(base64, 'base64'));
+  }
+
+  throw new Error('Base64 decoding을 지원하지 않는 환경입니다.');
+};
+
+const callOpenDartProxy = async ({ action, payload = {}, signal } = {}) => {
+  if (!action) {
+    throw new Error('Open DART 프록시 요청에 action이 지정되지 않았습니다.');
+  }
+
+  const response = await fetch(PROXY_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, payload }),
+    signal,
+  });
+
+  let result;
+  try {
+    result = await response.json();
+  } catch (error) {
+    throw new Error('Open DART 프록시 응답을 해석할 수 없습니다.');
+  }
+
+  if (!response.ok) {
+    const message = result?.error || `Open DART 프록시 요청이 실패했습니다. (HTTP ${response.status})`;
+    throw new Error(message);
+  }
+
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+
+  return result;
 };
 
 const toArray = (list) => Array.prototype.slice.call(list);
@@ -98,15 +149,13 @@ export const fetchCorpCodeMap = async ({ forceRefresh = false } = {}) => {
     }
   }
 
-  const apiKey = getApiKey();
-  const url = `${API_BASE_URL}/corpCode.xml?crtfc_key=${apiKey}`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Open DART corpCode.xml 요청에 실패했습니다. (HTTP ${response.status})`);
+  const { data: base64Zip } = await callOpenDartProxy({ action: 'corpCode' });
+  if (!base64Zip) {
+    throw new Error('Open DART corpCode 데이터를 받아오지 못했습니다.');
   }
 
-  const buffer = await response.arrayBuffer();
-  const zip = await JSZip.loadAsync(buffer);
+  const zipBytes = decodeBase64ToUint8Array(base64Zip);
+  const zip = await JSZip.loadAsync(zipBytes);
   const xmlFile = zip.file(/\.xml$/i)?.[0];
   if (!xmlFile) {
     throw new Error('corpCode.zip 파일에서 XML을 찾을 수 없습니다.');
@@ -215,20 +264,16 @@ export const fetchExecutiveStatus = async ({ corpCode, bsnsYear, reprtCode, sign
   if (!bsnsYear) throw new Error('bsns_year 값이 필요합니다.');
   if (!reprtCode) throw new Error('reprt_code 값이 필요합니다.');
 
-  const apiKey = getApiKey();
-  const params = new URLSearchParams({
-    crtfc_key: apiKey,
-    corp_code: corpCode,
-    bsns_year: String(bsnsYear),
-    reprt_code: String(reprtCode),
+  const { data } = await callOpenDartProxy({
+    action: 'executives',
+    payload: {
+      corpCode,
+      bsnsYear: String(bsnsYear),
+      reprtCode: String(reprtCode),
+    },
+    signal,
   });
 
-  const response = await fetch(`${API_BASE_URL}/exctvSttus.json?${params.toString()}`, { signal });
-  if (!response.ok) {
-    throw new Error(`Open DART exctvSttus 요청에 실패했습니다. (HTTP ${response.status})`);
-  }
-
-  const data = await response.json();
   if (!data) {
     throw new Error('Open DART 응답을 해석할 수 없습니다.');
   }
