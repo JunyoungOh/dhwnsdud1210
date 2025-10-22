@@ -109,8 +109,16 @@ const TabSummary = ({
   }
 
   if (activeMain === 'starred') {
-    const priority = starredSummary?.priority || [];
-    const expertise = starredSummary?.expertise || [];
+    const priorityCounts = starredSummary?.priorityCounts || {};
+    const priorityList = ['3', '2', '1'].map((key) => ({
+      key,
+      count: priorityCounts[key] ?? 0,
+    }));
+    const otherCount = priorityCounts.other ?? 0;
+    const expertiseList = (starredSummary?.topExpertise || []).map((item, idx) => ({
+      key: item?.key || item?.name || `분류-${idx + 1}`,
+      count: item?.count ?? 0,
+    }));
     return (
       <section className="rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -123,26 +131,34 @@ const TabSummary = ({
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <h3 className="text-sm font-semibold text-slate-700">우선순위 요약</h3>
             <ul className="mt-3 space-y-2 text-sm text-slate-700">
-              {priority.length === 0 ? (
-                <li className="text-xs text-slate-500">표시된 우선순위가 없습니다.</li>
-              ) : (
-                priority.map((item) => (
-                  <li key={item.key} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
-                    <span className="font-semibold text-slate-900">P{item.key}</span>
-                    <span className="text-sm font-semibold text-slate-900">{item.count}명</span>
-                  </li>
-                ))
+              {priorityList.map((item) => (
+                <li
+                  key={item.key}
+                  className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2"
+                >
+                  <span className="font-semibold text-slate-900">P{item.key}</span>
+                  <span className="text-sm font-semibold text-slate-900">{item.count}명</span>
+                </li>
+              ))}
+              {otherCount > 0 && (
+                <li className="flex items-center justify-between rounded-xl border border-dashed border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                  <span className="font-medium text-slate-700">기타</span>
+                  <span className="font-semibold text-slate-800">{otherCount}명</span>
+                </li>
               )}
             </ul>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <h3 className="text-sm font-semibold text-slate-700">직군 분포</h3>
             <ul className="mt-3 space-y-2 text-sm text-slate-700">
-              {expertise.length === 0 ? (
+              {expertiseList.length === 0 ? (
                 <li className="text-xs text-slate-500">집계된 직군 데이터가 없습니다.</li>
               ) : (
-                expertise.map((item) => (
-                  <li key={item.key} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
+                expertiseList.map((item) => (
+                  <li
+                    key={item.key}
+                    className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2"
+                  >
                     <span className="truncate pr-2" title={item.key}>{item.key}</span>
                     <span className="text-sm font-semibold text-slate-900">{item.count}명</span>
                   </li>
@@ -157,7 +173,7 @@ const TabSummary = ({
 
   if (activeMain === 'meetings') {
     const latest = meetingSummary?.latest || null;
-    const busiest = meetingSummary?.busiest || null;
+    const busiestList = Array.isArray(meetingSummary?.busiest) ? meetingSummary.busiest : [];
     return (
       <section className="rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm">
         <p className="text-xs uppercase tracking-[0.35em] text-slate-500">미팅 데이터</p>
@@ -168,7 +184,11 @@ const TabSummary = ({
             {latest ? (
               <div className="mt-3 space-y-1 text-sm text-slate-700">
                 <p className="text-base font-semibold text-slate-900">{latest.name}</p>
-                <p>{formatDate(latest.latest)} · {latest.type} · {latest.label}</p>
+                <p>
+                  {latest.type}
+                  {latest.label ? ` · ${latest.label}` : ''}
+                  {latest.date ? ` (${formatDate(latest.date)})` : ''}
+                </p>
               </div>
             ) : (
               <p className="mt-3 text-xs text-slate-500">최근 미팅 기록이 없습니다.</p>
@@ -176,13 +196,25 @@ const TabSummary = ({
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">최근 3개월 최다 히스토리</p>
-            {busiest ? (
-              <div className="mt-3 space-y-1 text-sm text-slate-700">
-                <p className="text-base font-semibold text-slate-900">{busiest.name}</p>
-                <p>{busiest.count}회 기록 · {formatDate(busiest.latest)} 최신</p>
-              </div>
-            ) : (
+            {busiestList.length === 0 ? (
               <p className="mt-3 text-xs text-slate-500">최근 3개월 내 기록이 충분하지 않습니다.</p>
+            ) : (
+              <ul className="mt-3 space-y-2 text-sm text-slate-700">
+                {busiestList.map((entry, idx) => (
+                  <li
+                    key={`${entry.name}-${entry.latest?.toISOString?.() || idx}`}
+                    className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2"
+                  >
+                    <div className="flex flex-col">
+                      <span className="text-sm font-semibold text-slate-900">#{idx + 1} {entry.name}</span>
+                      <span className="text-xs text-slate-500">
+                        최근 {entry.latest ? formatDate(entry.latest) : '기록 없음'}
+                      </span>
+                    </div>
+                    <span className="text-sm font-semibold text-slate-900">{entry.count}회</span>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         </div>
