@@ -58,7 +58,42 @@ const SECTION_STOP_WORDS = [
   '보수',
   '성과',
   '인원 현황',
+  '보수 총액',
+  '이사회',
 ];
+
+const MAIN_SECTION_LABELS = [
+  '임원및직원등의현황',
+  '임원및직원등에관한사항',
+  ['임원및직원', '현황'],
+  ['임원및직원', '사항'],
+];
+
+const REGISTERED_SECTION_LABELS = [
+  '등기임원현황',
+  '등기임원에관한사항',
+  '등기임원',
+];
+
+const UNREGISTERED_SECTION_LABELS = [
+  '미등기임원현황',
+  '미등기임원에관한사항',
+  '미등기임원',
+];
+
+const normalizeText = (value) =>
+  (value || '')
+    .normalize('NFKC')
+    .replace(/[^\p{L}\p{N}]/gu, '')
+    .toLowerCase();
+
+const matchesLabel = (normalizedLine, label) => {
+  if (!normalizedLine) return false;
+  if (Array.isArray(label)) {
+    return label.every((keyword) => normalizedLine.includes(normalizeText(keyword)));
+  }
+  return normalizedLine.includes(normalizeText(label));
+};
 
 const guessFolderFromCompany = (companyName) => {
   if (!companyName) return null;
@@ -94,7 +129,7 @@ const cleanLines = (text) =>
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
-const extractSectionByLabel = (text, label) => {
+const extractSectionByLabels = (text, labels, { stopLabels = [], includeHeading = true } = {}) => {
   if (!text) return '';
   const lines = cleanLines(text);
   let capturing = false;
@@ -102,19 +137,26 @@ const extractSectionByLabel = (text, label) => {
 
   lines.forEach((line) => {
     const normalized = line.replace(/\s+/g, '');
-    if (!capturing && normalized.includes(label.replace(/\s+/g, ''))) {
+    const normalizedCompact = normalizeText(line);
+    if (!capturing && labels.some((label) => matchesLabel(normalizedCompact, label))) {
       capturing = true;
-      section.push(line);
+      if (includeHeading) {
+        section.push(line);
+      }
       return;
     }
     if (capturing) {
+      if (stopLabels.some((label) => matchesLabel(normalizedCompact, label))) {
+        capturing = false;
+        return;
+      }
       const isStopLine = SECTION_STOP_WORDS.some((word) => normalized.includes(word.replace(/\s+/g, '')));
-      const looksLikeHeader = /현황|보고|요약/.test(line) && line.length <= 20;
+      const looksLikeHeader = /현황|보고|요약|사항/.test(line) && line.length <= 25;
       if (isStopLine && section.length > 1) {
         capturing = false;
         return;
       }
-      if (looksLikeHeader && !normalized.includes(label.replace(/\s+/g, ''))) {
+      if (looksLikeHeader && !labels.some((label) => matchesLabel(normalizedCompact, label))) {
         capturing = false;
         return;
       }
@@ -125,41 +167,144 @@ const extractSectionByLabel = (text, label) => {
   return section.join('\n');
 };
 
+const KEYWORD_CHECKS = ['성명', '직위', '담당', '경력', '재직', '출생', '성별', '등기', '상근'];
+
+const splitRow = (line) => {
+  if (!line) return [];
+  if (line.includes('|')) {
+    return line
+      .split('|')
+      .map((cell) => cell.trim())
+      .filter(Boolean);
+  }
+  if (/\t/.test(line)) {
+    return line
+      .split('\t')
+      .map((cell) => cell.trim())
+      .filter(Boolean);
+  }
+  if (/\s{2,}/.test(line)) {
+    return line
+      .split(/\s{2,}/)
+      .map((cell) => cell.trim())
+      .filter(Boolean);
+  }
+  return [line.trim()].filter(Boolean);
+};
+
+const buildHeaderMap = (headers) => {
+  const map = {};
+  headers.forEach((header, index) => {
+    const normalized = normalizeText(header);
+    if (/성명|이름/.test(normalized)) {
+      map.name = index;
+    }
+    if (/성별/.test(normalized)) {
+      map.gender = index;
+    }
+    if (/출생|생년|생월|출신|출산/.test(normalized)) {
+      map.birth = index;
+    }
+    if (/직위|직책|직무|현직/.test(normalized)) {
+      map.title = index;
+    }
+    if (/등기임원|등기여부|등기임원여부|등기/.test(normalized)) {
+      map.registeredStatus = index;
+    }
+    if (/상근|겸임|전임|비상근/.test(normalized)) {
+      map.fullTime = index;
+    }
+    if (/담당|업무|책임/.test(normalized)) {
+      map.duty = index;
+    }
+    if (/경력|이력/.test(normalized)) {
+      map.career = index;
+    }
+    if (/재직|임기|재임/.test(normalized)) {
+      map.tenure = index;
+    }
+    if (/비고|특기사항|참고/.test(normalized)) {
+      map.notes = index;
+    }
+    if (!map.registeredStatus && /구분/.test(normalized)) {
+      map.registeredStatus = index;
+    }
+  });
+  return map;
+};
+
 const parseTableFromSection = (sectionText) => {
   if (!sectionText) return [];
   const lines = cleanLines(sectionText).filter((line) => {
     if (/^[-=]+$/.test(line)) return false;
-    if (/^\|?\s*(성명|직위|담당업무)/.test(line)) return false;
     return true;
   });
 
   const rows = [];
+  let headerMap = null;
+  let lastRow = null;
+
   lines.forEach((line) => {
-    let cells = [];
-    if (line.includes('|')) {
-      cells = line
-        .split('|')
-        .map((cell) => cell.trim())
-        .filter(Boolean);
-    } else if (/\s{2,}/.test(line)) {
-      cells = line
-        .split(/\s{2,}/)
-        .map((cell) => cell.trim())
-        .filter(Boolean);
+    const cells = splitRow(line);
+    if (cells.length === 0) {
+      return;
     }
 
-    if (cells.length < 2) return;
-    if (cells[0] && /성명|직위|담당/.test(cells[0])) return;
+    const normalizedCells = cells.map((cell) => normalizeText(cell));
+    const keywordMatches = normalizedCells.filter((cell) =>
+      KEYWORD_CHECKS.some((keyword) => cell.includes(normalizeText(keyword)))
+    ).length;
 
-    const [name, title, duty, term, etc] = cells;
-    rows.push({
-      name: name || '',
-      title: title || '',
-      duty: duty || '',
-      term: term || '',
-      etc: etc || cells.slice(4).join(' / '),
+    if (!headerMap) {
+      if (keywordMatches >= 2) {
+        headerMap = buildHeaderMap(cells);
+      }
+      return;
+    }
+
+    if (keywordMatches >= 2 && normalizedCells.some((cell) => cell.includes(normalizeText('성명')))) {
+      headerMap = buildHeaderMap(cells);
+      lastRow = null;
+      return;
+    }
+
+    if (cells.length === 1) {
+      const extra = cells[0];
+      if (!extra || !lastRow) return;
+      const targetKey = headerMap.career !== undefined ? 'career' : headerMap.duty !== undefined ? 'duty' : 'notes';
+      if (targetKey === 'career') {
+        lastRow.career = lastRow.career ? `${lastRow.career} ${extra}` : extra;
+      } else if (targetKey === 'duty') {
+        lastRow.duty = lastRow.duty ? `${lastRow.duty} ${extra}` : extra;
+      } else {
+        lastRow.notes = lastRow.notes ? `${lastRow.notes} ${extra}` : extra;
+      }
+      lastRow.raw = `${lastRow.raw}\n${extra}`;
+      return;
+    }
+
+    const getValue = (key) => {
+      const index = headerMap[key];
+      if (index === undefined) return '';
+      return (cells[index] || '').trim();
+    };
+
+    const row = {
+      name: getValue('name'),
+      gender: getValue('gender'),
+      birth: getValue('birth'),
+      title: getValue('title'),
+      registeredStatus: getValue('registeredStatus'),
+      fullTime: getValue('fullTime'),
+      duty: getValue('duty'),
+      career: getValue('career'),
+      tenure: getValue('tenure'),
+      notes: getValue('notes'),
       raw: cells.join(' | '),
-    });
+    };
+
+    rows.push(row);
+    lastRow = row;
   });
 
   return rows;
@@ -173,11 +318,15 @@ const parseExecutivesFromText = (text) => {
       raw: '',
     };
   }
-  const mainSection = extractSectionByLabel(text, '임원및직원등의현황');
+  const mainSection = extractSectionByLabels(text, MAIN_SECTION_LABELS);
   const source = mainSection || text;
 
-  const registeredSection = extractSectionByLabel(mainSection || text, '등기임원현황');
-  const unregisteredSection = extractSectionByLabel(mainSection || text, '미등기임원현황');
+  const registeredSection = extractSectionByLabels(mainSection || text, REGISTERED_SECTION_LABELS, {
+    stopLabels: UNREGISTERED_SECTION_LABELS,
+  });
+  const unregisteredSection = extractSectionByLabels(mainSection || text, UNREGISTERED_SECTION_LABELS, {
+    stopLabels: REGISTERED_SECTION_LABELS,
+  });
 
   return {
     registered: parseTableFromSection(registeredSection),
@@ -215,10 +364,16 @@ const makeExecutiveRecords = (entries, { folder, company, filingId, filingName, 
     company,
     category,
     name: item.name,
+    gender: item.gender,
+    birth: item.birth,
     title: item.title,
     duty: item.duty,
-    term: item.term,
-    etc: item.etc,
+    registeredStatus: item.registeredStatus || (category === '등기임원' ? '등기' : '미등기'),
+    fullTime: item.fullTime,
+    career: item.career || item.notes,
+    tenure: item.tenure || item.term,
+    notes: item.notes,
+    raw: item.raw,
     filingName,
     uploadedAt,
   }));
@@ -420,9 +575,14 @@ export default function GroupDataHub() {
             <th className="px-3 py-2 text-left font-medium text-slate-600">기업</th>
             <th className="px-3 py-2 text-left font-medium text-slate-600">구분</th>
             <th className="px-3 py-2 text-left font-medium text-slate-600">성명</th>
+            <th className="px-3 py-2 text-left font-medium text-slate-600">성별</th>
+            <th className="px-3 py-2 text-left font-medium text-slate-600">출생년월</th>
             <th className="px-3 py-2 text-left font-medium text-slate-600">직위</th>
+            <th className="px-3 py-2 text-left font-medium text-slate-600">등기임원여부</th>
+            <th className="px-3 py-2 text-left font-medium text-slate-600">상근여부</th>
             <th className="px-3 py-2 text-left font-medium text-slate-600">담당업무</th>
-            <th className="px-3 py-2 text-left font-medium text-slate-600">임기</th>
+            <th className="px-3 py-2 text-left font-medium text-slate-600">주요경력</th>
+            <th className="px-3 py-2 text-left font-medium text-slate-600">재직기간</th>
             <th className="px-3 py-2 text-left font-medium text-slate-600">업데이트</th>
             <th className="px-3 py-2 text-left font-medium text-slate-600">출처</th>
           </tr>
@@ -430,7 +590,7 @@ export default function GroupDataHub() {
         <tbody className="divide-y divide-slate-100">
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={9} className="px-3 py-6 text-center text-slate-400">
+              <td colSpan={14} className="px-3 py-6 text-center text-slate-400">
                 {emptyLabel}
               </td>
             </tr>
@@ -441,9 +601,14 @@ export default function GroupDataHub() {
                 <td className="px-3 py-2 text-slate-600">{row.company}</td>
                 <td className="px-3 py-2 text-slate-600">{row.category}</td>
                 <td className="px-3 py-2 text-slate-900 font-medium">{row.name}</td>
+                <td className="px-3 py-2 text-slate-600">{row.gender || '-'}</td>
+                <td className="px-3 py-2 text-slate-600">{row.birth || '-'}</td>
                 <td className="px-3 py-2 text-slate-600">{row.title || '-'}</td>
+                <td className="px-3 py-2 text-slate-600">{row.registeredStatus || '-'}</td>
+                <td className="px-3 py-2 text-slate-600">{row.fullTime || '-'}</td>
                 <td className="px-3 py-2 text-slate-600">{row.duty || '-'}</td>
-                <td className="px-3 py-2 text-slate-600">{row.term || '-'}</td>
+                <td className="px-3 py-2 text-slate-600">{row.career || '-'}</td>
+                <td className="px-3 py-2 text-slate-600">{row.tenure || '-'}</td>
                 <td className="px-3 py-2 text-slate-500 text-xs">{formatDate(row.uploadedAt)}</td>
                 <td className="px-3 py-2 text-slate-500 text-xs">{row.filingName}</td>
               </tr>
