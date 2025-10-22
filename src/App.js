@@ -190,35 +190,84 @@ function getKakaoWorkErrorMessage(error, fallback = '카카오워크 전송에 �
 function parseDateTimeFromRecord(recordText) {
   if (!recordText) return null;
   const text = typeof recordText === 'string' ? recordText : String(recordText || '');
-  let best = null; let m;
-  const reA = /\((\d{2})\.(\d{2})\.(\d{2})\)\s*(?:(AM|PM|오전|오후)?\s*(\d{1,2})(?::(\d{2}))?(?:\s*시)?(?:\s*(\d{1,2})\s*분?)?)?/gi;
-  while ((m = reA.exec(text)) !== null) {
-    const year  = 2000 + parseInt(m[1], 10);
-    const month = parseInt(m[2], 10) - 1;
-    const day   = parseInt(m[3], 10);
-    let hadTime = false, hour = 0, minute = 0;
-    if (m[5] || m[6] || m[4]) {
+  let best = null;
+
+  const consider = (yearRaw, monthRaw, dayRaw, ampmRaw, hourRaw, minuteRaw, minuteAltRaw) => {
+    if (!yearRaw || !monthRaw || !dayRaw) return;
+    const yearNum = Number.parseInt(yearRaw, 10);
+    if (!Number.isFinite(yearNum)) return;
+    const year = yearRaw.length === 2 ? 2000 + yearNum : yearNum;
+    const monthNum = Number.parseInt(monthRaw, 10);
+    const dayNum = Number.parseInt(dayRaw, 10);
+    if (!Number.isFinite(monthNum) || !Number.isFinite(dayNum)) return;
+    const month = Math.max(1, Math.min(12, monthNum)) - 1;
+    const day = Math.max(1, Math.min(31, dayNum));
+
+    let hour = 0;
+    let minute = 0;
+    let hadTime = false;
+    const ampm = (ampmRaw || '').trim().toUpperCase();
+
+    if (hourRaw != null && String(hourRaw).trim() !== '') {
+      hour = Number.parseInt(hourRaw, 10);
+      if (!Number.isFinite(hour)) hour = 0;
+      minute = minuteRaw != null && String(minuteRaw).trim() !== ''
+        ? Number.parseInt(minuteRaw, 10)
+        : minuteAltRaw != null && String(minuteAltRaw).trim() !== ''
+          ? Number.parseInt(minuteAltRaw, 10)
+          : 0;
+      if (!Number.isFinite(minute)) minute = 0;
       hadTime = true;
-      hour   = m[5] ? parseInt(m[5], 10) : 0;
-      minute = m[6] ? parseInt(m[6], 10) : (m[7] ? parseInt(m[7], 10) : 0);
-      const ampm = m[4] ? m[4].toUpperCase() : '';
-      if (ampm === 'PM' || ampm === '오후') { if (hour !== 12) hour += 12; }
-      if (ampm === 'AM' || ampm === '오전') { if (hour === 12) hour = 0; }
+      if (ampm === 'PM' || ampm === '오후') {
+        if (hour !== 12) hour += 12;
+      } else if (ampm === 'AM' || ampm === '오전') {
+        if (hour === 12) hour = 0;
+      }
+    } else if (ampm === 'PM' || ampm === '오후') {
+      hadTime = true;
+      hour = 12;
+    } else if (ampm === 'AM' || ampm === '오전') {
+      hadTime = true;
     }
-    const d = new Date(year, month, day, hour, minute);
-    if (!best || d > best.date) best = { date: d, hadTime };
+
+    const candidate = new Date(year, month, day, hour, minute);
+    if (Number.isNaN(candidate.getTime())) return;
+    if (
+      !best ||
+      candidate > best.date ||
+      (candidate.getTime() === best.date.getTime() && hadTime && !best.hadTime)
+    ) {
+      best = { date: candidate, hadTime };
+    }
+  };
+
+  const generalPattern = /(?:\(|\[)?(\d{2,4})[.\-/](\d{1,2})[.\-/](\d{1,2})(?:\)|\])?(?:\s*(AM|PM|오전|오후)?\s*(\d{1,2})(?::(\d{2}))?(?:\s*시)?(?:\s*(\d{1,2})\s*분?)?)?/gi;
+  let match;
+  while ((match = generalPattern.exec(text)) !== null) {
+    consider(match[1], match[2], match[3], match[4], match[5], match[6], match[7]);
   }
-  const reB = /(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2}))?/g;
-  while ((m = reB.exec(text)) !== null) {
-    const year  = parseInt(m[1], 10);
-    const month = parseInt(m[2], 10) - 1;
-    const day   = parseInt(m[3], 10);
-    let hadTime = false, hour = 0, minute = 0;
-    if (m[4]) { hadTime = true; hour = parseInt(m[4], 10); minute = parseInt(m[5] || '0', 10); }
-    const d = new Date(year, month, day, hour, minute);
-    if (!best || d > best.date) best = { date: d, hadTime };
+
+  const isoPattern = /(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2}))?/g;
+  while ((match = isoPattern.exec(text)) !== null) {
+    const year = Number.parseInt(match[1], 10);
+    const month = Number.parseInt(match[2], 10) - 1;
+    const day = Number.parseInt(match[3], 10);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) continue;
+    const hour = match[4] != null ? Number.parseInt(match[4], 10) : 0;
+    const minute = match[5] != null ? Number.parseInt(match[5], 10) : 0;
+    const candidate = new Date(year, month, day, Number.isFinite(hour) ? hour : 0, Number.isFinite(minute) ? minute : 0);
+    if (Number.isNaN(candidate.getTime())) continue;
+    const hadTime = match[4] != null;
+    if (
+      !best ||
+      candidate > best.date ||
+      (candidate.getTime() === best.date.getTime() && hadTime && !best.hadTime)
+    ) {
+      best = { date: candidate, hadTime };
+    }
   }
-  return best ? best : null;
+
+  return best;
 }
 
 function safeDateFrom(value) {
@@ -2568,7 +2617,11 @@ export default function App() {
 
       const storageKey = `kakaoMeetingReminderSent-${dateKey}`;
       try {
-        if (window.localStorage.getItem(storageKey)) return;
+        const stored = window.localStorage.getItem(storageKey);
+        if (stored === 'sent') return;
+        if (stored && stored !== 'sent') {
+          window.localStorage.removeItem(storageKey);
+        }
       } catch (error) {
         console.warn('로컬 스토리지를 사용할 수 없습니다:', error);
       }
@@ -2584,12 +2637,6 @@ export default function App() {
         .filter(Boolean);
 
       if (!reminders.length) {
-        try {
-          window.localStorage.setItem(storageKey, 'none');
-        } catch (error) {
-          console.warn('리마인더 전송 기록을 저장하지 못했습니다:', error);
-        }
-        reminderStateRef.current = { dateKey, sent: true };
         return;
       }
 
@@ -3049,46 +3096,83 @@ export default function App() {
   );
 
   const meetingSummary = useMemo(() => {
-    let latestMeeting = null;
-    for (const row of meetingRowsForSummary) {
-      if (row.sortKey > 0) {
-        const useKay = row.kay?.key >= row.team?.key;
-        const chosen = useKay ? row.kay : row.team;
-        if (chosen?.key > 0) {
-          latestMeeting = {
-            name: row.name || '이름 미상',
-            label: chosen.label || '',
-            type: useKay ? '케이 미팅' : '팀황 미팅',
-          };
-        }
-        break;
-      }
-    }
+    const todayStart = startOfDay(new Date());
+    const tomorrowStart = addDays(todayStart, 1);
 
-    const threshold = startOfDay(addDays(new Date(), -90));
-    let busiest = null;
-    profiles.forEach((p) => {
-      const dates = extractMeetingHistoryDates(p.meetingRecord);
-      if (!dates.length) return;
-      const recent = dates.filter((d) => d >= threshold);
-      if (!recent.length) return;
-      recent.sort((a, b) => b - a);
-      const latestDate = recent[0];
+    const keyToDate = (key) => {
+      if (!key || typeof key !== 'number') return null;
+      const year = Math.floor(key / 10000);
+      const month = Math.floor((key % 10000) / 100);
+      const day = key % 100;
+      if (!year) return null;
+      const validMonth = month > 0 ? month : 1;
+      const validDay = day > 0 ? day : 1;
+      const parsed = new Date(year, validMonth - 1, validDay);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    let latest = null;
+    meetingRowsForSummary.forEach((row) => {
+      const candidates = [];
+      const teamDate = keyToDate(row?.team?.key);
+      if (teamDate && teamDate < tomorrowStart) {
+        candidates.push({
+          date: teamDate,
+          type: '팀황 미팅',
+          label: row?.team?.label || '',
+        });
+      }
+      const kayDate = keyToDate(row?.kay?.key);
+      if (kayDate && kayDate < tomorrowStart) {
+        candidates.push({
+          date: kayDate,
+          type: '케이 미팅',
+          label: row?.kay?.label || '',
+        });
+      }
+      if (!candidates.length) return;
+      candidates.sort((a, b) => b.date - a.date);
+      const pick = candidates[0];
       if (
-        !busiest ||
-        recent.length > busiest.count ||
-        (recent.length === busiest.count && latestDate > busiest.latest)
+        pick &&
+        (!latest || pick.date > latest.date || (pick.date.getTime() === latest.date.getTime() && latest.type !== pick.type))
       ) {
-        busiest = {
-          name: p.name || '이름 미상',
-          count: recent.length,
-          latest: latestDate,
+        latest = {
+          name: row.name || '이름 미상',
+          date: pick.date,
+          type: pick.type,
+          label: pick.label,
         };
       }
     });
 
-    return { latestMeeting, busiestCandidate: busiest };
-  }, [meetingRowsForSummary, profiles]);
+    const threshold = startOfDay(addDays(todayStart, -90));
+    const busiest = meetingRowsForSummary
+      .map((row) => {
+        const dates = extractMeetingHistoryDates(row.history);
+        if (!dates.length) return null;
+        const recent = dates
+          .map((d) => startOfDay(d))
+          .filter((d) => d >= threshold && d < tomorrowStart);
+        if (!recent.length) return null;
+        recent.sort((a, b) => b.getTime() - a.getTime());
+        return {
+          name: row.name || '이름 미상',
+          count: recent.length,
+          latest: recent[0],
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        const latestDiff = b.latest.getTime() - a.latest.getTime();
+        if (latestDiff !== 0) return latestDiff;
+        return a.name.localeCompare(b.name);
+      })
+      .slice(0, 3);
+
+    return { latest, busiest };
+  }, [meetingRowsForSummary]);
 
   const idealSummary = useMemo(() => {
     const entryList = idealWins && typeof idealWins === 'object'
