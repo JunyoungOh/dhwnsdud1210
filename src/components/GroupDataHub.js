@@ -7,6 +7,8 @@ import {
   ChevronRight,
   RefreshCw,
   Info,
+  Download,
+  AlertCircle,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -22,6 +24,13 @@ import {
 import Btn from './ui/Btn';
 import Badge from './ui/Badge';
 import { toast } from './ui/Toast';
+import {
+  fetchCorpCodeMap,
+  findBestCorpMatch,
+  fetchExecutiveStatus,
+  REPORT_CODE_OPTIONS,
+  getReportLabel,
+} from '../utils/opendart';
 
 const DEFAULT_GROUPS = [
   '삼성',
@@ -384,6 +393,113 @@ export default function GroupDataHub() {
   const [globalFilter, setGlobalFilter] = useState('');
   const [folderFilters, setFolderFilters] = useState({});
   const [isUploading, setIsUploading] = useState(false);
+  const [isFetchingDart, setIsFetchingDart] = useState(false);
+  const [dartCompany, setDartCompany] = useState('');
+  const [dartYear, setDartYear] = useState(() => String(new Date().getFullYear()));
+  const [dartReportCode, setDartReportCode] = useState(
+    () => REPORT_CODE_OPTIONS.find((option) => option.code === '11012')?.code || REPORT_CODE_OPTIONS[0]?.code || '11011'
+  );
+  const [dartMatchInfo, setDartMatchInfo] = useState(null);
+  const [dartError, setDartError] = useState('');
+
+  const handleFetchFromDart = useCallback(
+    async () => {
+      setDartError('');
+      if (!dartCompany.trim()) {
+        (toast.info?.('회사명을 입력해주세요.') ?? toast('회사명을 입력해주세요.'));
+        return;
+      }
+
+      const yearNumber = Number.parseInt(dartYear, 10);
+      if (!Number.isFinite(yearNumber)) {
+        (toast.info?.('조회할 사업연도를 숫자로 입력해주세요.') ?? toast('조회할 사업연도를 숫자로 입력해주세요.'));
+        return;
+      }
+
+      setIsFetchingDart(true);
+
+      try {
+        const corpList = await fetchCorpCodeMap();
+        const match = findBestCorpMatch(dartCompany, corpList);
+        if (!match) {
+          setDartMatchInfo(null);
+          setDartError('회사명을 기반으로 한 매칭 결과를 찾지 못했습니다. 조금 더 정확한 명칭으로 다시 시도해주세요.');
+          (toast.error?.('Open DART에서 회사를 찾지 못했습니다.') ?? toast('Open DART에서 회사를 찾지 못했습니다.'));
+          return;
+        }
+
+        setDartMatchInfo(match);
+
+        const { registered, unregistered, raw, meta } = await fetchExecutiveStatus({
+          corpCode: match.corpCode,
+          bsnsYear: yearNumber,
+          reprtCode: dartReportCode,
+        });
+
+        if (registered.length === 0 && unregistered.length === 0) {
+          setDartError('선택한 보고서에서 임원 정보를 찾을 수 없습니다. 다른 보고서 유형이나 연도를 시도해주세요.');
+          (toast.info?.('선택한 보고서에서 임원 목록이 비어 있습니다.') ?? toast('선택한 보고서에서 임원 목록이 비어 있습니다.'));
+          return;
+        }
+
+        const nowIso = new Date().toISOString();
+        const companyName = meta?.corpName || match.corpName || dartCompany.trim();
+        const folder = guessFolderFromCompany(companyName) || companyName || '기타';
+        const folderKey = folder.trim().length > 0 ? folder.trim() : '기타';
+        const filingId = `dart-${match.corpCode}-${meta?.bsnsYear || yearNumber}-${dartReportCode}-${nowIso}`;
+        const filingName = `OpenDART ${companyName} ${meta?.bsnsYear || yearNumber} ${getReportLabel(meta?.reprtCode || dartReportCode)}`;
+
+        const filing = {
+          id: filingId,
+          name: filingName,
+          company: companyName,
+          uploadedAt: nowIso,
+          registered,
+          unregistered,
+          raw,
+          source: 'OpenDART API',
+        };
+
+        setFolders((prev) => {
+          const next = { ...prev };
+          if (!next[folderKey]) {
+            next[folderKey] = {
+              filings: [],
+              createdAt: new Date().toISOString(),
+              isDynamic: true,
+            };
+          }
+          next[folderKey] = {
+            ...next[folderKey],
+            filings: [filing, ...(next[folderKey]?.filings || [])],
+            lastUpdatedAt: filing.uploadedAt,
+          };
+          return next;
+        });
+
+        setActiveFolder(folderKey);
+        setDartError('');
+        setDartCompany(companyName);
+        (toast.success?.('Open DART에서 임원 데이터를 불러왔습니다.') ?? toast('Open DART에서 임원 데이터를 불러왔습니다.'));
+      } catch (error) {
+        console.error(error);
+        const message = error?.message || 'Open DART 조회에 실패했습니다.';
+        setDartError(message);
+        (toast.error?.(message) ?? toast(message));
+      } finally {
+        setIsFetchingDart(false);
+      }
+    },
+    [
+      dartCompany,
+      dartYear,
+      dartReportCode,
+      getReportLabel,
+      fetchCorpCodeMap,
+      findBestCorpMatch,
+      fetchExecutiveStatus,
+    ]
+  );
 
   const handleFiles = useCallback(
     async (files) => {
@@ -626,12 +742,110 @@ export default function GroupDataHub() {
           <div>
             <h2 className="text-xl font-semibold text-slate-900">그룹사 임원 데이터 허브</h2>
             <p className="mt-1 text-sm text-slate-500">
-              DART 공시자료를 업로드하면 각 그룹사 폴더에서 임원 데이터를 자동으로 추출하고 정리합니다.
+              Open DART API 연동과 공시자료 업로드를 통해 그룹사 임원 현황을 빠르게 수집하고 정리하세요.
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <label className="relative">
-              <span className="sr-only">공시자료 업로드</span>
+          <Btn
+            variant="ghost"
+            size="sm"
+            className="self-start md:self-auto"
+            onClick={() => {
+              setFolders(buildInitialFolders());
+              setActiveFolder(null);
+              setGlobalFilter('');
+              setFolderFilters({});
+              setDartMatchInfo(null);
+              setDartError('');
+            }}
+            title="초기화"
+          >
+            <RefreshCw className="mr-2 h-4 w-4" /> 초기화
+          </Btn>
+        </div>
+
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+            <div className="flex items-center gap-2 text-slate-700">
+              <Download className="h-5 w-5" />
+              <span className="text-base font-semibold">Open DART API에서 불러오기</span>
+            </div>
+            <p className="text-xs text-slate-500">
+              회사명을 입력하면 corpCode.xml 캐시를 통해 고유번호를 찾고, exctvSttus API로 임원 리스트를 가져옵니다. API 키는
+              <code className="rounded bg-white/70 px-1">REACT_APP_OPENDART_API_KEY</code>
+              환경변수에 설정되어 있어야 합니다.
+            </p>
+            <div className="grid gap-3 md:grid-cols-3">
+              <label className="md:col-span-2">
+                <span className="text-xs font-medium text-slate-600">회사명</span>
+                <input
+                  type="text"
+                  value={dartCompany}
+                  onChange={(event) => setDartCompany(event.target.value)}
+                  placeholder="예: 삼성전자"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
+                />
+              </label>
+              <label>
+                <span className="text-xs font-medium text-slate-600">사업연도</span>
+                <input
+                  type="number"
+                  min="2000"
+                  max="2100"
+                  value={dartYear}
+                  onChange={(event) => setDartYear(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
+                />
+              </label>
+              <label>
+                <span className="text-xs font-medium text-slate-600">보고서 유형</span>
+                <select
+                  value={dartReportCode}
+                  onChange={(event) => setDartReportCode(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
+                >
+                  {REPORT_CODE_OPTIONS.map((option) => (
+                    <option key={option.code} value={option.code}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-h-[20px] text-xs text-slate-500">
+                {dartMatchInfo && (
+                  <span>
+                    매칭된 회사: <strong>{dartMatchInfo.corpName}</strong> (corp_code: {dartMatchInfo.corpCode}
+                    {dartMatchInfo.score && dartMatchInfo.score < 0.9
+                      ? ` · 유사도 ${(dartMatchInfo.score * 100).toFixed(0)}%`
+                      : ''}
+                    )
+                  </span>
+                )}
+              </div>
+              <Btn onClick={handleFetchFromDart} disabled={isFetchingDart} size="sm">
+                <Download className="mr-2 h-4 w-4" />
+                {isFetchingDart ? '불러오는 중...' : 'Open DART 불러오기'}
+              </Btn>
+            </div>
+            {dartError && (
+              <p className="flex items-start gap-1 text-xs text-rose-500">
+                <AlertCircle className="mt-[2px] h-3.5 w-3.5" />
+                <span>{dartError}</span>
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+            <div className="flex items-center gap-2 text-slate-700">
+              <FileText className="h-5 w-5" />
+              <span className="text-base font-semibold">공시자료 파일 업로드</span>
+            </div>
+            <p className="text-xs text-slate-500">
+              기존에 수집한 PDF, 텍스트 등에서 임원 표를 추출하려면 파일을 업로드하세요. 업로드된 자료는 브라우저 메모리에만 저장됩니다.
+            </p>
+            <label className="relative flex w-full flex-col items-start gap-2">
+              <span className="text-xs font-medium text-slate-600">파일 선택</span>
               <input
                 type="file"
                 accept=".txt,.csv,.pdf,.html,.xlsx,.xls"
@@ -646,23 +860,10 @@ export default function GroupDataHub() {
               />
               <Btn disabled={isUploading} variant="outline" size="sm">
                 <UploadCloud className="mr-2 h-4 w-4" />
-                {isUploading ? '불러오는 중...' : '공시자료 업로드'}
+                {isUploading ? '불러오는 중...' : '파일 업로드'}
               </Btn>
             </label>
-            <Btn
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 p-0"
-              onClick={() => {
-                setFolders(buildInitialFolders());
-                setActiveFolder(null);
-                setGlobalFilter('');
-                setFolderFilters({});
-              }}
-              title="초기화"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Btn>
+            <p className="text-xs text-slate-400">지원 확장자: txt, csv, pdf, html, xlsx, xls</p>
           </div>
         </div>
         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
