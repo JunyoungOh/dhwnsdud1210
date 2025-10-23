@@ -1,7 +1,11 @@
+const JSZip = require('jszip');
+const { XMLParser } = require('fast-xml-parser');
+
 const API_BASE_URL = 'https://opendart.fss.or.kr/api';
-const DEFAULT_TIMEOUT_MS = 25000;
-const MAX_ATTEMPTS = 3;
-const CORP_CODE_CACHE_TTL_MS = 1000 * 60 * 60 * 6; // 6시간 동안 재사용
+const DEFAULT_TIMEOUT_MS = 8000;
+const MAX_ATTEMPTS = 2;
+const CORP_CODE_CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24시간 동안 재사용
+const CORP_CODE_CACHE_CONTROL = 'public, max-age=86400';
 const DEFAULT_USER_AGENT =
   'GroupDataHub/1.0 (+https://github.com/dhwnsdud1210/profile-dashboard)';
 
@@ -105,6 +109,35 @@ const corpCodeCache = {
   fetchedAt: 0,
 };
 
+const xmlParser = new XMLParser({ ignoreAttributes: true, trimValues: true });
+
+const toArray = (value) => {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+};
+
+const parseCorpCodeZip = async (base64Zip) => {
+  const buffer = Buffer.from(base64Zip, 'base64');
+  const zip = await JSZip.loadAsync(buffer);
+  const xmlFile = zip.file(/\.xml$/i)?.[0];
+  if (!xmlFile) {
+    throw new Error('corpCode.zip 파일에서 XML을 찾을 수 없습니다.');
+  }
+
+  const xmlText = await xmlFile.async('text');
+  const parsed = xmlParser.parse(xmlText);
+  const rawList = toArray(parsed?.result?.list);
+
+  return rawList
+    .map((item) => ({
+      corpCode: item?.corp_code?.trim?.() || '',
+      corpName: item?.corp_name?.trim?.() || '',
+      stockCode: item?.stock_code?.trim?.() || '',
+      modifyDate: item?.modify_date?.trim?.() || '',
+    }))
+    .filter((item) => item.corpCode && item.corpName);
+};
+
 const fetchCorpCode = async () => {
   if (corpCodeCache.value && Date.now() - corpCodeCache.fetchedAt < CORP_CODE_CACHE_TTL_MS) {
     return corpCodeCache.value;
@@ -113,22 +146,27 @@ const fetchCorpCode = async () => {
   const apiKey = getApiKey();
   const url = `${API_BASE_URL}/corpCode.xml?crtfc_key=${apiKey}`;
 
-  const base64Zip = await withRetry(async () => {
-    const response = await fetchWithTimeout(url, { timeoutMs: 20000 });
-    if (!response.ok) {
-      const message = `corpCode 요청에 실패했습니다. (HTTP ${response.status})`;
-      throw new Error(message);
-    }
-    const buffer = await response.arrayBuffer();
-    if (!buffer || buffer.byteLength === 0) {
-      throw new Error('corpCode 응답이 비어 있습니다.');
-    }
-    return Buffer.from(buffer).toString('base64');
-  });
+  const base64Zip = await withRetry(
+    async () => {
+      const response = await fetchWithTimeout(url, { timeoutMs: 8000 });
+      if (!response.ok) {
+        const message = `corpCode 요청에 실패했습니다. (HTTP ${response.status})`;
+        throw new Error(message);
+      }
+      const buffer = await response.arrayBuffer();
+      if (!buffer || buffer.byteLength === 0) {
+        throw new Error('corpCode 응답이 비어 있습니다.');
+      }
+      return Buffer.from(buffer).toString('base64');
+    },
+    { attempts: 1 }
+  );
 
-  corpCodeCache.value = base64Zip;
+  const corpCodes = await parseCorpCodeZip(base64Zip);
+
+  corpCodeCache.value = corpCodes;
   corpCodeCache.fetchedAt = Date.now();
-  return base64Zip;
+  return corpCodes;
 };
 
 const fetchExecutives = async ({ corpCode, bsnsYear, reprtCode }) => {
@@ -149,25 +187,28 @@ const fetchExecutives = async ({ corpCode, bsnsYear, reprtCode }) => {
   url.searchParams.set('bsns_year', String(bsnsYear));
   url.searchParams.set('reprt_code', String(reprtCode));
 
-  return withRetry(async () => {
-    const response = await fetchWithTimeout(url, { timeoutMs: 15000 });
-    if (!response.ok) {
-      throw new Error(`exctvSttus 요청에 실패했습니다. (HTTP ${response.status})`);
-    }
+  return withRetry(
+    async () => {
+      const response = await fetchWithTimeout(url, { timeoutMs: 8000 });
+      if (!response.ok) {
+        throw new Error(`exctvSttus 요청에 실패했습니다. (HTTP ${response.status})`);
+      }
 
-    let data;
-    try {
-      data = await response.json();
-    } catch (error) {
-      throw new Error('OpenDART 응답을 해석할 수 없습니다.');
-    }
+      let data;
+      try {
+        data = await response.json();
+      } catch (error) {
+        throw new Error('OpenDART 응답을 해석할 수 없습니다.');
+      }
 
-    if (!data) {
-      throw new Error('OpenDART 응답을 해석할 수 없습니다.');
-    }
+      if (!data) {
+        throw new Error('OpenDART 응답을 해석할 수 없습니다.');
+      }
 
-    return data;
-  });
+      return data;
+    },
+    { attempts: 2, baseDelayMs: 300 }
+  );
 };
 
 exports.handler = async (event) => {
@@ -193,8 +234,8 @@ exports.handler = async (event) => {
 
   try {
     if (action === 'corpCode') {
-      const base64Zip = await fetchCorpCode();
-      return jsonResponse(200, { data: base64Zip }, { 'Cache-Control': 'public, max-age=3600' });
+      const corpCodes = await fetchCorpCode();
+      return jsonResponse(200, { data: corpCodes }, { 'Cache-Control': CORP_CODE_CACHE_CONTROL });
     }
 
     if (action === 'executives') {
