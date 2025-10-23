@@ -14,6 +14,17 @@ export const REPORT_CODE_OPTIONS = Object.entries(REPORT_CODES).map(([code, labe
   label,
 }));
 
+const STATUS_CODE_HINTS = {
+  '011': '잘못된 고유번호입니다.',
+  '012': '요청한 회사의 기본 정보가 존재하지 않습니다.',
+  '013': '요청한 사업연도/보고서에 임원 현황 데이터가 없습니다.',
+  '014': '제출되지 않은 보고서입니다.',
+  '020': 'API Key 사용 한도를 초과했습니다.',
+  '021': '허용된 조회 건수를 초과했습니다.',
+};
+
+const STATUS_NO_DATA = new Set(['013', '014']);
+
 const callOpenDartProxy = async ({ action, payload = {}, signal } = {}) => {
   if (!action) {
     throw new Error('Open DART 프록시 요청에 action이 지정되지 않았습니다.');
@@ -247,9 +258,36 @@ export const fetchExecutiveStatus = async ({ corpCode, bsnsYear, reprtCode, sign
     throw new Error('Open DART 응답을 해석할 수 없습니다.');
   }
 
-  if (data.status && data.status !== '000') {
-    const message = data.message || 'Open DART API 요청이 실패했습니다.';
-    throw new Error(`${message} (status=${data.status})`);
+  const normalizedStatus = data.status || '000';
+  const fallbackMessage = data.message?.trim() || 'Open DART API 요청이 실패했습니다.';
+  const statusHint = STATUS_CODE_HINTS[normalizedStatus];
+  const combinedMessage = statusHint
+    ? `${statusHint}${fallbackMessage ? ` — ${fallbackMessage}` : ''}`
+    : `${fallbackMessage}${normalizedStatus && normalizedStatus !== '000' ? ` (status=${normalizedStatus})` : ''}`;
+
+  const baseMeta = {
+    corpName: data.corp_name,
+    corpCode,
+    bsnsYear: String(bsnsYear),
+    reprtCode: String(reprtCode),
+    message: data.message,
+    status: normalizedStatus,
+  };
+
+  if (normalizedStatus !== '000') {
+    if (STATUS_NO_DATA.has(normalizedStatus)) {
+      return {
+        meta: {
+          ...baseMeta,
+          statusMessage: combinedMessage,
+        },
+        registered: [],
+        unregistered: [],
+        raw: data,
+      };
+    }
+
+    throw new Error(combinedMessage);
   }
 
   const list = Array.isArray(data.list) ? data.list : [];
@@ -260,11 +298,8 @@ export const fetchExecutiveStatus = async ({ corpCode, bsnsYear, reprtCode, sign
 
   return {
     meta: {
-      corpName: data.corp_name,
-      corpCode,
-      bsnsYear: String(bsnsYear),
-      reprtCode: String(reprtCode),
-      message: data.message,
+      ...baseMeta,
+      statusMessage: data.message,
     },
     registered,
     unregistered,
