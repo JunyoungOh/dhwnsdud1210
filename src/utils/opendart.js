@@ -1,7 +1,5 @@
-import JSZip from 'jszip';
-
 const PROXY_ENDPOINT = '/.netlify/functions/opendart-proxy';
-const CORP_CODE_CACHE_KEY = 'opendart:corp-code-cache:v1';
+const CORP_CODE_CACHE_KEY = 'opendart:corp-code-cache:v2';
 const CORP_CODE_CACHE_TTL = 1000 * 60 * 60 * 24; // 24시간
 
 export const REPORT_CODES = {
@@ -15,34 +13,6 @@ export const REPORT_CODE_OPTIONS = Object.entries(REPORT_CODES).map(([code, labe
   code,
   label,
 }));
-
-const decodeBase64ToUint8Array = (base64) => {
-  if (!base64) return new Uint8Array();
-
-  const decodeWithAtob = (value) => {
-    const binaryString = value;
-    const length = binaryString.length;
-    const bytes = new Uint8Array(length);
-    for (let i = 0; i < length; i += 1) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    return bytes;
-  };
-
-  if (typeof window !== 'undefined' && typeof window.atob === 'function') {
-    return decodeWithAtob(window.atob(base64));
-  }
-
-  if (typeof atob === 'function') {
-    return decodeWithAtob(atob(base64));
-  }
-
-  if (typeof Buffer !== 'undefined') {
-    return new Uint8Array(Buffer.from(base64, 'base64'));
-  }
-
-  throw new Error('Base64 decoding을 지원하지 않는 환경입니다.');
-};
 
 const callOpenDartProxy = async ({ action, payload = {}, signal } = {}) => {
   if (!action) {
@@ -94,8 +64,6 @@ const callOpenDartProxy = async ({ action, payload = {}, signal } = {}) => {
   return result ?? {};
 };
 
-const toArray = (list) => Array.prototype.slice.call(list);
-
 const normalizeName = (value = '') =>
   value
     .normalize('NFKC')
@@ -133,23 +101,6 @@ const similarityScore = (a = '', b = '') => {
   return intersection.size / unionSize;
 };
 
-const parseCorpCodes = (xmlText) => {
-  if (!xmlText) return [];
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(xmlText, 'application/xml');
-  const listNodes = toArray(doc.getElementsByTagName('list'));
-  return listNodes
-    .map((node) => {
-      const corpCode = node.getElementsByTagName('corp_code')[0]?.textContent?.trim();
-      const corpName = node.getElementsByTagName('corp_name')[0]?.textContent?.trim();
-      const stockCode = node.getElementsByTagName('stock_code')[0]?.textContent?.trim();
-      const modifyDate = node.getElementsByTagName('modify_date')[0]?.textContent?.trim();
-      if (!corpCode || !corpName) return null;
-      return { corpCode, corpName, stockCode, modifyDate };
-    })
-    .filter(Boolean);
-};
-
 export const fetchCorpCodeMap = async ({ forceRefresh = false } = {}) => {
   if (typeof window !== 'undefined' && !forceRefresh) {
     try {
@@ -168,20 +119,19 @@ export const fetchCorpCodeMap = async ({ forceRefresh = false } = {}) => {
     }
   }
 
-  const { data: base64Zip } = await callOpenDartProxy({ action: 'corpCode' });
-  if (!base64Zip) {
+  const { data } = await callOpenDartProxy({ action: 'corpCode' });
+  if (!Array.isArray(data)) {
     throw new Error('Open DART corpCode 데이터를 받아오지 못했습니다.');
   }
 
-  const zipBytes = decodeBase64ToUint8Array(base64Zip);
-  const zip = await JSZip.loadAsync(zipBytes);
-  const xmlFile = zip.file(/\.xml$/i)?.[0];
-  if (!xmlFile) {
-    throw new Error('corpCode.zip 파일에서 XML을 찾을 수 없습니다.');
-  }
-
-  const xmlText = await xmlFile.async('text');
-  const items = parseCorpCodes(xmlText);
+  const items = data
+    .map((item) => ({
+      corpCode: item.corpCode,
+      corpName: item.corpName,
+      stockCode: item.stockCode,
+      modifyDate: item.modifyDate,
+    }))
+    .filter((item) => item.corpCode && item.corpName);
 
   if (typeof window !== 'undefined') {
     try {
