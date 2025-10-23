@@ -4,9 +4,9 @@ import JSZip from 'jszip'
 const BASE = 'https://opendart.fss.or.kr/api'
 const KEY = process.env.OPENDART_API_KEY
 
-const DEFAULT_TIMEOUT_MS = 7000
-const ATTEMPTS_CORPCODE = 1
-const ATTEMPTS_EXEC = 1
+const DEFAULT_TIMEOUT_MS = 20000
+const ATTEMPTS_CORPCODE = 3
+const ATTEMPTS_EXEC = 2
 
 let corpCodeCache = { data: null, ts: 0 }
 const CORPCODE_TTL_MS = 24 * 60 * 60 * 1000
