@@ -1,25 +1,15 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  UploadCloud,
-  Folder as FolderIcon,
-  FileText,
-  Filter as FilterIcon,
-  ChevronRight,
-  RefreshCw,
-  Info,
   Download,
-  AlertCircle,
+  Save,
+  RefreshCw,
+  Folder as FolderIcon,
+  Layers,
+  Search,
+  FileText,
+  ChevronRight,
+  Archive,
 } from 'lucide-react';
-import {
-  ResponsiveContainer,
-  BarChart,
-  CartesianGrid,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
-  Bar,
-} from 'recharts';
 
 import Btn from './ui/Btn';
 import Badge from './ui/Badge';
@@ -32,775 +22,349 @@ import {
   getReportLabel,
 } from '../utils/opendart';
 
-const DEFAULT_GROUPS = [
-  '삼성',
-  'SK',
-  'CJ',
-  '현대자동차',
-  'LG',
-  '롯데',
-  'GS',
-  '네이버',
-  '신세계',
-  'KT',
-];
-
-const GROUP_KEYWORDS = {
-  삼성: ['삼성', 'samsung', '삼성전자', '삼성생명', '삼성물산'],
-  SK: ['sk', '에스케이', 'SK하이닉스', 'SK이노베이션', 'SK텔레콤'],
-  CJ: ['cj', '씨제이', 'CJ제일제당', 'CJ대한통운'],
-  현대자동차: ['현대자동차', '현대차', 'Hyundai Motor', '현대모비스', '기아'],
-  LG: ['lg', '엘지', 'LG전자', 'LG화학', 'LG생활건강'],
-  롯데: ['롯데', 'lotte', '롯데케미칼', '롯데쇼핑'],
-  GS: ['gs', 'GS칼텍스', 'GS리테일'],
-  네이버: ['네이버', 'naver', '라인', 'NAVER'],
-  신세계: ['신세계', '이마트', 'SSG'],
-  KT: ['kt', '케이티', 'KT&G'],
+const KNOWN_GROUP_KEYWORDS = {
+  삼성: ['삼성', 'samsung'],
+  SK: ['sk', '에스케이'],
+  현대자동차: ['현대자동차', '현대차', 'hyundai motor'],
+  현대중공업: ['현대중공업', 'hyundai heavy'],
+  LG: ['lg', '엘지'],
+  롯데: ['롯데', 'lotte'],
+  CJ: ['cj', '씨제이'],
+  한화: ['한화', 'hanwha'],
+  두산: ['두산', 'doosan'],
+  신세계: ['신세계', '이마트', 'emart', 'ssg'],
+  네이버: ['네이버', 'naver', '라인', 'line'],
+  카카오: ['카카오', 'kakao'],
+  GS: ['gs'],
+  KT: ['kt', '케이티'],
+  포스코: ['포스코', 'posco'],
 };
 
-const SECTION_STOP_WORDS = [
-  '요약',
-  '기타',
-  '보고서',
-  '위원회',
-  '평가',
-  '보수',
-  '성과',
-  '인원 현황',
-  '보수 총액',
-  '이사회',
-];
+const FALLBACK_FOLDER = '기타';
 
-const MAIN_SECTION_LABELS = [
-  '임원및직원등의현황',
-  '임원및직원등에관한사항',
-  ['임원및직원', '현황'],
-  ['임원및직원', '사항'],
-];
+const normalize = (value = '') => value.replace(/\s+/g, '').toLowerCase();
 
-const REGISTERED_SECTION_LABELS = [
-  '등기임원현황',
-  '등기임원에관한사항',
-  '등기임원',
-];
+const deriveFolderName = (companyName = '') => {
+  if (!companyName) return FALLBACK_FOLDER;
+  const normalized = normalize(companyName);
 
-const UNREGISTERED_SECTION_LABELS = [
-  '미등기임원현황',
-  '미등기임원에관한사항',
-  '미등기임원',
-];
-
-const normalizeText = (value) =>
-  (value || '')
-    .normalize('NFKC')
-    .replace(/[^\p{L}\p{N}]/gu, '')
-    .toLowerCase();
-
-const matchesLabel = (normalizedLine, label) => {
-  if (!normalizedLine) return false;
-  if (Array.isArray(label)) {
-    return label.every((keyword) => normalizedLine.includes(normalizeText(keyword)));
-  }
-  return normalizedLine.includes(normalizeText(label));
-};
-
-const guessFolderFromCompany = (companyName) => {
-  if (!companyName) return null;
-  const normalized = companyName.replace(/\s+/g, '').toLowerCase();
-  for (const [folder, keywords] of Object.entries(GROUP_KEYWORDS)) {
-    if (keywords.some((keyword) => normalized.includes(keyword.replace(/\s+/g, '').toLowerCase()))) {
+  for (const [folder, keywords] of Object.entries(KNOWN_GROUP_KEYWORDS)) {
+    if (keywords.some((keyword) => normalized.includes(normalize(keyword)))) {
       return folder;
     }
   }
-  return null;
-};
 
-const extractCompanyNameFromFilename = (fileName) => {
-  if (!fileName) return '';
-  const match = fileName.match(/^\(([^)]+)\)/);
-  if (match) {
-    return match[1].trim();
+  const tokens = companyName
+    .split(/[\s·&(),/]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  if (tokens.length === 0) {
+    return FALLBACK_FOLDER;
   }
-  return fileName.replace(/\.[^.]+$/, '').trim();
-};
-
-const readFileAsText = (file) =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsText(file, 'utf-8');
-  });
-
-const cleanLines = (text) =>
-  text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
-const extractSectionByLabels = (text, labels, { stopLabels = [], includeHeading = true } = {}) => {
-  if (!text) return '';
-  const lines = cleanLines(text);
-  let capturing = false;
-  const section = [];
-
-  lines.forEach((line) => {
-    const normalized = line.replace(/\s+/g, '');
-    const normalizedCompact = normalizeText(line);
-    if (!capturing && labels.some((label) => matchesLabel(normalizedCompact, label))) {
-      capturing = true;
-      if (includeHeading) {
-        section.push(line);
-      }
-      return;
-    }
-    if (capturing) {
-      if (stopLabels.some((label) => matchesLabel(normalizedCompact, label))) {
-        capturing = false;
-        return;
-      }
-      const isStopLine = SECTION_STOP_WORDS.some((word) => normalized.includes(word.replace(/\s+/g, '')));
-      const looksLikeHeader = /현황|보고|요약|사항/.test(line) && line.length <= 25;
-      if (isStopLine && section.length > 1) {
-        capturing = false;
-        return;
-      }
-      if (looksLikeHeader && !labels.some((label) => matchesLabel(normalizedCompact, label))) {
-        capturing = false;
-        return;
-      }
-      section.push(line);
-    }
-  });
-
-  return section.join('\n');
-};
-
-const KEYWORD_CHECKS = ['성명', '직위', '담당', '경력', '재직', '출생', '성별', '등기', '상근'];
-
-const splitRow = (line) => {
-  if (!line) return [];
-  if (line.includes('|')) {
-    return line
-      .split('|')
-      .map((cell) => cell.trim())
-      .filter(Boolean);
+  const firstToken = tokens[0];
+  if (/^[A-Za-z]{2,}$/.test(firstToken)) {
+    return firstToken.toUpperCase();
   }
-  if (/\t/.test(line)) {
-    return line
-      .split('\t')
-      .map((cell) => cell.trim())
-      .filter(Boolean);
+  if (/^[A-Za-z]+$/.test(firstToken)) {
+    return firstToken.toUpperCase();
   }
-  if (/\s{2,}/.test(line)) {
-    return line
-      .split(/\s{2,}/)
-      .map((cell) => cell.trim())
-      .filter(Boolean);
+  if (firstToken.length <= 4) {
+    return firstToken;
   }
-  return [line.trim()].filter(Boolean);
+  return firstToken.slice(0, 4);
 };
 
-const buildHeaderMap = (headers) => {
-  const map = {};
-  headers.forEach((header, index) => {
-    const normalized = normalizeText(header);
-    if (/성명|이름/.test(normalized)) {
-      map.name = index;
-    }
-    if (/성별/.test(normalized)) {
-      map.gender = index;
-    }
-    if (/출생|생년|생월|출신|출산/.test(normalized)) {
-      map.birth = index;
-    }
-    if (/직위|직책|직무|현직/.test(normalized)) {
-      map.title = index;
-    }
-    if (/등기임원|등기여부|등기임원여부|등기/.test(normalized)) {
-      map.registeredStatus = index;
-    }
-    if (/상근|겸임|전임|비상근/.test(normalized)) {
-      map.fullTime = index;
-    }
-    if (/담당|업무|책임/.test(normalized)) {
-      map.duty = index;
-    }
-    if (/경력|이력/.test(normalized)) {
-      map.career = index;
-    }
-    if (/재직|임기|재임/.test(normalized)) {
-      map.tenure = index;
-    }
-    if (/비고|특기사항|참고/.test(normalized)) {
-      map.notes = index;
-    }
-    if (!map.registeredStatus && /구분/.test(normalized)) {
-      map.registeredStatus = index;
-    }
-  });
-  return map;
+const createReportId = (meta) => `${meta.bsnsYear}-${meta.reprtCode}`;
+
+const formatDateTime = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')} ` +
+    `${`${date.getHours()}`.padStart(2, '0')}:${`${date.getMinutes()}`.padStart(2, '0')}`;
 };
 
-const parseTableFromSection = (sectionText) => {
-  if (!sectionText) return [];
-  const lines = cleanLines(sectionText).filter((line) => {
-    if (/^[-=]+$/.test(line)) return false;
-    return true;
-  });
-
-  const rows = [];
-  let headerMap = null;
-  let lastRow = null;
-
-  lines.forEach((line) => {
-    const cells = splitRow(line);
-    if (cells.length === 0) {
-      return;
-    }
-
-    const normalizedCells = cells.map((cell) => normalizeText(cell));
-    const keywordMatches = normalizedCells.filter((cell) =>
-      KEYWORD_CHECKS.some((keyword) => cell.includes(normalizeText(keyword)))
-    ).length;
-
-    if (!headerMap) {
-      if (keywordMatches >= 2) {
-        headerMap = buildHeaderMap(cells);
-      }
-      return;
-    }
-
-    if (keywordMatches >= 2 && normalizedCells.some((cell) => cell.includes(normalizeText('성명')))) {
-      headerMap = buildHeaderMap(cells);
-      lastRow = null;
-      return;
-    }
-
-    if (cells.length === 1) {
-      const extra = cells[0];
-      if (!extra || !lastRow) return;
-      const targetKey = headerMap.career !== undefined ? 'career' : headerMap.duty !== undefined ? 'duty' : 'notes';
-      if (targetKey === 'career') {
-        lastRow.career = lastRow.career ? `${lastRow.career} ${extra}` : extra;
-      } else if (targetKey === 'duty') {
-        lastRow.duty = lastRow.duty ? `${lastRow.duty} ${extra}` : extra;
-      } else {
-        lastRow.notes = lastRow.notes ? `${lastRow.notes} ${extra}` : extra;
-      }
-      lastRow.raw = `${lastRow.raw}\n${extra}`;
-      return;
-    }
-
-    const getValue = (key) => {
-      const index = headerMap[key];
-      if (index === undefined) return '';
-      return (cells[index] || '').trim();
-    };
-
-    const row = {
-      name: getValue('name'),
-      gender: getValue('gender'),
-      birth: getValue('birth'),
-      title: getValue('title'),
-      registeredStatus: getValue('registeredStatus'),
-      fullTime: getValue('fullTime'),
-      duty: getValue('duty'),
-      career: getValue('career'),
-      tenure: getValue('tenure'),
-      notes: getValue('notes'),
-      raw: cells.join(' | '),
-    };
-
-    rows.push(row);
-    lastRow = row;
-  });
-
-  return rows;
+const buildReportLabel = (meta) => {
+  if (!meta) return '';
+  const year = meta.bsnsYear;
+  const label = getReportLabel(meta.reprtCode);
+  return `${year} ${label}`;
 };
 
-const parseExecutivesFromText = (text) => {
-  if (!text) {
-    return {
-      registered: [],
-      unregistered: [],
-      raw: '',
-    };
-  }
-  const mainSection = extractSectionByLabels(text, MAIN_SECTION_LABELS);
-  const source = mainSection || text;
-
-  const registeredSection = extractSectionByLabels(mainSection || text, REGISTERED_SECTION_LABELS, {
-    stopLabels: UNREGISTERED_SECTION_LABELS,
+const computeFolderEntries = (folders) =>
+  Object.entries(folders).map(([name, folder]) => {
+    const companies = folder?.companies ? Object.values(folder.companies) : [];
+    const reportCount = companies.reduce((sum, company) => sum + (company.reports?.length || 0), 0);
+    const updatedAt = companies.reduce((latest, company) => {
+      const candidate = company.updatedAt || latest;
+      if (!latest) return candidate;
+      if (!candidate) return latest;
+      return new Date(candidate) > new Date(latest) ? candidate : latest;
+    }, folder.updatedAt);
+    return { name, companyCount: companies.length, reportCount, updatedAt };
   });
-  const unregisteredSection = extractSectionByLabels(mainSection || text, UNREGISTERED_SECTION_LABELS, {
-    stopLabels: REGISTERED_SECTION_LABELS,
-  });
-
-  return {
-    registered: parseTableFromSection(registeredSection),
-    unregistered: parseTableFromSection(unregisteredSection),
-    raw: source,
-  };
-};
-
-const buildInitialFolders = () => {
-  const base = {};
-  DEFAULT_GROUPS.forEach((group) => {
-    base[group] = {
-      filings: [],
-      createdAt: new Date().toISOString(),
-    };
-  });
-  return base;
-};
-
-const formatDate = (iso) => {
-  if (!iso) return '-';
-  try {
-    const date = new Date(iso);
-    if (Number.isNaN(date.getTime())) return '-';
-    return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')} ${`${date.getHours()}`.padStart(2, '0')}:${`${date.getMinutes()}`.padStart(2, '0')}`;
-  } catch (error) {
-    return '-';
-  }
-};
-
-const makeExecutiveRecords = (entries, { folder, company, filingId, filingName, uploadedAt, category }) =>
-  entries.map((item, index) => ({
-    id: `${filingId}-${category}-${index}`,
-    folder,
-    company,
-    category,
-    name: item.name,
-    gender: item.gender,
-    birth: item.birth,
-    title: item.title,
-    duty: item.duty,
-    registeredStatus: item.registeredStatus || (category === '등기임원' ? '등기' : '미등기'),
-    fullTime: item.fullTime,
-    career: item.career || item.notes,
-    tenure: item.tenure || item.term,
-    notes: item.notes,
-    raw: item.raw,
-    filingName,
-    uploadedAt,
-  }));
 
 export default function GroupDataHub() {
-  const [folders, setFolders] = useState(() => buildInitialFolders());
+  const [companyQuery, setCompanyQuery] = useState('');
+  const [businessYear, setBusinessYear] = useState(String(new Date().getFullYear()));
+  const [reportCode, setReportCode] = useState(REPORT_CODE_OPTIONS[0]?.code || '11011');
+  const [corpCodes, setCorpCodes] = useState([]);
+  const [isFetching, setIsFetching] = useState(false);
+  const [dartMatch, setDartMatch] = useState(null);
+  const [dartResult, setDartResult] = useState(null);
+  const [rawDraft, setRawDraft] = useState('');
+  const [error, setError] = useState('');
+  const [folders, setFolders] = useState({});
   const [activeFolder, setActiveFolder] = useState(null);
   const [globalFilter, setGlobalFilter] = useState('');
-  const [folderFilters, setFolderFilters] = useState({});
-  const [isUploading, setIsUploading] = useState(false);
-  const [isFetchingDart, setIsFetchingDart] = useState(false);
-  const [dartCompany, setDartCompany] = useState('');
-  const [dartYear, setDartYear] = useState(() => String(new Date().getFullYear()));
-  const [dartReportCode, setDartReportCode] = useState(
-    () => REPORT_CODE_OPTIONS.find((option) => option.code === '11012')?.code || REPORT_CODE_OPTIONS[0]?.code || '11011'
-  );
-  const [dartMatchInfo, setDartMatchInfo] = useState(null);
-  const [dartError, setDartError] = useState('');
+  const [activeCompany, setActiveCompany] = useState(null);
+  const [searchText, setSearchText] = useState('');
 
-  const handleFetchFromDart = useCallback(
-    async () => {
-      setDartError('');
-      if (!dartCompany.trim()) {
-        (toast.info?.('회사명을 입력해주세요.') ?? toast('회사명을 입력해주세요.'));
+  const ensureCorpCodes = useCallback(async () => {
+    if (corpCodes.length > 0) return corpCodes;
+    const list = await fetchCorpCodeMap();
+    setCorpCodes(list);
+    return list;
+  }, [corpCodes]);
+
+  const handleFetch = useCallback(async () => {
+    if (!companyQuery.trim()) {
+      (toast.error?.('회사를 입력해 주세요.') ?? toast('회사를 입력해 주세요.'));
+      return;
+    }
+    setIsFetching(true);
+    setError('');
+
+    try {
+      const list = await ensureCorpCodes();
+      const match = findBestCorpMatch(companyQuery, list);
+
+      if (!match) {
+        setDartMatch(null);
+        setDartResult(null);
+        setRawDraft('');
+        setError('Open DART에서 회사를 찾지 못했습니다.');
+        (toast.error?.('Open DART에서 회사를 찾지 못했습니다.') ?? toast('Open DART에서 회사를 찾지 못했습니다.'));
         return;
       }
 
-      const yearNumber = Number.parseInt(dartYear, 10);
-      if (!Number.isFinite(yearNumber)) {
-        (toast.info?.('조회할 사업연도를 숫자로 입력해주세요.') ?? toast('조회할 사업연도를 숫자로 입력해주세요.'));
-        return;
-      }
+      setDartMatch(match);
 
-      setIsFetchingDart(true);
+      const result = await fetchExecutiveStatus({
+        corpCode: match.corpCode,
+        bsnsYear: businessYear,
+        reprtCode: reportCode,
+      });
 
-      try {
-        const corpList = await fetchCorpCodeMap();
-        const match = findBestCorpMatch(dartCompany, corpList);
-        if (!match) {
-          setDartMatchInfo(null);
-          setDartError('회사명을 기반으로 한 매칭 결과를 찾지 못했습니다. 조금 더 정확한 명칭으로 다시 시도해주세요.');
-          (toast.error?.('Open DART에서 회사를 찾지 못했습니다.') ?? toast('Open DART에서 회사를 찾지 못했습니다.'));
-          return;
-        }
+      setDartResult(result);
+      setRawDraft(JSON.stringify(result.raw, null, 2));
+      setError('');
+      (toast.success?.('Open DART에서 데이터를 불러왔습니다.') ?? toast('Open DART에서 데이터를 불러왔습니다.'));
+    } catch (fetchError) {
+      const message = fetchError?.message || 'Open DART 조회에 실패했습니다.';
+      setError(message);
+      setDartResult(null);
+      setRawDraft('');
+      (toast.error?.(message) ?? toast(message));
+    } finally {
+      setIsFetching(false);
+    }
+  }, [companyQuery, ensureCorpCodes, businessYear, reportCode]);
 
-        setDartMatchInfo(match);
+  const handleSave = useCallback(() => {
+    if (!dartResult) {
+      (toast.error?.('저장할 데이터가 없습니다.') ?? toast('저장할 데이터가 없습니다.'));
+      return;
+    }
 
-        const { registered, unregistered, raw, meta } = await fetchExecutiveStatus({
-          corpCode: match.corpCode,
-          bsnsYear: yearNumber,
-          reprtCode: dartReportCode,
-        });
+    const meta = dartResult.meta || {};
+    const corpName = meta.corpName || dartMatch?.corpName || companyQuery.trim();
+    const corpCode = meta.corpCode || dartMatch?.corpCode || '';
+    const folderName = deriveFolderName(corpName);
+    const savedAt = new Date().toISOString();
+    const reportId = createReportId(meta);
 
-        if (registered.length === 0 && unregistered.length === 0) {
-          setDartError('선택한 보고서에서 임원 정보를 찾을 수 없습니다. 다른 보고서 유형이나 연도를 시도해주세요.');
-          (toast.info?.('선택한 보고서에서 임원 목록이 비어 있습니다.') ?? toast('선택한 보고서에서 임원 목록이 비어 있습니다.'));
-          return;
-        }
+    const newReport = {
+      id: reportId,
+      savedAt,
+      meta,
+      raw: dartResult.raw,
+      rawText: rawDraft,
+      registered: dartResult.registered || [],
+      unregistered: dartResult.unregistered || [],
+    };
 
-        const nowIso = new Date().toISOString();
-        const companyName = meta?.corpName || match.corpName || dartCompany.trim();
-        const folder = guessFolderFromCompany(companyName) || companyName || '기타';
-        const folderKey = folder.trim().length > 0 ? folder.trim() : '기타';
-        const filingId = `dart-${match.corpCode}-${meta?.bsnsYear || yearNumber}-${dartReportCode}-${nowIso}`;
-        const filingName = `OpenDART ${companyName} ${meta?.bsnsYear || yearNumber} ${getReportLabel(meta?.reprtCode || dartReportCode)}`;
+    setFolders((prev) => {
+      const prevFolder = prev[folderName] || { name: folderName, companies: {} };
+      const prevCompanies = prevFolder.companies || {};
+      const prevCompany = prevCompanies[corpName] || {
+        corpName,
+        corpCode,
+        reports: [],
+      };
 
-        const filing = {
-          id: filingId,
-          name: filingName,
-          company: companyName,
-          uploadedAt: nowIso,
-          registered,
-          unregistered,
-          raw,
-          source: 'OpenDART API',
-        };
+      const filtered = prevCompany.reports.filter(
+        (report) => !(report.meta?.bsnsYear === meta.bsnsYear && report.meta?.reprtCode === meta.reprtCode)
+      );
 
-        setFolders((prev) => {
-          const next = { ...prev };
-          if (!next[folderKey]) {
-            next[folderKey] = {
-              filings: [],
-              createdAt: new Date().toISOString(),
-              isDynamic: true,
-            };
-          }
-          next[folderKey] = {
-            ...next[folderKey],
-            filings: [filing, ...(next[folderKey]?.filings || [])],
-            lastUpdatedAt: filing.uploadedAt,
-          };
-          return next;
-        });
+      const reports = [newReport, ...filtered].sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
 
-        setActiveFolder(folderKey);
-        setDartError('');
-        setDartCompany(companyName);
-        (toast.success?.('Open DART에서 임원 데이터를 불러왔습니다.') ?? toast('Open DART에서 임원 데이터를 불러왔습니다.'));
-      } catch (error) {
-        console.error(error);
-        const message = error?.message || 'Open DART 조회에 실패했습니다.';
-        setDartError(message);
-        (toast.error?.(message) ?? toast(message));
-      } finally {
-        setIsFetchingDart(false);
-      }
-    },
-    [
-      dartCompany,
-      dartYear,
-      dartReportCode,
-      getReportLabel,
-      fetchCorpCodeMap,
-      findBestCorpMatch,
-      fetchExecutiveStatus,
-    ]
-  );
-
-  const handleFiles = useCallback(
-    async (files) => {
-      if (!files?.length) {
-        (toast.info?.('업로드할 파일을 선택해주세요.') ?? toast('업로드할 파일을 선택해주세요.'));
-        return;
-      }
-      setIsUploading(true);
-      const updates = [];
-
-      for (const file of files) {
-        try {
-          const companyName = extractCompanyNameFromFilename(file.name);
-          const folder = guessFolderFromCompany(companyName) || companyName || '기타';
-          const folderKey = folder.trim().length > 0 ? folder.trim() : '기타';
-
-          // eslint-disable-next-line no-await-in-loop
-          const text = await readFileAsText(file);
-          const parsed = parseExecutivesFromText(String(text || ''));
-          const uploadedAt = new Date().toISOString();
-          const filingId = `${file.name}-${uploadedAt}`;
-
-          updates.push({
-            folder: folderKey,
-            company: companyName,
-            filing: {
-              id: filingId,
-              name: file.name,
-              company: companyName,
-              uploadedAt,
-              registered: parsed.registered,
-              unregistered: parsed.unregistered,
-              raw: parsed.raw,
+      return {
+        ...prev,
+        [folderName]: {
+          name: folderName,
+          updatedAt: savedAt,
+          companies: {
+            ...prevCompanies,
+            [corpName]: {
+              ...prevCompany,
+              corpName,
+              corpCode: prevCompany.corpCode || corpCode,
+              reports,
+              updatedAt: savedAt,
             },
-          });
-        } catch (error) {
-          console.error(error);
-          (toast.error?.(`${file.name} 처리 중 오류가 발생했습니다.`) ?? toast(`${file.name} 처리 중 오류가 발생했습니다.`));
-        }
-      }
-
-      if (updates.length === 0) {
-        setIsUploading(false);
-        return;
-      }
-
-      setFolders((prev) => {
-        const next = { ...prev };
-        updates.forEach(({ folder, filing }) => {
-          if (!next[folder]) {
-            next[folder] = {
-              filings: [],
-              createdAt: new Date().toISOString(),
-              isDynamic: true,
-            };
-          }
-          next[folder] = {
-            ...next[folder],
-            filings: [filing, ...(next[folder]?.filings || [])],
-            lastUpdatedAt: filing.uploadedAt,
-          };
-        });
-        return next;
-      });
-
-      setIsUploading(false);
-      (toast.success?.('공시자료를 불러왔습니다.') ?? toast('공시자료를 불러왔습니다.'));
-    },
-    []
-  );
-
-  const folderEntries = useMemo(() => Object.entries(folders).sort(([a], [b]) => a.localeCompare(b)), [folders]);
-
-  const allExecutives = useMemo(() => {
-    const aggregated = [];
-    folderEntries.forEach(([folder, { filings }]) => {
-      filings.forEach((filing) => {
-        aggregated.push(
-          ...makeExecutiveRecords(filing.registered, {
-            folder,
-            company: filing.company,
-            filingId: filing.id,
-            filingName: filing.name,
-            uploadedAt: filing.uploadedAt,
-            category: '등기임원',
-          })
-        );
-        aggregated.push(
-          ...makeExecutiveRecords(filing.unregistered, {
-            folder,
-            company: filing.company,
-            filingId: filing.id,
-            filingName: filing.name,
-            uploadedAt: filing.uploadedAt,
-            category: '미등기임원',
-          })
-        );
-      });
+          },
+        },
+      };
     });
-    return aggregated;
-  }, [folderEntries]);
 
-  const uniqueJobs = useMemo(() => {
-    const set = new Set();
-    allExecutives.forEach((item) => {
-      if (item.title) set.add(item.title);
-      if (item.duty) set.add(item.duty);
-    });
-    return Array.from(set).filter(Boolean).sort((a, b) => a.localeCompare(b));
-  }, [allExecutives]);
+    setActiveFolder(folderName);
+    setActiveCompany(corpName);
+    (toast.success?.('데이터를 저장했습니다.') ?? toast('데이터를 저장했습니다.'));
+  }, [dartResult, dartMatch, companyQuery, rawDraft]);
 
-  const filteredExecutives = useMemo(() => {
-    if (!globalFilter) return allExecutives;
-    const normalized = globalFilter.replace(/\s+/g, '').toLowerCase();
-    return allExecutives.filter((item) => {
-      const title = (item.title || '').replace(/\s+/g, '').toLowerCase();
-      const duty = (item.duty || '').replace(/\s+/g, '').toLowerCase();
-      return title.includes(normalized) || duty.includes(normalized);
-    });
-  }, [allExecutives, globalFilter]);
-
-  const chartData = useMemo(
-    () =>
-      folderEntries.map(([folder, { filings }]) => {
-        const registeredCount = filings.reduce((sum, filing) => sum + (filing.registered?.length || 0), 0);
-        const unregisteredCount = filings.reduce((sum, filing) => sum + (filing.unregistered?.length || 0), 0);
-        return {
-          name: folder,
-          등록임원: registeredCount,
-          미등기임원: unregisteredCount,
-          총계: registeredCount + unregisteredCount,
-        };
-      }),
-    [folderEntries]
-  );
-
-  const activeFolderFilter = activeFolder ? folderFilters[activeFolder] || '' : '';
-
-  const activeFolderExecutives = useMemo(() => {
-    if (!activeFolder) return [];
-    const folder = folders[activeFolder];
-    if (!folder) return [];
-    const within = [];
-    folder.filings.forEach((filing) => {
-      within.push(
-        ...makeExecutiveRecords(filing.registered, {
-          folder: activeFolder,
-          company: filing.company,
-          filingId: filing.id,
-          filingName: filing.name,
-          uploadedAt: filing.uploadedAt,
-          category: '등기임원',
-        })
-      );
-      within.push(
-        ...makeExecutiveRecords(filing.unregistered, {
-          folder: activeFolder,
-          company: filing.company,
-          filingId: filing.id,
-          filingName: filing.name,
-          uploadedAt: filing.uploadedAt,
-          category: '미등기임원',
-        })
-      );
-    });
-    if (!activeFolderFilter) return within;
-    const normalized = activeFolderFilter.replace(/\s+/g, '').toLowerCase();
-    return within.filter((item) => {
-      const title = (item.title || '').replace(/\s+/g, '').toLowerCase();
-      const duty = (item.duty || '').replace(/\s+/g, '').toLowerCase();
-      return title.includes(normalized) || duty.includes(normalized);
-    });
-  }, [activeFolder, activeFolderFilter, folders]);
-
-  const handleFolderFilterChange = (value) => {
-    if (!activeFolder) return;
-    setFolderFilters((prev) => ({
-      ...prev,
-      [activeFolder]: value,
-    }));
+  const handleResetSearch = () => {
+    setCompanyQuery('');
+    setBusinessYear(String(new Date().getFullYear()));
+    setReportCode(REPORT_CODE_OPTIONS[0]?.code || '11011');
+    setDartMatch(null);
+    setDartResult(null);
+    setRawDraft('');
+    setError('');
   };
 
-  const renderExecutiveTable = (rows, emptyLabel) => (
-    <div className="overflow-x-auto rounded-xl border border-slate-200">
-      <table className="min-w-full divide-y divide-slate-200 text-sm">
-        <thead className="bg-slate-50">
-          <tr>
-            <th className="px-3 py-2 text-left font-medium text-slate-600">그룹</th>
-            <th className="px-3 py-2 text-left font-medium text-slate-600">기업</th>
-            <th className="px-3 py-2 text-left font-medium text-slate-600">구분</th>
-            <th className="px-3 py-2 text-left font-medium text-slate-600">성명</th>
-            <th className="px-3 py-2 text-left font-medium text-slate-600">성별</th>
-            <th className="px-3 py-2 text-left font-medium text-slate-600">출생년월</th>
-            <th className="px-3 py-2 text-left font-medium text-slate-600">직위</th>
-            <th className="px-3 py-2 text-left font-medium text-slate-600">등기임원여부</th>
-            <th className="px-3 py-2 text-left font-medium text-slate-600">상근여부</th>
-            <th className="px-3 py-2 text-left font-medium text-slate-600">담당업무</th>
-            <th className="px-3 py-2 text-left font-medium text-slate-600">주요경력</th>
-            <th className="px-3 py-2 text-left font-medium text-slate-600">재직기간</th>
-            <th className="px-3 py-2 text-left font-medium text-slate-600">업데이트</th>
-            <th className="px-3 py-2 text-left font-medium text-slate-600">출처</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={14} className="px-3 py-6 text-center text-slate-400">
-                {emptyLabel}
-              </td>
-            </tr>
-          ) : (
-            rows.map((row) => (
-              <tr key={row.id} className="hover:bg-slate-50/80">
-                <td className="px-3 py-2 text-slate-600">{row.folder}</td>
-                <td className="px-3 py-2 text-slate-600">{row.company}</td>
-                <td className="px-3 py-2 text-slate-600">{row.category}</td>
-                <td className="px-3 py-2 text-slate-900 font-medium">{row.name}</td>
-                <td className="px-3 py-2 text-slate-600">{row.gender || '-'}</td>
-                <td className="px-3 py-2 text-slate-600">{row.birth || '-'}</td>
-                <td className="px-3 py-2 text-slate-600">{row.title || '-'}</td>
-                <td className="px-3 py-2 text-slate-600">{row.registeredStatus || '-'}</td>
-                <td className="px-3 py-2 text-slate-600">{row.fullTime || '-'}</td>
-                <td className="px-3 py-2 text-slate-600">{row.duty || '-'}</td>
-                <td className="px-3 py-2 text-slate-600">{row.career || '-'}</td>
-                <td className="px-3 py-2 text-slate-600">{row.tenure || '-'}</td>
-                <td className="px-3 py-2 text-slate-500 text-xs">{formatDate(row.uploadedAt)}</td>
-                <td className="px-3 py-2 text-slate-500 text-xs">{row.filingName}</td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
+  const handleClearStorage = () => {
+    setFolders({});
+    setActiveFolder(null);
+    setActiveCompany(null);
+    (toast.success?.('저장된 그룹사 데이터를 모두 삭제했습니다.') ?? toast('저장된 그룹사 데이터를 모두 삭제했습니다.'));
+  };
+
+  const folderEntries = useMemo(() => {
+    const entries = computeFolderEntries(folders);
+    return entries.sort((a, b) => {
+      if (!a.updatedAt && !b.updatedAt) return a.name.localeCompare(b.name);
+      if (!a.updatedAt) return 1;
+      if (!b.updatedAt) return -1;
+      return new Date(b.updatedAt) - new Date(a.updatedAt);
+    });
+  }, [folders]);
+
+  const activeFolderData = activeFolder ? folders[activeFolder] : null;
+
+  const companyEntries = useMemo(() => {
+    if (!activeFolderData?.companies) return [];
+    const entries = Object.entries(activeFolderData.companies).map(([corpName, company]) => ({
+      corpName,
+      corpCode: company.corpCode,
+      reports: company.reports || [],
+      updatedAt: company.updatedAt,
+    }));
+    return entries.sort((a, b) => {
+      if (!a.updatedAt && !b.updatedAt) return a.corpName.localeCompare(b.corpName);
+      if (!a.updatedAt) return 1;
+      if (!b.updatedAt) return -1;
+      return new Date(b.updatedAt) - new Date(a.updatedAt);
+    });
+  }, [activeFolderData]);
+
+  const activeCompanyData = activeCompany ? activeFolderData?.companies?.[activeCompany] : null;
+
+  const executiveRows = useMemo(() => {
+    if (!activeCompanyData) return [];
+    const rows = activeCompanyData.reports.flatMap((report) => {
+      const reportLabel = buildReportLabel(report.meta);
+      const registeredRows = (report.registered || []).map((entry, index) => ({
+        id: `${report.id}-R-${index}`,
+        reportLabel,
+        savedAt: report.savedAt,
+        category: '등기',
+        ...entry,
+      }));
+      const unregisteredRows = (report.unregistered || []).map((entry, index) => ({
+        id: `${report.id}-U-${index}`,
+        reportLabel,
+        savedAt: report.savedAt,
+        category: entry.registeredStatus || '미등기',
+        ...entry,
+      }));
+      return [...registeredRows, ...unregisteredRows];
+    });
+
+    if (!searchText.trim()) return rows;
+    const needle = searchText.trim().toLowerCase();
+    return rows.filter((row) => {
+      const haystack = [row.name, row.title, row.duty, row.reportLabel, row.category]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [activeCompanyData, searchText]);
 
   return (
     <div className="space-y-10">
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="text-xl font-semibold text-slate-900">그룹사 임원 데이터 허브</h2>
+            <h2 className="text-xl font-semibold text-slate-900">그룹사 데이터 허브</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Open DART API 연동과 공시자료 업로드를 통해 그룹사 임원 현황을 빠르게 수집하고 정리하세요.
+              Open DART에서 임원 데이터를 불러와 그룹사/계열사 단위로 정리하고 저장하세요.
             </p>
           </div>
-          <Btn
-            variant="ghost"
-            size="sm"
-            className="self-start md:self-auto"
-            onClick={() => {
-              setFolders(buildInitialFolders());
-              setActiveFolder(null);
-              setGlobalFilter('');
-              setFolderFilters({});
-              setDartMatchInfo(null);
-              setDartError('');
-            }}
-            title="초기화"
-          >
-            <RefreshCw className="mr-2 h-4 w-4" /> 초기화
-          </Btn>
+          <div className="flex gap-2">
+            <Btn variant="ghost" size="sm" onClick={handleResetSearch}>
+              <RefreshCw className="mr-2 h-4 w-4" /> 조회 초기화
+            </Btn>
+            <Btn variant="ghost" size="sm" onClick={handleClearStorage}>
+              <Archive className="mr-2 h-4 w-4" /> 저장 데이터 삭제
+            </Btn>
+          </div>
         </div>
 
-        <div className="mt-6 grid gap-4 lg:grid-cols-2">
-          <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+        <div className="mt-6 grid gap-6 lg:grid-cols-[1.2fr_1fr]">
+          <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/70 p-5">
             <div className="flex items-center gap-2 text-slate-700">
               <Download className="h-5 w-5" />
               <span className="text-base font-semibold">Open DART API에서 불러오기</span>
             </div>
-            <p className="text-xs text-slate-500">
-              회사명을 입력하면 corpCode.xml 캐시를 통해 고유번호를 찾고, exctvSttus API로 임원 리스트를 가져옵니다. API 키는
-              <code className="rounded bg-white/70 px-1">OPENDART_API_KEY</code>
-              환경변수로 Netlify Functions에 설정되어 있어야 합니다.
-            </p>
-            <div className="grid gap-3 md:grid-cols-3">
-              <label className="md:col-span-2">
-                <span className="text-xs font-medium text-slate-600">회사명</span>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-sm font-medium text-slate-600">
+                회사명 검색
                 <input
                   type="text"
-                  value={dartCompany}
-                  onChange={(event) => setDartCompany(event.target.value)}
-                  placeholder="예: 삼성전자"
+                  value={companyQuery}
+                  onChange={(event) => setCompanyQuery(event.target.value)}
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
-                />
+                  placeholder="예: SK텔레콤"                />
               </label>
-              <label>
-                <span className="text-xs font-medium text-slate-600">사업연도</span>
+              <label className="text-sm font-medium text-slate-600">
+                사업연도
                 <input
                   type="number"
+                  value={businessYear}
+                  onChange={(event) => setBusinessYear(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
                   min="2000"
                   max="2100"
-                  value={dartYear}
-                  onChange={(event) => setDartYear(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
                 />
               </label>
-              <label>
-                <span className="text-xs font-medium text-slate-600">보고서 유형</span>
+              <label className="text-sm font-medium text-slate-600">
+                보고서 유형
                 <select
-                  value={dartReportCode}
-                  onChange={(event) => setDartReportCode(event.target.value)}
+                  value={reportCode}
+                  onChange={(event) => setReportCode(event.target.value)}
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
                 >
                   {REPORT_CODE_OPTIONS.map((option) => (
@@ -811,259 +375,246 @@ export default function GroupDataHub() {
                 </select>
               </label>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-h-[20px] text-xs text-slate-500">
-                {dartMatchInfo && (
-                  <span>
-                    매칭된 회사: <strong>{dartMatchInfo.corpName}</strong> (corp_code: {dartMatchInfo.corpCode}
-                    {dartMatchInfo.score && dartMatchInfo.score < 0.9
-                      ? ` · 유사도 ${(dartMatchInfo.score * 100).toFixed(0)}%`
-                      : ''}
-                    )
-                  </span>
-                )}
-              </div>
-              <Btn onClick={handleFetchFromDart} disabled={isFetchingDart} size="sm">
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Btn variant="primary" size="sm" onClick={handleFetch} disabled={isFetching}>
                 <Download className="mr-2 h-4 w-4" />
-                {isFetchingDart ? '불러오는 중...' : 'Open DART 불러오기'}
+                {isFetching ? '불러오는 중...' : 'Open DART 조회'}
               </Btn>
-            </div>
-            {dartError && (
-              <p className="flex items-start gap-1 text-xs text-rose-500">
-                <AlertCircle className="mt-[2px] h-3.5 w-3.5" />
-                <span>{dartError}</span>
-              </p>
-            )}
-          </div>
-
-          <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
-            <div className="flex items-center gap-2 text-slate-700">
-              <FileText className="h-5 w-5" />
-              <span className="text-base font-semibold">공시자료 파일 업로드</span>
-            </div>
-            <p className="text-xs text-slate-500">
-              기존에 수집한 PDF, 텍스트 등에서 임원 표를 추출하려면 파일을 업로드하세요. 업로드된 자료는 브라우저 메모리에만 저장됩니다.
-            </p>
-            <label className="relative flex w-full flex-col items-start gap-2">
-              <span className="text-xs font-medium text-slate-600">파일 선택</span>
-              <input
-                type="file"
-                accept=".txt,.csv,.pdf,.html,.xlsx,.xls"
-                multiple
-                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                onChange={(event) => {
-                  const fileList = event.target.files;
-                  if (!fileList) return;
-                  handleFiles(Array.from(fileList));
-                  event.target.value = '';
-                }}
-              />
-              <Btn disabled={isUploading} variant="outline" size="sm">
-                <UploadCloud className="mr-2 h-4 w-4" />
-                {isUploading ? '불러오는 중...' : '파일 업로드'}
+              <Btn variant="secondary" size="sm" onClick={handleSave} disabled={!dartResult}>
+                <Save className="mr-2 h-4 w-4" /> 데이터 저장
               </Btn>
-            </label>
-            <p className="text-xs text-slate-400">지원 확장자: txt, csv, pdf, html, xlsx, xls</p>
-          </div>
-        </div>
-        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
-            <p className="text-sm font-medium text-slate-500">총 등록 임원</p>
-            <p className="mt-2 text-2xl font-semibold text-slate-900">
-              {allExecutives.filter((item) => item.category === '등기임원').length}
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
-            <p className="text-sm font-medium text-slate-500">총 미등기 임원</p>
-            <p className="mt-2 text-2xl font-semibold text-slate-900">
-              {allExecutives.filter((item) => item.category === '미등기임원').length}
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
-            <p className="text-sm font-medium text-slate-500">그룹사 수</p>
-            <p className="mt-2 text-2xl font-semibold text-slate-900">{folderEntries.length}</p>
-          </div>
-          <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
-            <p className="text-sm font-medium text-slate-500">최근 업데이트</p>
-            <p className="mt-2 text-sm text-slate-700">
-              {formatDate(
-                folderEntries.reduce((latest, [, value]) => {
-                  const candidate = value.lastUpdatedAt;
-                  if (!candidate) return latest;
-                  if (!latest) return candidate;
-                  return new Date(candidate) > new Date(latest) ? candidate : latest;
-                }, null)
+              {dartMatch && (
+                <Badge tone="info" className="flex items-center gap-1">
+                  <Layers className="h-3 w-3" /> {dartMatch.corpName}
+                </Badge>
               )}
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900">직무별 전체 필터링</h3>
-            <p className="mt-1 text-sm text-slate-500">
-              상위 10개 그룹사에 업로드된 모든 임원 데이터를 대상으로 원하는 직무를 빠르게 검색하세요.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <FilterIcon className="h-4 w-4 text-slate-400" />
-            <select
-              value={globalFilter}
-              onChange={(event) => setGlobalFilter(event.target.value)}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
-            >
-              <option value="">전체 보기</option>
-              {uniqueJobs.map((job) => (
-                <option key={job} value={job}>
-                  {job}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="mt-4">
-          {renderExecutiveTable(filteredExecutives, '조건에 맞는 임원 데이터가 없습니다.')}
-        </div>
-      </section>
-
-      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900">그룹사별 업로드 현황</h3>
-            <p className="mt-1 text-sm text-slate-500">각 폴더별로 등록된 임원 수를 한눈에 확인하세요.</p>
-          </div>
-          <Badge tone="info" className="flex items-center gap-1">
-            <Info className="h-4 w-4" />
-            그래프에 마우스를 올려 세부 정보를 확인하세요.
-          </Badge>
-        </div>
-        <div className="mt-6 h-72 w-full">
-          {chartData.every((item) => item.총계 === 0) ? (
-            <div className="flex h-full w-full items-center justify-center rounded-xl border border-dashed border-slate-200 text-sm text-slate-400">
-              아직 업로드된 공시자료가 없습니다.
+              {dartResult?.meta?.corpCode && (
+                <Badge tone="neutral">corp_code: {dartResult.meta.corpCode}</Badge>
+              )}
             </div>
-          ) : (
-            <ResponsiveContainer>
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#CBD5F5" />
-                <XAxis dataKey="name" stroke="#64748B" />
-                <YAxis stroke="#64748B" allowDecimals={false} />
-                <Tooltip formatter={(value) => `${value}명`} cursor={{ fill: 'rgba(148, 163, 184, 0.12)' }} />
-                <Legend />
-                <Bar dataKey="등록임원" stackId="a" fill="#6366F1" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="미등기임원" stackId="a" fill="#22D3EE" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
+
+            {error && (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>
+            )}
+
+            <div>
+              <label className="text-sm font-medium text-slate-600">불러온 원본 데이터</label>
+              <textarea
+                value={rawDraft}
+                onChange={(event) => setRawDraft(event.target.value)}
+                rows={12}
+                className="mt-2 w-full rounded-lg border border-slate-200 bg-white font-mono text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                placeholder="Open DART 응답이 여기에 표시됩니다."
+              />
+            </div>
+          </div>
+
+          <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5">
+            <div className="flex items-center gap-2 text-slate-700">
+              <FolderIcon className="h-5 w-5" />
+              <span className="text-base font-semibold">저장 미리보기</span>
+            </div>
+            <div className="rounded-lg border border-slate-100 bg-slate-50/70 p-4 text-sm text-slate-600">
+              <p className="font-medium text-slate-700">폴더 대상</p>
+              <p className="mt-1 text-xs text-slate-500">
+                회사명에 포함된 대표 키워드를 기준으로 같은 계열사/자회사가 하나의 폴더에 정리됩니다. 예: SK텔레콤 → SK 폴더.
+              </p>
+              {dartResult && (
+                <ul className="mt-3 space-y-2 text-xs">
+                  <li>
+                    <span className="font-semibold text-slate-700">폴더</span>: {deriveFolderName(dartResult.meta?.corpName || dartMatch?.corpName || companyQuery)}
+                  </li>
+                  <li>
+                    <span className="font-semibold text-slate-700">기업명</span>: {dartResult.meta?.corpName || dartMatch?.corpName || companyQuery || '-'}
+                  </li>
+                  <li>
+                    <span className="font-semibold text-slate-700">저장 예정 보고서</span>: {buildReportLabel(dartResult.meta) || '-'}
+                  </li>
+                </ul>
+              )}
+            </div>
+            <div className="rounded-lg border border-slate-100 bg-white p-4 text-xs text-slate-500">
+              <p className="font-medium text-slate-600">저장 시 포함 항목</p>
+              <ul className="mt-2 list-disc space-y-1 pl-4">
+                <li>Open DART API에서 내려온 원본 JSON 전체</li>
+                <li>등기/미등기 임원 구분 및 기본 프로필 정보</li>
+                <li>저장 일시와 보고서 유형 메타데이터</li>
+              </ul>
+            </div>
+          </div>
         </div>
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-2">
-          <h3 className="text-lg font-semibold text-slate-900">그룹사 폴더</h3>
+          <h3 className="text-lg font-semibold text-slate-900">그룹사별 저장 현황</h3>
           <p className="text-sm text-slate-500">
-            폴더를 선택하면 해당 그룹사의 공시자료 업로드 및 임원 현황을 관리할 수 있습니다.
+            저장된 데이터를 그룹 폴더 → 회사 → 보고서 순으로 탐색하고 원하는 임원 정보를 검색하세요.
           </p>
         </div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {folderEntries.map(([folderName, value]) => {
-            const latest = value.filings[0];
-            const registeredCount = value.filings.reduce((sum, filing) => sum + (filing.registered?.length || 0), 0);
-            const unregisteredCount = value.filings.reduce((sum, filing) => sum + (filing.unregistered?.length || 0), 0);
-            return (
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {folderEntries.length === 0 ? (
+            <div className="col-span-full rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-6 text-center text-sm text-slate-500">
+              아직 저장된 그룹사 데이터가 없습니다. Open DART에서 데이터를 불러와 저장해 보세요.
+            </div>
+          ) : (
+            folderEntries.map((folder) => (
               <button
-                key={folderName}
+                key={folder.name}
                 type="button"
-                onClick={() => setActiveFolder(folderName)}
+                onClick={() => {
+                  setActiveFolder(folder.name);
+                  setActiveCompany(null);
+                }}
                 className={`flex w-full flex-col rounded-xl border px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-50 ${
-                  activeFolder === folderName ? 'border-slate-400 bg-slate-50' : 'border-slate-200 bg-white'
+                  activeFolder === folder.name ? 'border-slate-400 bg-slate-50' : 'border-slate-200 bg-white'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-slate-700">
                     <FolderIcon className="h-5 w-5" />
-                    <span className="text-base font-semibold">{folderName}</span>
+                    <span className="text-base font-semibold">{folder.name}</span>
                   </div>
                   <ChevronRight className="h-4 w-4 text-slate-400" />
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                  <Badge tone="neutral">등록 {registeredCount}</Badge>
-                  <Badge tone="info">미등기 {unregisteredCount}</Badge>
-                  {latest ? (
-                    <Badge tone="warning">최근 {formatDate(latest.uploadedAt)}</Badge>
+                  <Badge tone="neutral">기업 {folder.companyCount}</Badge>
+                  <Badge tone="info">보고서 {folder.reportCount}</Badge>
+                  {folder.updatedAt ? (
+                    <Badge tone="warning">업데이트 {formatDateTime(folder.updatedAt)}</Badge>
                   ) : (
-                    <Badge tone="neutral">자료 없음</Badge>
+                    <Badge tone="neutral">업데이트 정보 없음</Badge>
                   )}
                 </div>
               </button>
-            );
-          })}
+            ))
+          )}
         </div>
 
         {activeFolder && (
           <div className="mt-8 space-y-6 rounded-2xl border border-slate-200 bg-slate-50/60 p-6">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div>
-                <h4 className="text-lg font-semibold text-slate-900">{activeFolder} 폴더 관리</h4>
-                <p className="mt-1 text-sm text-slate-500">
-                  공시자료 업로드 시 파일명 첫 괄호 안 기업명을 기준으로 폴더가 자동 분류됩니다.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="relative">
-                  <span className="sr-only">{activeFolder} 공시자료 업로드</span>
-                  <input
-                    type="file"
-                    accept=".txt,.csv,.pdf,.html,.xlsx,.xls"
-                    multiple
-                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                    onChange={(event) => {
-                      const fileList = event.target.files;
-                      if (!fileList) return;
-                      handleFiles(Array.from(fileList));
-                      event.target.value = '';
-                    }}
-                  />
-                  <Btn disabled={isUploading} variant="primary" size="sm">
-                    <UploadCloud className="mr-2 h-4 w-4" />
-                    {isUploading ? '불러오는 중...' : '자료 추가'}
-                  </Btn>
-                </label>
-                <Btn variant="ghost" size="sm" onClick={() => setActiveFolder(null)}>
-                  닫기
-                </Btn>
-              </div>
-            </div>
-            <div className="rounded-xl border border-dashed border-slate-300 bg-white/60 p-4 text-sm text-slate-500">
-              파일명 예시: <Badge tone="neutral">(삼성전자)2023사업보고서.pdf</Badge> → 자동으로 <strong>{activeFolder}</strong>{' '}
-              폴더에 분류됩니다.
+            <div className="flex flex-col gap-2">
+              <h4 className="text-lg font-semibold text-slate-900">{activeFolder} 폴더</h4>
+              <p className="text-sm text-slate-500">계열사로 묶인 기업 목록입니다. 회사를 선택하면 저장된 보고서를 확인할 수 있습니다.</p>
             </div>
 
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="flex items-center gap-2 text-sm text-slate-600">
-                <FileText className="h-4 w-4" />
-                총 {folders[activeFolder]?.filings.length || 0}개의 공시자료
-              </div>
-              <div className="flex items-center gap-2">
-                <FilterIcon className="h-4 w-4 text-slate-400" />
-                <select
-                  value={activeFolderFilter}
-                  onChange={(event) => handleFolderFilterChange(event.target.value)}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
-                >
-                  <option value="">전체 보기</option>
-                  {uniqueJobs.map((job) => (
-                    <option key={job} value={job}>
-                      {job}
-                    </option>
+            <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+              {companyEntries.length === 0 ? (
+                <div className="col-span-full rounded-xl border border-dashed border-slate-200 bg-white/70 p-6 text-center text-sm text-slate-500">
+                  아직 {activeFolder} 폴더에 저장된 회사가 없습니다.
+                </div>
+              ) : (
+                companyEntries.map((company) => (
+                  <button
+                    key={company.corpName}
+                    type="button"
+                    onClick={() => setActiveCompany(company.corpName)}
+                    className={`flex w-full flex-col rounded-xl border px-4 py-3 text-left transition hover:border-slate-300 hover:bg-white ${
+                      activeCompany === company.corpName ? 'border-slate-400 bg-white' : 'border-slate-200 bg-slate-100/80'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <FileText className="h-4 w-4" />
+                        <span className="text-sm font-semibold">{company.corpName}</span>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-slate-400" />
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                      {company.corpCode && <Badge tone="neutral">{company.corpCode}</Badge>}
+                      <Badge tone="info">보고서 {company.reports.length}</Badge>
+                      {company.updatedAt && <Badge tone="warning">저장 {formatDateTime(company.updatedAt)}</Badge>}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+
+            {activeCompany && (
+              <div className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <h5 className="text-lg font-semibold text-slate-900">{activeCompany}</h5>
+                    <p className="text-sm text-slate-500">
+                      저장된 보고서를 기준으로 임원 데이터를 조회하고 원본 JSON을 확인할 수 있습니다.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                      <Search className="h-4 w-4" />
+                      <input
+                        type="text"
+                        value={searchText}
+                        onChange={(event) => setSearchText(event.target.value)}
+                        placeholder="임원 검색"
+                        className="bg-transparent text-sm focus:outline-none"
+                      />
+                    </div>
+                    <Btn variant="ghost" size="sm" onClick={() => setSearchText('')}>
+                      초기화
+                    </Btn>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="min-w-full divide-y divide-slate-200 text-xs">
+                    <thead className="bg-slate-50 text-slate-600">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">보고서</th>
+                        <th className="px-3 py-2 text-left font-medium">구분</th>
+                        <th className="px-3 py-2 text-left font-medium">성명</th>
+                        <th className="px-3 py-2 text-left font-medium">직위</th>
+                        <th className="px-3 py-2 text-left font-medium">담당업무</th>
+                        <th className="px-3 py-2 text-left font-medium">등기</th>
+                        <th className="px-3 py-2 text-left font-medium">상근</th>
+                        <th className="px-3 py-2 text-left font-medium">저장일</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-600">
+                      {executiveRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
+                            저장된 임원 정보가 없거나 검색 조건과 일치하는 항목이 없습니다.
+                          </td>
+                        </tr>
+                      ) : (
+                        executiveRows.map((row) => (
+                          <tr key={row.id} className="hover:bg-slate-50">
+                            <td className="px-3 py-2 text-slate-700">{row.reportLabel}</td>
+                            <td className="px-3 py-2">{row.category}</td>
+                            <td className="px-3 py-2 font-medium text-slate-800">{row.name || '-'}</td>
+                            <td className="px-3 py-2">{row.title || '-'}</td>
+                            <td className="px-3 py-2">{row.duty || '-'}</td>
+                            <td className="px-3 py-2">{row.registeredStatus || '-'}</td>
+                            <td className="px-3 py-2">{row.fullTime || '-'}</td>
+                            <td className="px-3 py-2 text-xs text-slate-400">{formatDateTime(row.savedAt)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="space-y-3">
+                  <h6 className="text-sm font-semibold text-slate-700">보고서별 원본 데이터</h6>
+                  {activeCompanyData?.reports?.map((report) => (
+                    <details key={report.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                      <summary className="flex cursor-pointer items-center justify-between text-sm font-medium text-slate-700">
+                        <span>
+                          {buildReportLabel(report.meta)} · 저장 {formatDateTime(report.savedAt)} · 등기 {report.registered.length} / 미등기 {report.unregistered.length}
+                        </span>
+                        <ChevronRight className="h-4 w-4 text-slate-400" />
+                      </summary>
+                      <pre className="mt-3 max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white p-3 text-[11px] leading-relaxed text-slate-700">
+                        {report.rawText || JSON.stringify(report.raw, null, 2)}
+                      </pre>
+                    </details>
                   ))}
-                </select>
+                </div>
               </div>
-            </div>
-
-            <div>{renderExecutiveTable(activeFolderExecutives, `${activeFolder} 폴더에 아직 정리된 임원 데이터가 없습니다.`)}</div>
+            )}
           </div>
         )}
       </section>
