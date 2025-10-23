@@ -73,25 +73,121 @@ function dateTokensForRecord(date, timeZone = DEFAULT_TIME_ZONE) {
   const yearShort = yearFull.slice(-2);
   const month = parts.month;
   const day = parts.day;
-  const formats = [
-    `${yearFull}.${month}.${day}`,
-    `${yearShort}.${month}.${day}`,
-    `${yearFull}-${month}-${day}`,
-    `${yearShort}-${month}-${day}`,
-  ];
-  return formats.flatMap((fmt) => [fmt, `(${fmt})`]);
+  const monthNoPad = String(Number.parseInt(month, 10));
+  const dayNoPad = String(Number.parseInt(day, 10));
+
+  const candidates = new Set();
+  const addToken = (token) => {
+    if (!token) return;
+    candidates.add(token);
+    candidates.add(`(${token})`);
+    candidates.add(`[${token}]`);
+  };
+
+  const yearVariants = [yearFull, yearShort];
+  const monthVariants = [month, monthNoPad];
+  const dayVariants = [day, dayNoPad];
+
+  yearVariants.forEach((year) => {
+    monthVariants.forEach((monthPart) => {
+      dayVariants.forEach((dayPart) => {
+        addToken(`${year}.${monthPart}.${dayPart}`);
+        addToken(`${year}-${monthPart}-${dayPart}`);
+        addToken(`${year}/${monthPart}/${dayPart}`);
+        addToken(`${year}년${monthPart}월${dayPart}일`);
+        addToken(`${year}년 ${monthPart}월 ${dayPart}일`);
+      });
+    });
+  });
+
+  monthVariants.forEach((monthPart) => {
+    dayVariants.forEach((dayPart) => {
+      addToken(`${monthPart}.${dayPart}`);
+      addToken(`${monthPart}-${dayPart}`);
+      addToken(`${monthPart}/${dayPart}`);
+      addToken(`${monthPart}월${dayPart}일`);
+      addToken(`${monthPart}월 ${dayPart}일`);
+    });
+  });
+
+  return Array.from(candidates);
+}
+
+function compactString(text) {
+  return (text || '').replace(/\s+/g, '');
 }
 
 function findMeetingLinesForDate(meetingRecord, date, timeZone = DEFAULT_TIME_ZONE) {
   if (!meetingRecord) return [];
-  const tokens = dateTokensForRecord(date, timeZone);
+  const tokens = dateTokensForRecord(date, timeZone).map((token) => ({
+    raw: token,
+    compact: compactString(token),
+  }));
+  if (!tokens.length) return [];
+
   const normalized = normaliseMultiline(meetingRecord);
   const lines = normalized
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
 
-  return lines.filter((line) => tokens.some((token) => line.includes(token)));
+  return lines.filter((line) => {
+    const compactLine = compactString(line);
+    return tokens.some((token) =>
+      line.includes(token.raw) || compactLine.includes(token.compact)
+    );
+  });
+}
+
+function isSameDateInTimeZone(a, b, timeZone = DEFAULT_TIME_ZONE) {
+  if (!(a instanceof Date) || !(b instanceof Date)) return false;
+  const aParts = toTimeZoneParts(a, timeZone);
+  const bParts = toTimeZoneParts(b, timeZone);
+  return aParts.year === bParts.year && aParts.month === bParts.month && aParts.day === bParts.day;
+}
+
+function getLocalTimeParts(date, timeZone = DEFAULT_TIME_ZONE) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = formatter
+    .formatToParts(date)
+    .reduce((acc, part) => ({ ...acc, [part.type]: part.value }), {});
+  const hour = Number.parseInt(parts.hour ?? '0', 10);
+  const minute = Number.parseInt(parts.minute ?? '0', 10);
+  return {
+    hour: Number.isFinite(hour) ? hour : 0,
+    minute: Number.isFinite(minute) ? minute : 0,
+  };
+}
+
+function buildFallbackMeetingLines(profile, targetDate, timeZone = DEFAULT_TIME_ZONE) {
+  if (!profile?.eventDate) return [];
+  const eventDate = new Date(profile.eventDate);
+  if (Number.isNaN(eventDate.getTime())) return [];
+  if (!isSameDateInTimeZone(eventDate, targetDate, timeZone)) return [];
+
+  const dateFormatter = new Intl.DateTimeFormat('ko-KR', {
+    timeZone,
+    month: 'long',
+    day: 'numeric',
+    weekday: 'short',
+  });
+  const { hour, minute } = getLocalTimeParts(eventDate, timeZone);
+  let timeLabel = '';
+  if (hour !== 0 || minute !== 0) {
+    timeLabel = new Intl.DateTimeFormat('ko-KR', {
+      timeZone,
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(eventDate);
+  }
+  const dateLabel = dateFormatter.format(eventDate);
+  const scheduleLabel = timeLabel ? `${dateLabel} ${timeLabel}` : dateLabel;
+  return [`일정: ${scheduleLabel}`];
 }
 
 function buildMeetingReminderMessage(
@@ -118,11 +214,14 @@ function buildMeetingReminderMessages(
 ) {
   if (!Array.isArray(profiles)) return [];
   return profiles.reduce((acc, profile) => {
-    const lines = findMeetingLinesForDate(profile?.meetingRecord, date, timeZone);
+    let lines = findMeetingLinesForDate(profile?.meetingRecord, date, timeZone);
+    if (!lines.length) {
+      lines = buildFallbackMeetingLines(profile, date, timeZone);
+    }
     if (!lines.length) return acc;
     const shareUrl = typeof shareUrlBuilder === 'function' ? shareUrlBuilder(profile) : undefined;
     const text = buildMeetingReminderMessage(profile, lines, { shareUrl, title, maxLength });
-    if (text) acc.push({ profile, text, lines });
+    if (text) acc.push({ profile, text, lines, shareUrl });
     return acc;
   }, []);
 }
