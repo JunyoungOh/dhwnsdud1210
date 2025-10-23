@@ -16,7 +16,11 @@ export async function handler(event) {
     if (!KEY) return json(500, { error: 'Missing env OPENDART_API_KEY' })
     if (event.httpMethod !== 'POST') return json(405, { error: 'POST only' }, { Allow: 'POST' })
 
-    const { action, params } = JSON.parse(event.body || '{}')
+    const parsedBody = JSON.parse(event.body || '{}')
+    const { action } = parsedBody || {}
+    const params = parsedBody?.params || {}
+    const payload = parsedBody?.payload || {}
+    const input = Object.keys(params).length ? params : payload
 
     if (action === 'corpCode') {
       const now = Date.now()
@@ -53,7 +57,9 @@ export async function handler(event) {
     }
 
     if (action === 'executives' || action === 'exctvSttus') {
-      const { corp_code, bsns_year, reprt_code } = params || {}
+      const corp_code = input?.corp_code || input?.corpCode
+      const bsns_year = input?.bsns_year || input?.bsnsYear
+      const reprt_code = input?.reprt_code || input?.reprtCode
       if (!corp_code || !bsns_year || !reprt_code) {
         return json(400, { error: 'corp_code, bsns_year, reprt_code are required' })
       }
@@ -63,13 +69,13 @@ export async function handler(event) {
       u.searchParams.set('bsns_year', String(bsns_year))
       u.searchParams.set('reprt_code', String(reprt_code))
 
-      const payload = await withRetry(async () => {
+      const execPayload = await withRetry(async () => {
         const res = await fetchWithTimeout(u, { timeoutMs: DEFAULT_TIMEOUT_MS })
         if (!res.ok) throw new Error(`exctvSttus HTTP ${res.status}`)
         return await res.json()
       }, { attempts: ATTEMPTS_EXEC })
 
-      return json(200, payload, cacheHeader(60))
+      return json(200, { data: execPayload }, cacheHeader(60))
     }
 
     return json(400, { error: 'Unknown action' })
