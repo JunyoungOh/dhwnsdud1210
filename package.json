@@ -6,6 +6,7 @@
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^13.5.0",
+    "fast-xml-parser": "^4.3.5",
     "firebase": "^10.12.2",
     "lucide-react": "^0.395.0",
     "jszip": "^3.10.1",
