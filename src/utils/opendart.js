@@ -55,8 +55,10 @@ const callOpenDartProxy = async ({ action, payload = {}, signal } = {}) => {
     }
 
     const snippet = rawText?.trim().replace(/\s+/g, ' ').slice(0, 200);
+    const isTimeout = response.status === 504 || /timeout|지연/i.test(snippet||'');
+    const hint = isTimeout ? ' — DART 응답이 지연되고 있습니다. 보고서 유형/연도를 바꿔 보거나 잠시 후 다시 시도해 주세요.' : '';
     const message =
-      snippet || `Open DART 프록시 요청이 실패했습니다. (HTTP ${response.status})`;
+      (snippet || `Open DART 프록시 요청이 실패했습니다. (HTTP ${response.status})`) + hint;
     throw new Error(message);
   }
 
