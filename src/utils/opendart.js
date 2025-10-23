@@ -56,15 +56,34 @@ const callOpenDartProxy = async ({ action, payload = {}, signal } = {}) => {
     signal,
   });
 
-  let result;
-  try {
-    result = await response.json();
-  } catch (error) {
-    throw new Error('Open DART 프록시 응답을 해석할 수 없습니다.');
+  const rawText = await response.text();
+  let result = null;
+  let parseError = null;
+
+  if (rawText) {
+    try {
+      result = JSON.parse(rawText);
+    } catch (error) {
+      parseError = error;
+    }
   }
 
   if (!response.ok) {
-    const message = result?.error || `Open DART 프록시 요청이 실패했습니다. (HTTP ${response.status})`;
+    if (result?.error) {
+      throw new Error(result.error);
+    }
+
+    const snippet = rawText?.trim().replace(/\s+/g, ' ').slice(0, 200);
+    const message =
+      snippet || `Open DART 프록시 요청이 실패했습니다. (HTTP ${response.status})`;
+    throw new Error(message);
+  }
+
+  if (parseError) {
+    const snippet = rawText?.trim().replace(/\s+/g, ' ').slice(0, 200);
+    const message = snippet
+      ? `Open DART 프록시 응답을 해석할 수 없습니다. (${snippet})`
+      : 'Open DART 프록시 응답을 해석할 수 없습니다.';
     throw new Error(message);
   }
 
@@ -72,7 +91,7 @@ const callOpenDartProxy = async ({ action, payload = {}, signal } = {}) => {
     throw new Error(result.error);
   }
 
-  return result;
+  return result ?? {};
 };
 
 const toArray = (list) => Array.prototype.slice.call(list);
