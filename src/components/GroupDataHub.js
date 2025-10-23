@@ -129,7 +129,7 @@ export default function GroupDataHub() {
 
   const handleFetch = useCallback(async () => {
     if (!companyQuery.trim()) {
-      (toast.error?.('회사를 입력해 주세요.') ?? toast('회사를 입력해 주세요.'));
+      toast('회사를 입력해 주세요.', { type: 'error' });
       return;
     }
     setIsFetching(true);
@@ -144,7 +144,7 @@ export default function GroupDataHub() {
         setDartResult(null);
         setRawDraft('');
         setError('Open DART에서 회사를 찾지 못했습니다.');
-        (toast.error?.('Open DART에서 회사를 찾지 못했습니다.') ?? toast('Open DART에서 회사를 찾지 못했습니다.'));
+        toast('Open DART에서 회사를 찾지 못했습니다.', { type: 'error' });
         return;
       }
 
@@ -159,13 +159,17 @@ export default function GroupDataHub() {
       setDartResult(result);
       setRawDraft(JSON.stringify(result.raw, null, 2));
       setError('');
-      (toast.success?.('Open DART에서 데이터를 불러왔습니다.') ?? toast('Open DART에서 데이터를 불러왔습니다.'));
+      if (result?.meta?.status && result.meta.status !== '000') {
+        toast(result.meta.statusMessage || '요청한 조건에 해당하는 임원 데이터가 없습니다.', { type: 'info' });
+      } else {
+        toast('Open DART에서 데이터를 불러왔습니다.', { type: 'success' });
+      }
     } catch (fetchError) {
       const message = fetchError?.message || 'Open DART 조회에 실패했습니다.';
       setError(message);
       setDartResult(null);
       setRawDraft('');
-      (toast.error?.(message) ?? toast(message));
+      toast(message, { type: 'error' });
     } finally {
       setIsFetching(false);
     }
@@ -173,7 +177,7 @@ export default function GroupDataHub() {
 
   const handleSave = useCallback(() => {
     if (!dartResult) {
-      (toast.error?.('저장할 데이터가 없습니다.') ?? toast('저장할 데이터가 없습니다.'));
+      toast('저장할 데이터가 없습니다.', { type: 'error' });
       return;
     }
 
@@ -230,7 +234,7 @@ export default function GroupDataHub() {
 
     setActiveFolder(folderName);
     setActiveCompany(corpName);
-    (toast.success?.('데이터를 저장했습니다.') ?? toast('데이터를 저장했습니다.'));
+    toast('데이터를 저장했습니다.', { type: 'success' });
   }, [dartResult, dartMatch, companyQuery, rawDraft]);
 
   const handleResetSearch = () => {
@@ -247,7 +251,7 @@ export default function GroupDataHub() {
     setFolders({});
     setActiveFolder(null);
     setActiveCompany(null);
-    (toast.success?.('저장된 그룹사 데이터를 모두 삭제했습니다.') ?? toast('저장된 그룹사 데이터를 모두 삭제했습니다.'));
+    toast('저장된 그룹사 데이터를 모두 삭제했습니다.', { type: 'success' });
   };
 
   const folderEntries = useMemo(() => {
@@ -396,6 +400,14 @@ export default function GroupDataHub() {
 
             {error && (
               <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</div>
+            )}
+
+            {!error && dartResult?.meta?.status && dartResult.meta.status !== '000' && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                <span className="font-semibold">DART 응답 코드 {dartResult.meta.status}</span>
+                {': '}
+                {dartResult.meta.statusMessage || '요청한 조건에 해당하는 임원 데이터가 없습니다.'}
+              </div>
             )}
 
             <div>
