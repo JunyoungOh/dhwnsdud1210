@@ -25,7 +25,7 @@ import {
   sendProfileToKakaoWork,
   hasKakaoWorkWebhook,
   sendMeetingReminderToKakaoWork,
-  findMeetingLinesForDate,
+  buildMeetingReminderMessages,
 } from './utils/kakaowork';
 
 import AuthGate, { useUserCtx } from './auth/AuthGate';
@@ -2633,12 +2633,11 @@ export default function App() {
       if (reminderStateRef.current.sent) return;
 
       const today = new Date();
-      const reminders = profiles
-        .map((profile) => {
-          const lines = findMeetingLinesForDate(profile?.meetingRecord, today);
-          return lines.length ? { profile, lines } : null;
-        })
-        .filter(Boolean);
+      const reminders = buildMeetingReminderMessages(profiles, {
+        date: today,
+        shareUrlBuilder: buildShareUrl,
+        timeZone,
+      });
 
       if (!reminders.length) {
         return;
@@ -2648,7 +2647,7 @@ export default function App() {
       try {
         for (const entry of reminders) {
           if (cancelled) break;
-          const shareUrl = buildShareUrl(entry.profile);
+          const shareUrl = entry.shareUrl ?? buildShareUrl(entry.profile);
           await sendMeetingReminderToKakaoWork(entry.profile, entry.lines, { shareUrl });
         }
         if (!cancelled) {
