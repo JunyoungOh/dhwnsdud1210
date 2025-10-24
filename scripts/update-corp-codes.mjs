@@ -1,7 +1,7 @@
-import { promises as fs } from 'fs';
+import { promises as fs, readFileSync } from 'fs';
 import path from 'path';
-import JSZip from 'jszip';
 import { XMLParser } from 'fast-xml-parser';
+import { extractXmlFromZip } from '../lib/extract-xml-from-zip.mjs';
 
 const args = new Set(process.argv.slice(2));
 const skipOnMissingKey = args.has('--skip-on-missing-key');
@@ -15,20 +15,36 @@ function log(message) {
   }
 }
 
+const ENDPOINT = `https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key=${API_KEY}`;
+const OUTPUT_PATH = path.resolve(process.cwd(), 'public', 'corp-code.json');
+
+function ensureExistingCacheIsUsable() {
+  try {
+    const raw = readFileSync(OUTPUT_PATH, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed?.list) && parsed.list.length > 0) {
+      if (!quiet) {
+        console.warn('[update-corp-codes] 환경 변수가 없어 기존 corp-code.json을 그대로 사용합니다.');
+      }
+      process.exit(0);
+    }
+  } catch (error) {
+    // ignore and fall through to failure below
+  }
+
+  console.error('[update-corp-codes] corp-code.json에 사용할 데이터가 없어 빌드를 계속할 수 없습니다.');
+  console.error('OPENDART_API_KEY 환경 변수를 설정하거나 수동으로 corp-code.json을 채워주세요.');
+  process.exit(1);
+}
+
 if (!API_KEY) {
   const message = 'OPENDART_API_KEY 환경 변수가 설정되어 있지 않아 corp-code.json을 갱신하지 않았습니다.';
   if (skipOnMissingKey) {
-    if (!quiet) {
-      console.warn(`[update-corp-codes] ${message}`);
-    }
-    process.exit(0);
+    ensureExistingCacheIsUsable();
   }
   console.error(`[update-corp-codes] ${message}`);
   process.exit(1);
 }
-
-const ENDPOINT = `https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key=${API_KEY}`;
-const OUTPUT_PATH = path.resolve(process.cwd(), 'public', 'corp-code.json');
 
 function normalizeEntry(item = {}) {
   return {
@@ -47,13 +63,7 @@ function normalizeEntry(item = {}) {
   }
 
   const buffer = Buffer.from(await response.arrayBuffer());
-  const zip = await JSZip.loadAsync(buffer);
-  const xmlEntryName = Object.keys(zip.files).find((name) => name.toLowerCase().endsWith('.xml'));
-  if (!xmlEntryName) {
-    throw new Error('ZIP 파일에서 XML 항목을 찾지 못했습니다.');
-  }
-
-  const xml = await zip.file(xmlEntryName).async('text');
+  const xml = extractXmlFromZip(buffer);
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '',
