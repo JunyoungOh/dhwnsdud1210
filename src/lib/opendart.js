@@ -191,6 +191,103 @@ function normalizeReprtCode(code) {
   return alias || raw
 }
 
+const cleanValue = (value) => (value ?? '').toString().trim()
+const normalizeValue = (value) =>
+  cleanValue(value)
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, '')
+
+export function searchCorpCandidates(keyword = '', list = [], { limit = 20 } = {}) {
+  const rawQuery = cleanValue(keyword)
+  if (!rawQuery) return []
+
+  const expandedQuery = expandKnownKeywords(rawQuery)
+  const normalizedQuery = normalizeValue(expandedQuery)
+  const asciiQuery = asciiOnly(expandedQuery)
+  const numericQuery = rawQuery.replace(/[^0-9]/g, '')
+
+  const results = []
+  const seen = new Set()
+
+  const register = (item, score, matchType) => {
+    if (!item?.corpCode || seen.has(item.corpCode)) return
+    seen.add(item.corpCode)
+    results.push({
+      corpCode: item.corpCode,
+      corpName: item.corpName,
+      stockCode: item.stockCode || '',
+      matchScore: score,
+      matchType,
+    })
+  }
+
+  const entries = Array.isArray(list) ? list : []
+
+  const directMatches = entries.filter((item) => {
+    const corpCode = cleanValue(item.corpCode)
+    if (!corpCode) return false
+    if (corpCode === rawQuery) return true
+    if (numericQuery && corpCode.replace(/^0+/, '') === numericQuery.replace(/^0+/, '')) return true
+    return false
+  })
+  directMatches.forEach((item) => register(item, 0, '고유번호 일치'))
+
+  const stockMatches = entries.filter((item) => {
+    const stockCode = cleanValue(item.stockCode)
+    if (!stockCode) return false
+    if (stockCode === rawQuery) return true
+    if (numericQuery && stockCode.replace(/^0+/, '') === numericQuery.replace(/^0+/, '')) return true
+    return normalizeValue(stockCode) === normalizedQuery
+  })
+  stockMatches.forEach((item) => register(item, 5, '종목코드 일치'))
+
+  entries.forEach((item) => {
+    if (!item?.corpName) return
+    const expandedName = getExpandedCorpName(item.corpName)
+    const normalizedName = normalizeValue(expandedName)
+    if (!normalizedName) return
+
+    if (normalizedName === normalizedQuery) {
+      register(item, 10, '회사명 정확 일치')
+      return
+    }
+
+    if (normalizedName.startsWith(normalizedQuery) || normalizedQuery.startsWith(normalizedName)) {
+      register(item, 20, '회사명 접두/접미 일치')
+      return
+    }
+
+    if (normalizedName.includes(normalizedQuery) || normalizedQuery.includes(normalizedName)) {
+      register(item, 30, '회사명 부분 일치')
+      return
+    }
+
+    if (asciiQuery.length >= 2) {
+      const asciiName = asciiOnly(getAsciiFingerprint(item.corpName))
+      if (!asciiName) return
+      if (asciiName === asciiQuery) {
+        register(item, 40, '영문 약칭 일치')
+        return
+      }
+      if (asciiName.startsWith(asciiQuery) || asciiQuery.startsWith(asciiName)) {
+        register(item, 50, '영문 약칭 부분 일치')
+        return
+      }
+      if (asciiName.includes(asciiQuery) || asciiQuery.includes(asciiName)) {
+        register(item, 60, '영문 약칭 유사 일치')
+      }
+    }
+  })
+
+  results.sort((a, b) => {
+    if (a.matchScore !== b.matchScore) return a.matchScore - b.matchScore
+    return a.corpName.localeCompare(b.corpName, 'ko')
+  })
+
+  return results.slice(0, limit)
+}
+
 async function callOpenDartProxy({ action, params } = {}) {
   const res = await fetch(PROXY_URL, {
     method: 'POST',
