@@ -2,5 +2,5 @@
   "updated_at": null,
   "count": 0,
   "list": [],
-  "_note": "Run `npm run update:corp-codes` with a valid OPENDART_API_KEY to refresh this cache before deployment."
+  "_note": "이 파일이 비어 있으면 배포가 실패합니다. 배포 전에 `OPENDART_API_KEY`를 지정한 뒤 `npm run update:corp-codes`를 실행해 데이터를 채워 주세요."
 }
