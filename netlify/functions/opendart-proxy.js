@@ -1,104 +1,96 @@
-import { XMLParser } from 'fast-xml-parser'
-import JSZip from 'jszip'
+// netlify/functions/opendart-proxy.js
+import fetch from "node-fetch";
 
-const BASE = 'https://opendart.fss.or.kr/api'
-const KEY = process.env.OPENDART_API_KEY
+const DEFAULT_TIMEOUT_MS = 20000;
+const ATTEMPTS_CORPCODE = 3;
+const ATTEMPTS_EXEC = 2;
+const CACHE_TTL_MS = 1000 * 60 * 60;
 
-const DEFAULT_TIMEOUT_MS = 20000
-const ATTEMPTS_CORPCODE = 3
-const ATTEMPTS_EXEC = 2
+const API_KEY = process.env.OPENDART_API_KEY;
 
-let corpCodeCache = { data: null, ts: 0 }
-const CORPCODE_TTL_MS = 24 * 60 * 60 * 1000
+const cache = new Map();
+const VALID_REPRT = new Set(["11011","11012","11013","11014"]);
+const MIN_YEAR = 2015;
 
-export async function handler(event) {
-  try {
-    if (!KEY) return json(500, { error: 'Missing env OPENDART_API_KEY' })
-    if (event.httpMethod !== 'POST') return json(405, { error: 'POST only' }, { Allow: 'POST' })
+const withTimeout = (ms, controller) => setTimeout(() => controller.abort(), ms);
 
-    const parsedBody = JSON.parse(event.body || '{}')
-    const { action } = parsedBody || {}
-    const params = parsedBody?.params || {}
-    const payload = parsedBody?.payload || {}
-    const input = Object.keys(params).length ? params : payload
-
-    if (action === 'corpCode') {
-      const now = Date.now()
-      if (corpCodeCache.data && now - corpCodeCache.ts < CORPCODE_TTL_MS) {
-        return json(200, { data: corpCodeCache.data }, cacheHeader(3600))
-      }
-
-      const url = `${BASE}/corpCode.xml?crtfc_key=${encodeURIComponent(KEY)}`
-      const arrayBuf = await withRetry(async () => {
-        const res = await fetchWithTimeout(url, { timeoutMs: DEFAULT_TIMEOUT_MS })
-        if (!res.ok) throw new Error(`corpCode HTTP ${res.status}`)
-        const buf = await res.arrayBuffer()
-        if (!buf || buf.byteLength === 0) throw new Error('corpCode empty body')
-        return buf
-      }, { attempts: ATTEMPTS_CORPCODE })
-
-      const zip = await JSZip.loadAsync(Buffer.from(arrayBuf))
-      const xmlEntry = zip.file(/\.xml$/i)?.[0]
-      if (!xmlEntry) throw new Error('corpCode.zip missing XML')
-      const xmlText = await xmlEntry.async('text')
-
-      const parser = new XMLParser({ ignoreAttributes: true })
-      const parsed = parser.parse(xmlText)
-      const list = toArray(parsed?.result?.list?.corp)
-      const slim = list.map(it => ({
-        corpCode: (it?.corp_code || '').trim(),
-        corpName: (it?.corp_name || '').trim(),
-        stockCode: (it?.stock_code || '').trim(),
-        modifyDate: (it?.modify_date || '').trim()
-      })).filter(x => x.corpCode && x.corpName)
-
-      corpCodeCache = { data: slim, ts: Date.now() }
-      return json(200, { data: slim }, cacheHeader(86400))
-    }
-
-    if (action === 'executives' || action === 'exctvSttus') {
-      const corp_code = input?.corp_code || input?.corpCode
-      const bsns_year = input?.bsns_year || input?.bsnsYear
-      const reprt_code = input?.reprt_code || input?.reprtCode
-      if (!corp_code || !bsns_year || !reprt_code) {
-        return json(400, { error: 'corp_code, bsns_year, reprt_code are required' })
-      }
-      const u = new URL(`${BASE}/exctvSttus.json`)
-      u.searchParams.set('crtfc_key', KEY)
-      u.searchParams.set('corp_code', String(corp_code))
-      u.searchParams.set('bsns_year', String(bsns_year))
-      u.searchParams.set('reprt_code', String(reprt_code))
-
-      const execPayload = await withRetry(async () => {
-        const res = await fetchWithTimeout(u, { timeoutMs: DEFAULT_TIMEOUT_MS })
-        if (!res.ok) throw new Error(`exctvSttus HTTP ${res.status}`)
-        return await res.json()
-      }, { attempts: ATTEMPTS_EXEC })
-
-      return json(200, { data: execPayload }, cacheHeader(60))
-    }
-
-    return json(400, { error: 'Unknown action' })
-  } catch (err) {
-    const msg = err?.message || 'proxy error'
-    const isTimeout = /timeout|fetch|network|aborted/i.test(msg)
-    return json(isTimeout ? 504 : 502, { error: msg })
+async function withRetry(n, fn) {
+  let last;
+  for (let i=0;i<n;i++) {
+    try { return await fn(i); }
+    catch (e) { last = e; await new Promise(r => setTimeout(r, Math.min(1600, 250 * (2**i)))) }
   }
+  throw last;
 }
 
-function toArray(x) { return Array.isArray(x) ? x : x ? [x] : [] }
-function cacheHeader(s) { return { 'Cache-Control': `public, max-age=${s}` } }
-function json(status, body, extra={}) { return { statusCode: status, headers: { 'Content-Type': 'application/json; charset=utf-8', ...extra }, body: JSON.stringify(body) } }
-
-async function withRetry(fn, { attempts = 1 } = {}) {
-  let last
-  for (let i=0;i<attempts;i++) { try { return await fn() } catch (e) { last = e } if (i<attempts-1) await sleep(i?800:250) }
-  throw last
+function okJSON(body, extraHeaders={}) {
+  return { statusCode: 200, headers: { "content-type":"application/json; charset=utf-8", "cache-control":"no-store", ...extraHeaders }, body: JSON.stringify(body) };
 }
-function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
-
-async function fetchWithTimeout(resource, { timeoutMs = DEFAULT_TIMEOUT_MS, ...opts } = {}) {
-  const ctrl = new AbortController()
-  const id = setTimeout(()=>ctrl.abort(new Error('timeout')), timeoutMs)
-  try { return await fetch(resource, { ...opts, signal: ctrl.signal }) } finally { clearTimeout(id) }
+function errJSON(status, message, extra={}) {
+  return { statusCode: status, headers: { "content-type":"application/json; charset=utf-8" }, body: JSON.stringify({ ok:false, message, ...extra }) };
 }
+
+export const handler = async (event) => {
+  const t0 = Date.now();
+  try {
+    if (event.httpMethod !== "POST") return errJSON(405, "Method Not Allowed");
+    const { mode, payload } = JSON.parse(event.body || "{}");
+
+    if (mode === "ping") return okJSON({ ok:true, pong:true }, { "x-elapsed-ms": `${Date.now()-t0}` });
+
+    if (mode === "execStatus") {
+      const { corp_code, bsns_year, reprt_code } = payload || {};
+      if (!corp_code) return errJSON(400, "Missing corp_code");
+      if (!bsns_year || +bsns_year < MIN_YEAR) return errJSON(400, `bsns_year must be >= ${MIN_YEAR}`);
+      if (!reprt_code || !VALID_REPRT.has(String(reprt_code))) return errJSON(400, "Invalid reprt_code");
+
+      const key = `exec:${corp_code}:${bsns_year}:${reprt_code}`;
+      const now = Date.now();
+      const hit = cache.get(key);
+      if (hit && hit.expires > now) return okJSON({ from_cache:true, ...hit.data }, { "x-elapsed-ms": `${Date.now()-t0}` });
+
+      const url = `https://opendart.fss.or.kr/api/exctvSttus.json?crtfc_key=${API_KEY}&corp_code=${corp_code}&bsns_year=${bsns_year}&reprt_code=${reprt_code}`;
+      const controller = new AbortController();
+      const timer = withTimeout(DEFAULT_TIMEOUT_MS, controller);
+      try {
+        const res = await withRetry(ATTEMPTS_EXEC, async () => {
+          const r = await fetch(url, { signal: controller.signal });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r;
+        });
+        const data = await res.json();
+        cache.set(key, { expires: now + CACHE_TTL_MS, data });
+        return okJSON({ from_cache:false, ...data }, { "x-elapsed-ms": `${Date.now()-t0}` });
+      } catch (e) {
+        const isAbort = e.name === "AbortError";
+        return errJSON(isAbort ? 504 : 502, `execStatus fetch failed: ${e.message}`, { elapsed_ms: Date.now()-t0 });
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    if (mode === "corpCode") {
+      const url = `https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key=${API_KEY}`;
+      const controller = new AbortController();
+      const timer = withTimeout(DEFAULT_TIMEOUT_MS, controller);
+      try {
+        const res = await withRetry(ATTEMPTS_CORPCODE, async () => {
+          const r = await fetch(url, { signal: controller.signal });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r;
+        });
+        const buf = await res.buffer();
+        return { statusCode: 200, headers: { "content-type":"application/octet-stream", "x-elapsed-ms": `${Date.now()-t0}` }, body: buf.toString("base64"), isBase64Encoded: true };
+      } catch (e) {
+        const isAbort = e.name === "AbortError";
+        return errJSON(isAbort ? 504 : 502, `corpCode fetch failed: ${e.message}`, { elapsed_ms: Date.now()-t0 });
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    return errJSON(400, "Unknown mode");
+  } catch (e) {
+    return errJSON(500, `Internal Error: ${e.message}`);
+  }
+};
