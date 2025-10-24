@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Download,
   Save,
@@ -16,7 +16,7 @@ import Badge from './ui/Badge';
 import { toast } from './ui/Toast';
 import {
   fetchCorpCodeMap,
-  findBestCorpMatch,
+  searchCorpCandidates,
   fetchExecutiveStatus,
   REPORT_CODE_OPTIONS,
   getReportLabel,
@@ -110,7 +110,9 @@ export default function GroupDataHub() {
   const [reportCode, setReportCode] = useState(REPORT_CODE_OPTIONS[0]?.code || '11011');
   const [corpCodes, setCorpCodes] = useState([]);
   const [isFetching, setIsFetching] = useState(false);
-  const [dartMatch, setDartMatch] = useState(null);
+  const [searchMatches, setSearchMatches] = useState([]);
+  const [isSearchingMatches, setIsSearchingMatches] = useState(false);
+  const [selectedCorp, setSelectedCorp] = useState(null);
   const [dartResult, setDartResult] = useState(null);
   const [rawDraft, setRawDraft] = useState('');
   const [error, setError] = useState('');
@@ -137,18 +139,38 @@ export default function GroupDataHub() {
 
     try {
       const list = await ensureCorpCodes();
-      const match = findBestCorpMatch(companyQuery, list);
+      const trimmedQuery = companyQuery.trim();
+      let match = selectedCorp;
+
+      if (!match && trimmedQuery) {
+        const exact = list.find((item) => item.corpCode === trimmedQuery);
+        if (exact) {
+          match = {
+            corpCode: exact.corpCode,
+            corpName: exact.corpName,
+            stockCode: exact.stockCode || '',
+            matchType: '고유번호 일치',
+            matchScore: 0,
+          };
+        }
+      }
+
+      if (!match && trimmedQuery) {
+        const [firstCandidate] = searchCorpCandidates(trimmedQuery, list, { limit: 1 });
+        if (firstCandidate) {
+          match = firstCandidate;
+        }
+      }
 
       if (!match) {
-        setDartMatch(null);
         setDartResult(null);
         setRawDraft('');
-        setError('Open DART에서 회사를 찾지 못했습니다.');
-        toast('Open DART에서 회사를 찾지 못했습니다.', { type: 'error' });
+        setError('Open DART에서 회사를 찾지 못했습니다. 검색 결과에서 회사를 선택해 주세요.');
+        toast('Open DART에서 회사를 찾지 못했습니다. 검색 결과에서 회사를 선택해 주세요.', { type: 'error' });
         return;
       }
 
-      setDartMatch(match);
+      setSelectedCorp(match);
 
       const result = await fetchExecutiveStatus({
         corpCode: match.corpCode,
@@ -173,7 +195,55 @@ export default function GroupDataHub() {
     } finally {
       setIsFetching(false);
     }
-  }, [companyQuery, ensureCorpCodes, businessYear, reportCode]);
+  }, [companyQuery, ensureCorpCodes, businessYear, reportCode, selectedCorp]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const trimmed = companyQuery.trim();
+      if (trimmed.length < 2) {
+        setSearchMatches([]);
+        if (trimmed.length === 0) {
+          setSelectedCorp(null);
+        }
+        setIsSearchingMatches(false);
+        return;
+      }
+
+      setIsSearchingMatches(true);
+      try {
+        const list = await ensureCorpCodes();
+        if (cancelled) return;
+        const candidates = searchCorpCandidates(trimmed, list, { limit: 20 });
+        setSearchMatches(candidates);
+        setSelectedCorp((prev) => {
+          if (prev && candidates.some((item) => item.corpCode === prev.corpCode)) {
+            return prev;
+          }
+          return candidates.length === 1 ? candidates[0] : prev && trimmed === prev.corpName ? prev : null;
+        });
+      } catch (matchError) {
+        if (!cancelled) {
+          setSearchMatches([]);
+          console.error(matchError);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsSearchingMatches(false);
+        }
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [companyQuery, ensureCorpCodes]);
+
+  const handleSelectCorp = useCallback((entry) => {
+    setSelectedCorp(entry);
+  }, []);
 
   const handleSave = useCallback(() => {
     if (!dartResult) {
@@ -182,8 +252,8 @@ export default function GroupDataHub() {
     }
 
     const meta = dartResult.meta || {};
-    const corpName = meta.corpName || dartMatch?.corpName || companyQuery.trim();
-    const corpCode = meta.corpCode || dartMatch?.corpCode || '';
+    const corpName = meta.corpName || selectedCorp?.corpName || companyQuery.trim();
+    const corpCode = meta.corpCode || selectedCorp?.corpCode || '';
     const folderName = deriveFolderName(corpName);
     const savedAt = new Date().toISOString();
     const reportId = createReportId(meta);
@@ -235,13 +305,15 @@ export default function GroupDataHub() {
     setActiveFolder(folderName);
     setActiveCompany(corpName);
     toast('데이터를 저장했습니다.', { type: 'success' });
-  }, [dartResult, dartMatch, companyQuery, rawDraft]);
+  }, [dartResult, selectedCorp, companyQuery, rawDraft]);
 
   const handleResetSearch = () => {
     setCompanyQuery('');
     setBusinessYear(String(new Date().getFullYear()));
     setReportCode(REPORT_CODE_OPTIONS[0]?.code || '11011');
-    setDartMatch(null);
+    setSearchMatches([]);
+    setSelectedCorp(null);
+    setIsSearchingMatches(false);
     setDartResult(null);
     setRawDraft('');
     setError('');
@@ -388,13 +460,57 @@ export default function GroupDataHub() {
               <Btn variant="secondary" size="sm" onClick={handleSave} disabled={!dartResult}>
                 <Save className="mr-2 h-4 w-4" /> 데이터 저장
               </Btn>
-              {dartMatch && (
+              {selectedCorp && (
                 <Badge tone="info" className="flex items-center gap-1">
-                  <Layers className="h-3 w-3" /> {dartMatch.corpName}
+                  <Layers className="h-3 w-3" /> {selectedCorp.corpName}
                 </Badge>
               )}
-              {dartResult?.meta?.corpCode && (
-                <Badge tone="neutral">corp_code: {dartResult.meta.corpCode}</Badge>
+              {(dartResult?.meta?.corpCode || selectedCorp?.corpCode) && (
+                <Badge tone="neutral">corp_code: {dartResult?.meta?.corpCode || selectedCorp?.corpCode}</Badge>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-600">
+              <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <span>회사 검색 결과</span>
+                {isSearchingMatches ? (
+                  <span className="text-amber-500">검색 중...</span>
+                ) : (
+                  <span className="text-slate-400">{searchMatches.length}건</span>
+                )}
+              </div>
+              {companyQuery.trim().length < 2 ? (
+                <p className="mt-3 text-[11px] text-slate-500">회사명 또는 고유번호를 2글자 이상 입력하면 검색 결과가 표시됩니다.</p>
+              ) : searchMatches.length === 0 ? (
+                <p className="mt-3 text-[11px] text-rose-500">검색 조건과 일치하는 회사를 찾지 못했습니다. 다른 키워드를 입력해 보세요.</p>
+              ) : (
+                <ul className="mt-3 max-h-48 space-y-2 overflow-y-auto pr-1">
+                  {searchMatches.map((match) => {
+                    const isActive = selectedCorp?.corpCode === match.corpCode;
+                    return (
+                      <li key={match.corpCode}>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectCorp(match)}
+                          className={`flex w-full flex-col rounded-lg border px-3 py-2 text-left transition ${
+                            isActive ? 'border-sky-400 bg-sky-50 text-sky-700' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className="text-[13px] font-semibold">{match.corpName}</span>
+                          <div className="mt-1 flex flex-wrap gap-2 text-[11px]">
+                            <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-600">corp_code: {match.corpCode}</span>
+                            {match.stockCode && (
+                              <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-600">stock: {match.stockCode}</span>
+                            )}
+                            {match.matchType && (
+                              <span className="rounded bg-amber-100 px-2 py-0.5 text-amber-700">{match.matchType}</span>
+                            )}
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
             </div>
 
@@ -435,10 +551,10 @@ export default function GroupDataHub() {
               {dartResult && (
                 <ul className="mt-3 space-y-2 text-xs">
                   <li>
-                    <span className="font-semibold text-slate-700">폴더</span>: {deriveFolderName(dartResult.meta?.corpName || dartMatch?.corpName || companyQuery)}
+                    <span className="font-semibold text-slate-700">폴더</span>: {deriveFolderName(dartResult.meta?.corpName || selectedCorp?.corpName || companyQuery)}
                   </li>
                   <li>
-                    <span className="font-semibold text-slate-700">기업명</span>: {dartResult.meta?.corpName || dartMatch?.corpName || companyQuery || '-'}
+                    <span className="font-semibold text-slate-700">기업명</span>: {dartResult.meta?.corpName || selectedCorp?.corpName || companyQuery || '-'}
                   </li>
                   <li>
                     <span className="font-semibold text-slate-700">저장 예정 보고서</span>: {buildReportLabel(dartResult.meta) || '-'}
