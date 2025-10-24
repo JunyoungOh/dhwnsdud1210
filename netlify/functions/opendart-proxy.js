@@ -1,6 +1,8 @@
 // netlify/functions/opendart-proxy.js
 import { promises as fs } from "fs";
 import path from "path";
+import JSZip from "jszip";
+import { XMLParser } from "fast-xml-parser";
 
 const DEFAULT_TIMEOUT_MS = 20000;
 const ATTEMPTS_EXEC = 2;
@@ -15,6 +17,102 @@ const MIN_YEAR = 2015;
 const CORP_CODE_FILE = path.resolve(process.cwd(), "public", "corp-code.json");
 
 let corpCodeCache = null;
+let corpCodeRefreshPromise = null;
+
+function normalizeCorpEntry(item = {}) {
+  return {
+    corpCode: item.corpCode || item.corp_code || "",
+    corpName: item.corpName || item.corp_name || "",
+    stockCode: item.stockCode || item.stock_code || "",
+    modifyDate: item.modifyDate || item.modify_date || "",
+  };
+}
+
+function serializeCorpEntries(entries = [], meta = {}) {
+  return JSON.stringify(
+    {
+      updated_at: meta.updatedAt || null,
+      count: entries.length,
+      list: entries.map((entry) => ({
+        corp_code: entry.corpCode,
+        corp_name: entry.corpName,
+        stock_code: entry.stockCode,
+        modify_date: entry.modifyDate,
+      })),
+    },
+    null,
+    2
+  );
+}
+
+async function fetchCorpCodesFromApi() {
+  if (!API_KEY) {
+    throw new Error("Missing env OPENDART_API_KEY");
+  }
+
+  const url = `https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key=${API_KEY}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`corpCode.xml 다운로드 실패 (HTTP ${response.status})`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const zip = await JSZip.loadAsync(buffer);
+  const xmlEntry = Object.keys(zip.files).find((name) => name.toLowerCase().endsWith(".xml"));
+  if (!xmlEntry) {
+    throw new Error("corpCode.zip에서 XML 파일을 찾지 못했습니다.");
+  }
+
+  const xml = await zip.file(xmlEntry).async("text");
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: "",
+    trimValues: true,
+    isArray: (name) => name === "list",
+  });
+
+  const parsed = parser.parse(xml);
+  const rawList = parsed?.result?.list || [];
+  const rows = Array.isArray(rawList) ? rawList : [];
+  const entries = rows
+    .map((item) => normalizeCorpEntry(item))
+    .filter((item) => item.corpCode && item.corpName);
+
+  if (entries.length === 0) {
+    throw new Error("Open DART에서 받은 corpCode 목록이 비어 있습니다.");
+  }
+
+  const nowIso = new Date().toISOString();
+  const updatedAt = parsed?.result?.list?.[0]?.modify_date || parsed?.result?.list?.[0]?.modifyDate || nowIso;
+
+  const payload = {
+    data: entries,
+    meta: {
+      updatedAt,
+      count: entries.length,
+      source: "opendart",
+      refreshedAt: nowIso,
+    },
+  };
+
+  await fs.writeFile(CORP_CODE_FILE, serializeCorpEntries(entries, payload.meta), "utf-8");
+
+  corpCodeCache = {
+    expires: Date.now() + CORP_CODE_TTL_MS,
+    data: payload,
+  };
+
+  return payload;
+}
+
+async function refreshCorpCodes() {
+  if (!corpCodeRefreshPromise) {
+    corpCodeRefreshPromise = fetchCorpCodesFromApi().finally(() => {
+      corpCodeRefreshPromise = null;
+    });
+  }
+  return corpCodeRefreshPromise;
+}
 
 const withTimeout = (ms, controller) => setTimeout(() => controller.abort(), ms);
 
@@ -39,40 +137,47 @@ async function loadCorpCodeList() {
     return corpCodeCache.data;
   }
 
-  let raw;
+  let raw = null;
   try {
     raw = await fs.readFile(CORP_CODE_FILE, "utf-8");
   } catch (err) {
-    throw new Error(`corp-code.json을 읽는 데 실패했습니다. (${err.message})`);
+    // 파일을 찾지 못한 경우 최신 데이터를 내려받아 시도합니다.
+    return refreshCorpCodes();
   }
 
   let parsed;
   try {
-    parsed = JSON.parse(raw);
+    parsed = raw ? JSON.parse(raw) : null;
   } catch (err) {
-    throw new Error(`corp-code.json 형식을 해석하지 못했습니다. (${err.message})`);
+    // 파싱 실패 시 최신 데이터를 받아옵니다.
+    return refreshCorpCodes();
   }
 
   const list = Array.isArray(parsed?.list) ? parsed.list : [];
-  const mapped = list.map((item) => ({
-    corpCode: item.corp_code,
-    corpName: item.corp_name,
-    stockCode: item.stock_code || "",
-    modifyDate: item.modify_date || "",
-  }));
+  const entries = list
+    .map((item) => normalizeCorpEntry(item))
+    .filter((item) => item.corpCode && item.corpName);
 
-  corpCodeCache = {
-    expires: Date.now() + CORP_CODE_TTL_MS,
-    data: {
-      data: mapped,
-      meta: {
-        updatedAt: parsed?.updated_at || null,
-        count: mapped.length,
-      },
+  if (entries.length === 0) {
+    return refreshCorpCodes();
+  }
+
+  const payload = {
+    data: entries,
+    meta: {
+      updatedAt: parsed?.updated_at || null,
+      count: entries.length,
+      source: "file",
+      refreshedAt: new Date().toISOString(),
     },
   };
 
-  return corpCodeCache.data;
+  corpCodeCache = {
+    expires: Date.now() + CORP_CODE_TTL_MS,
+    data: payload,
+  };
+
+  return payload;
 }
 
 function normalizeAction(action) {
