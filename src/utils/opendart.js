@@ -1,312 +1,66 @@
-const PROXY_ENDPOINT = '/.netlify/functions/opendart-proxy';
-const CORP_CODE_CACHE_KEY = 'opendart:corp-code-cache:v2';
-const CORP_CODE_CACHE_TTL = 1000 * 60 * 60 * 24; // 24시간
+// src/utils/opendart.js
+const REPRT_CODE_MAP = { business: "11011", half: "11012", q1: "11013", q3: "11014" };
 
-export const REPORT_CODES = {
-  '11011': '사업보고서',
-  '11012': '반기보고서',
-  '11013': '1분기보고서',
-  '11014': '3분기보고서',
-};
+export async function loadCorpCodeJson() {
+  const res = await fetch("/corp-code.json", { cache: "reload" });
+  if (!res.ok) throw new Error(`Failed to load corp-code.json (HTTP ${res.status})`);
+  const json = await res.json();
+  if (!json || !Array.isArray(json.list)) throw new Error("Invalid corp-code.json format");
+  return json.list;
+}
 
-export const REPORT_CODE_OPTIONS = Object.entries(REPORT_CODES).map(([code, label]) => ({
-  code,
-  label,
-}));
+export function findBestCorpMatch(companyName, corpList) {
+  if (!companyName || !corpList?.length) return null;
+  const name = companyName.trim();
+  let hit = corpList.find(c => c.corp_name === name);
+  if (hit) return hit;
+  hit = corpList.find(c => c.corp_name.startsWith(name));
+  if (hit) return hit;
+  hit = corpList.find(c => c.corp_name.includes(name));
+  return hit || null;
+}
 
-const STATUS_CODE_HINTS = {
-  '011': '잘못된 고유번호입니다.',
-  '012': '요청한 회사의 기본 정보가 존재하지 않습니다.',
-  '013': '요청한 사업연도/보고서에 임원 현황 데이터가 없습니다.',
-  '014': '제출되지 않은 보고서입니다.',
-  '020': 'API Key 사용 한도를 초과했습니다.',
-  '021': '허용된 조회 건수를 초과했습니다.',
-};
-
-const STATUS_NO_DATA = new Set(['013', '014']);
-
-const callOpenDartProxy = async ({ action, payload = {}, signal } = {}) => {
-  if (!action) {
-    throw new Error('Open DART 프록시 요청에 action이 지정되지 않았습니다.');
+async function callProxy(mode, payload) {
+  const t0 = performance.now();
+  let res;
+  try {
+    res = await fetch("/.netlify/functions/opendart-proxy", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode, payload }),
+    });
+  } catch (e) {
+    throw new Error(`Open DART 프록시 네트워크 오류: ${e.message}`);
   }
 
-  const response = await fetch(PROXY_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, payload }),
-    signal,
-  });
+  const elapsed = (performance.now() - t0).toFixed(0);
+  if (!res.ok) {
+    let snippet = "";
+    try { const j = await res.json(); snippet = j?.message || ""; } catch {}
+    const isTimeout = res.status === 504 || /timeout|지연|abort/i.test(snippet);
+    const hint = isTimeout ? " — DART 응답이 지연되었거나 플랫폼 시간 제한에 걸렸습니다. 잠시 후 다시 시도하거나 보고서/연도를 변경해 보세요." : "";
+    throw new Error(`Open DART 프록시 요청이 실패했습니다. (HTTP ${res.status}, ${elapsed}ms)${hint}`);
+  }
+  return await res.json();
+}
 
-  const rawText = await response.text();
-  let result = null;
-  let parseError = null;
-
-  if (rawText) {
-    try {
-      result = JSON.parse(rawText);
-    } catch (error) {
-      parseError = error;
+export async function fetchExecutiveStatusByName(companyName, bsns_year, reprt_code) {
+  const code = REPRT_CODE_MAP[reprt_code] || String(reprt_code);
+  if (!["11011","11012","11013","11014"].includes(code)) {
+    throw new Error("유효하지 않은 reprt_code입니다. (business/half/q1/q3 또는 11011/11012/11013/11014)");
     }
-  }
+  const corpList = await loadCorpCodeJson();
+  const matched = findBestCorpMatch(companyName, corpList);
+  if (!matched?.corp_code) throw new Error(`회사명을 corp_code로 매핑하지 못했습니다: ${companyName}`);
 
-  if (!response.ok) {
-    if (result?.error) {
-      throw new Error(result.error);
+  // Try once, then one retry on 504
+  try {
+    return await callProxy("execStatus", { corp_code: matched.corp_code, bsns_year, reprt_code: code });
+  } catch (e) {
+    if (/HTTP 504/.test(e.message)) {
+      await new Promise(r => setTimeout(r, 600));
+      return await callProxy("execStatus", { corp_code: matched.corp_code, bsns_year, reprt_code: code });
     }
-
-    const snippet = rawText?.trim().replace(/\s+/g, ' ').slice(0, 200);
-    const isTimeout = response.status === 504 || /timeout|지연/i.test(snippet||'');
-    const hint = isTimeout ? ' — DART 응답이 지연되고 있습니다. 보고서 유형/연도를 바꿔 보거나 잠시 후 다시 시도해 주세요.' : '';
-    const message =
-      (snippet || `Open DART 프록시 요청이 실패했습니다. (HTTP ${response.status})`) + hint;
-    throw new Error(message);
+    throw e;
   }
-
-  if (parseError) {
-    const snippet = rawText?.trim().replace(/\s+/g, ' ').slice(0, 200);
-    const message = snippet
-      ? `Open DART 프록시 응답을 해석할 수 없습니다. (${snippet})`
-      : 'Open DART 프록시 응답을 해석할 수 없습니다.';
-    throw new Error(message);
-  }
-
-  if (result?.error) {
-    throw new Error(result.error);
-  }
-
-  return result ?? {};
-};
-
-const normalizeName = (value = '') =>
-  value
-    .normalize('NFKC')
-    .replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, '')
-    .replace(/[^\p{L}\p{N}]/gu, '')
-    .toLowerCase();
-
-const buildBigrams = (value = '') => {
-  const normalized = normalizeName(value);
-  if (normalized.length <= 1) {
-    return new Set([normalized]);
-  }
-  const set = new Set();
-  for (let i = 0; i < normalized.length - 1; i += 1) {
-    set.add(normalized.slice(i, i + 2));
-  }
-  return set;
-};
-
-const similarityScore = (a = '', b = '') => {
-  const normalizedA = normalizeName(a);
-  const normalizedB = normalizeName(b);
-  if (!normalizedA && !normalizedB) return 1;
-  if (!normalizedA || !normalizedB) return 0;
-  if (normalizedA === normalizedB) return 1;
-
-  const setA = buildBigrams(normalizedA);
-  const setB = buildBigrams(normalizedB);
-  const intersection = new Set();
-  setA.forEach((value) => {
-    if (setB.has(value)) intersection.add(value);
-  });
-  const unionSize = new Set([...setA, ...setB]).size;
-  if (unionSize === 0) return 0;
-  return intersection.size / unionSize;
-};
-
-export const fetchCorpCodeMap = async ({ forceRefresh = false } = {}) => {
-  if (typeof window !== 'undefined' && !forceRefresh) {
-    try {
-      const cachedText = window.localStorage.getItem(CORP_CODE_CACHE_KEY);
-      if (cachedText) {
-        const cached = JSON.parse(cachedText);
-        if (cached && Array.isArray(cached.items) && cached.storedAt) {
-          const age = Date.now() - cached.storedAt;
-          if (age < CORP_CODE_CACHE_TTL) {
-            return cached.items;
-          }
-        }
-      }
-    } catch (error) {
-      console.warn('[OpenDART] 캐시를 읽을 수 없습니다.', error);
-    }
-  }
-
-  const { data } = await callOpenDartProxy({ action: 'corpCode' });
-  if (!Array.isArray(data)) {
-    throw new Error('Open DART corpCode 데이터를 받아오지 못했습니다.');
-  }
-
-  const items = data
-    .map((item) => ({
-      corpCode: item.corpCode,
-      corpName: item.corpName,
-      stockCode: item.stockCode,
-      modifyDate: item.modifyDate,
-    }))
-    .filter((item) => item.corpCode && item.corpName);
-
-  if (typeof window !== 'undefined') {
-    try {
-      window.localStorage.setItem(
-        CORP_CODE_CACHE_KEY,
-        JSON.stringify({ items, storedAt: Date.now() })
-      );
-    } catch (error) {
-      console.warn('[OpenDART] 캐시를 저장할 수 없습니다.', error);
-    }
-  }
-
-  return items;
-};
-
-export const findBestCorpMatch = (companyName, corpList = []) => {
-  if (!companyName || !corpList.length) return null;
-  const normalizedTarget = normalizeName(companyName);
-  if (!normalizedTarget) return null;
-
-  const exact = corpList.find((item) => normalizeName(item.corpName) === normalizedTarget);
-  if (exact) {
-    return { ...exact, score: 1 };
-  }
-
-  const contains = corpList.find((item) => normalizeName(item.corpName).includes(normalizedTarget));
-  if (contains) {
-    return { ...contains, score: 0.9 };
-  }
-
-  let best = null;
-  corpList.forEach((item) => {
-    const score = similarityScore(companyName, item.corpName);
-    if (!best || score > best.score) {
-      best = { ...item, score };
-    }
-  });
-
-  if (!best || best.score < 0.3) {
-    return null;
-  }
-  return best;
-};
-
-const mapFullTime = (value) => {
-  const normalized = (value || '').toString().trim().toUpperCase();
-  if (!normalized) return '';
-  if (['Y', 'YES', 'TRUE', '1'].includes(normalized)) return '상근';
-  if (['N', 'NO', 'FALSE', '0'].includes(normalized)) return '비상근';
-  return value;
-};
-
-const mapRegisteredStatus = (value) => {
-  const normalized = (value || '').toString().trim().toUpperCase();
-  if (!normalized) return '';
-  if (normalized === 'Y') return '등기';
-  if (normalized === 'N') return '미등기';
-  return value;
-};
-
-const coerceDateString = (value) => {
-  if (!value) return '';
-  const trimmed = value.trim();
-  if (!trimmed) return '';
-  if (/^\d{4}[.-]?\d{2}[.-]?\d{2}$/.test(trimmed)) {
-    const digits = trimmed.replace(/[^\d]/g, '');
-    return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
-  }
-  return trimmed;
-};
-
-const normalizeExecutiveEntry = (entry = {}) => {
-  const tenureEndDate = coerceDateString(entry.tenure_end_on);
-  const notes = [
-    entry.adres ? `주소: ${entry.adres}` : '',
-    entry.resp_task ? `담당: ${entry.resp_task}` : '',
-    tenureEndDate ? `임기만료일: ${tenureEndDate}` : '',
-  ]
-    .filter(Boolean)
-    .join(' / ');
-
-  return {
-    name: (entry.nm || '').trim(),
-    gender: (entry.sexdstn || '').trim(),
-    birth: (entry.brth_yy || '').trim(),
-    title: (entry.ofcps || '').trim(),
-    duty: (entry.chrg_job || '').trim(),
-    registeredStatus: mapRegisteredStatus(entry.rgist_exctv_at),
-    fullTime: mapFullTime(entry.fte_at),
-    career: (entry.main_career || '').trim(),
-    tenure: (entry.hffc_pd || '').trim() || (tenureEndDate ? `임기만료일 ${tenureEndDate}` : ''),
-    notes: notes || undefined,
-    raw: entry,
-  };
-};
-
-export const fetchExecutiveStatus = async ({ corpCode, bsnsYear, reprtCode, signal } = {}) => {
-  if (!corpCode) throw new Error('corp_code 값이 필요합니다.');
-  if (!bsnsYear) throw new Error('bsns_year 값이 필요합니다.');
-  if (!reprtCode) throw new Error('reprt_code 값이 필요합니다.');
-
-  const { data } = await callOpenDartProxy({
-    action: 'executives',
-    payload: {
-      corpCode,
-      bsnsYear: String(bsnsYear),
-      reprtCode: String(reprtCode),
-    },
-    signal,
-  });
-
-  if (!data) {
-    throw new Error('Open DART 응답을 해석할 수 없습니다.');
-  }
-
-  const normalizedStatus = data.status || '000';
-  const fallbackMessage = data.message?.trim() || 'Open DART API 요청이 실패했습니다.';
-  const statusHint = STATUS_CODE_HINTS[normalizedStatus];
-  const combinedMessage = statusHint
-    ? `${statusHint}${fallbackMessage ? ` — ${fallbackMessage}` : ''}`
-    : `${fallbackMessage}${normalizedStatus && normalizedStatus !== '000' ? ` (status=${normalizedStatus})` : ''}`;
-
-  const baseMeta = {
-    corpName: data.corp_name,
-    corpCode,
-    bsnsYear: String(bsnsYear),
-    reprtCode: String(reprtCode),
-    message: data.message,
-    status: normalizedStatus,
-  };
-
-  if (normalizedStatus !== '000') {
-    if (STATUS_NO_DATA.has(normalizedStatus)) {
-      return {
-        meta: {
-          ...baseMeta,
-          statusMessage: combinedMessage,
-        },
-        registered: [],
-        unregistered: [],
-        raw: data,
-      };
-    }
-
-    throw new Error(combinedMessage);
-  }
-
-  const list = Array.isArray(data.list) ? data.list : [];
-  const normalized = list.map((item) => normalizeExecutiveEntry(item));
-
-  const registered = normalized.filter((item) => item.registeredStatus === '등기');
-  const unregistered = normalized.filter((item) => item.registeredStatus !== '등기');
-
-  return {
-    meta: {
-      ...baseMeta,
-      statusMessage: data.message,
-    },
-    registered,
-    unregistered,
-    raw: data,
-  };
-};
-
-export const getReportLabel = (code) => REPORT_CODES[code] || code;
+}
