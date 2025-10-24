@@ -16,6 +16,168 @@ export const REPORT_CODE_OPTIONS = [
   { code: '11014', label: '3분기보고서' },
 ]
 
+const ASCII_SEGMENT_ENTRIES = [
+  ['hyundai motor', '현대자동차'],
+  ['hyundai heavy', '현대중공업'],
+  ['amorepacific', '아모레퍼시픽'],
+  ['skhynix', '에스케이하이닉스'],
+  ['coupang', '쿠팡'],
+  ['electronics', '전자'],
+  ['electronic', '전자'],
+  ['solutions', '솔루션'],
+  ['solution', '솔루션'],
+  ['chemical', '케미칼'],
+  ['chemicals', '케미칼'],
+  ['chem', '케미칼'],
+  ['hynix', '하이닉스'],
+  ['samsung', '삼성'],
+  ['hyundai', '현대'],
+  ['kia motors', '기아자동차'],
+  ['kia', '기아'],
+  ['posco', '포스코'],
+  ['lotte', '롯데'],
+  ['hanwha', '한화'],
+  ['hanjin', '한진'],
+  ['naver', '네이버'],
+  ['kakao', '카카오'],
+  ['amore', '아모레'],
+  ['emart', '이마트'],
+  ['shinsegae', '신세계'],
+  ['bibigo', '비비고'],
+  ['kolon', '코오롱'],
+  ['hanmi', '한미'],
+  ['woori', '우리'],
+  ['shinhan', '신한'],
+  ['cgv', '씨지브이'],
+  ['mobis', '모비스'],
+  ['motor', '모터'],
+  ['motors', '모터스'],
+  ['steel', '스틸'],
+  ['energy', '에너지'],
+  ['display', '디스플레이'],
+  ['telecom', '텔레콤'],
+  ['ktng', '케이티엔지'],
+  ['ktg', '케이티지'],
+  ['kt', '케이티'],
+  ['nhn', '엔에이치엔'],
+  ['enm', '이엔엠'],
+  ['cns', '씨엔에스'],
+  ['sds', '에스디에스'],
+  ['ssg', '신세계'],
+  ['hmm', '에이치엠엠'],
+  ['sk', '에스케이'],
+  ['cj', '씨제이'],
+  ['gs', '지에스'],
+  ['lg', '엘지'],
+  ['kb', '케이비'],
+  ['nh', '엔에이치'],
+  ['bnk', '비엔케이'],
+  ['hybe', '하이브'],
+  ['sm', '에스엠'],
+  ['spc', '에스피씨'],
+  ['hana', '하나'],
+]
+
+const ASCII_SEGMENT_MAP = ASCII_SEGMENT_ENTRIES.sort((a, b) => b[0].length - a[0].length)
+
+function applyAsciiSegmentReplacements(value = '') {
+  let result = value
+  for (const [segment, replacement] of ASCII_SEGMENT_MAP) {
+    const pattern = new RegExp(segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
+    result = result.replace(pattern, replacement)
+  }
+  return result
+}
+
+const HANGUL_ASCII_PATTERNS = [
+  ['더블유', 'w'],
+  ['에이치', 'h'],
+  ['에이', 'a'],
+  ['비', 'b'],
+  ['씨', 'c'],
+  ['디', 'd'],
+  ['이엔엠', 'ienm'],
+  ['이앤씨', 'enc'],
+  ['이앤디', 'end'],
+  ['앤씨', 'nc'],
+  ['앤디', 'nd'],
+  ['앤드', 'nd'],
+  ['앤엠', 'nm'],
+  ['엔씨', 'nc'],
+  ['엔디', 'nd'],
+  ['엔엠', 'nm'],
+  ['에프', 'f'],
+  ['지', 'g'],
+  ['아이', 'i'],
+  ['제이', 'j'],
+  ['케이', 'k'],
+  ['엘', 'l'],
+  ['엠', 'm'],
+  ['엔', 'n'],
+  ['오', 'o'],
+  ['피', 'p'],
+  ['큐', 'q'],
+  ['알', 'r'],
+  ['에스', 's'],
+  ['티', 't'],
+  ['유', 'u'],
+  ['브이', 'v'],
+  ['엑스', 'x'],
+  ['와이', 'y'],
+  ['제트', 'z'],
+].sort((a, b) => b[0].length - a[0].length)
+
+const asciiNameCache = new Map()
+const expandedNameCache = new Map()
+
+const asciiOnly = (value = '') => value.normalize('NFKC').toLowerCase().replace(/[^a-z0-9]/g, '')
+
+function expandKnownKeywords(value = '') {
+  if (!value) return ''
+  const replacedAmpersand = value.replace(/&/g, ' 앤 ')
+  return applyAsciiSegmentReplacements(replacedAmpersand)
+}
+
+function getExpandedCorpName(name = '') {
+  if (!name) return ''
+  if (expandedNameCache.has(name)) return expandedNameCache.get(name)
+  const expanded = expandKnownKeywords(name)
+  expandedNameCache.set(name, expanded)
+  return expanded
+}
+
+function getAsciiFingerprint(name = '') {
+  if (!name) return ''
+  if (asciiNameCache.has(name)) return asciiNameCache.get(name)
+
+  const source = expandKnownKeywords(name).replace(/\s+/g, '')
+  let result = ''
+  let index = 0
+
+  while (index < source.length) {
+    let matched = false
+    for (const [hangul, ascii] of HANGUL_ASCII_PATTERNS) {
+      if (source.startsWith(hangul, index)) {
+        result += ascii
+        index += hangul.length
+        matched = true
+        break
+      }
+    }
+
+    if (!matched) {
+      const char = source[index]
+      if (/[a-z0-9]/.test(char)) {
+        result += char
+      }
+      index += 1
+    }
+  }
+
+  asciiNameCache.set(name, result)
+  return result
+}
+
 export function getReportLabel(code) {
   const target = normalizeReprtCode(code)
   const hit = REPORT_CODE_OPTIONS.find((option) => option.code === target)
@@ -92,11 +254,13 @@ export async function fetchCorpCodeMap({ forceRefresh = false } = {}) {
 export function findBestCorpMatch(companyName, list = []) {
   const clean = (value) => (value ?? '').toString().trim()
   const norm = (value) => clean(value).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
-  const target = norm(companyName)
+  const expandedInput = expandKnownKeywords(companyName)
+  const target = norm(expandedInput)
   if (!target) return null
 
-    const rawTarget = clean(companyName)
+  const rawTarget = clean(companyName)
   const numericTarget = rawTarget.replace(/[^0-9]/g, '')
+  const asciiTarget = asciiOnly(expandedInput)
 
   if (rawTarget) {
     const byCorpCode = list.find((item) => {
@@ -118,19 +282,33 @@ export function findBestCorpMatch(companyName, list = []) {
     if (byStockCode) return byStockCode
   }
 
-  const exact = list.find((item) => norm(item.corpName) === target)
+  const exact = list.find((item) => norm(getExpandedCorpName(item.corpName)) === target)
   if (exact) return exact
 
   const prefix = list.find((item) => {
-    const name = norm(item.corpName)
+    const name = norm(getExpandedCorpName(item.corpName))
     return name.startsWith(target) || target.startsWith(name)
   })
   if (prefix) return prefix
 
-  return list.find((item) => {
-    const name = norm(item.corpName)
+  const partial = list.find((item) => {
+    const name = norm(getExpandedCorpName(item.corpName))
     return name.includes(target) || target.includes(name)
-  }) || null
+  })
+  if (partial) return partial
+
+  if (asciiTarget.length >= 2) {
+    const asciiMatch = list.find((item) => {
+      const alias = asciiOnly(getAsciiFingerprint(item.corpName))
+      if (!alias || alias.length < 2) return false
+      if (alias === asciiTarget) return true
+      if (alias.startsWith(asciiTarget) || asciiTarget.startsWith(alias)) return true
+      return alias.includes(asciiTarget) || asciiTarget.includes(alias)
+    })
+    if (asciiMatch) return asciiMatch
+  }
+
+  return null
 }
 
 export async function fetchExecutiveStatus({ corpCode, bsnsYear, reprtCode }) {
