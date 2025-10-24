@@ -2,6 +2,34 @@ const DEFAULT_MAX_TEXT_LENGTH = 500;
 const DEFAULT_REMINDER_TITLE = '오늘 미팅 리마인드 드려요!';
 const DEFAULT_TIME_ZONE = 'Asia/Seoul';
 
+function normalizeDateInput(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value.toDate === 'function') {
+    try {
+      const converted = value.toDate();
+      return converted instanceof Date && !Number.isNaN(converted.getTime()) ? converted : null;
+    } catch (error) {
+      return null;
+    }
+  }
+  if (typeof value === 'object' && value !== null && typeof value.seconds === 'number') {
+    const converted = new Date(value.seconds * 1000);
+    return Number.isNaN(converted.getTime()) ? null : converted;
+  }
+  if (typeof value === 'number') {
+    const converted = new Date(value);
+    return Number.isNaN(converted.getTime()) ? null : converted;
+  }
+  if (typeof value === 'string') {
+    const converted = new Date(value);
+    return Number.isNaN(converted.getTime()) ? null : converted;
+  }
+  return null;
+}
+
 const TRUTHY_STRINGS = new Set(['1', 'true', 'yes', 'y', 'on', 'enable', 'enabled']);
 
 function isTruthy(value = '') {
@@ -165,9 +193,9 @@ function getLocalTimeParts(date, timeZone = DEFAULT_TIME_ZONE) {
 }
 
 function buildFallbackMeetingLines(profile, targetDate, timeZone = DEFAULT_TIME_ZONE) {
-  if (!profile?.eventDate) return [];
-  const eventDate = new Date(profile.eventDate);
-  if (Number.isNaN(eventDate.getTime())) return [];
+  if (!profile) return [];
+  const eventDate = normalizeDateInput(profile.eventDate || profile.event_date);
+  if (!eventDate) return [];
   if (!isSameDateInTimeZone(eventDate, targetDate, timeZone)) return [];
 
   const dateFormatter = new Intl.DateTimeFormat('ko-KR', {
