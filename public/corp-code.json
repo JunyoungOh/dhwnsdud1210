@@ -1,5 +1,6 @@
 {
   "updated_at": null,
   "count": 0,
-  "list": []
+  "list": [],
+  "_note": "Run `npm run update:corp-codes` with a valid OPENDART_API_KEY to refresh this cache before deployment."
 }
