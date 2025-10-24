@@ -95,12 +95,16 @@ async function fetchCorpCodesFromApi() {
     },
   };
 
-  await fs.writeFile(CORP_CODE_FILE, serializeCorpEntries(entries, payload.meta), "utf-8");
-
   corpCodeCache = {
     expires: Date.now() + CORP_CODE_TTL_MS,
     data: payload,
   };
+
+  try {
+    await fs.writeFile(CORP_CODE_FILE, serializeCorpEntries(entries, payload.meta), "utf-8");
+  } catch (err) {
+    console.warn("[opendart-proxy] Failed to persist corp-code cache", err);
+  }
 
   return payload;
 }
