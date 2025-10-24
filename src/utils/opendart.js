@@ -3,7 +3,9 @@ const REPRT_CODE_MAP = { business: "11011", half: "11012", q1: "11013", q3: "110
 
 export async function loadCorpCodeJson() {
   const res = await fetch("/corp-code.json", { cache: "reload" });
-  if (!res.ok) throw new Error(`Failed to load corp-code.json (HTTP ${res.status})`);
+  if (!res.ok) {
+    throw new Error(`corp-code.json을 불러오지 못했습니다. (HTTP ${res.status}) — public/corp-code.json을 저장해 주세요.`);
+  }
   const json = await res.json();
   if (!json || !Array.isArray(json.list)) throw new Error("Invalid corp-code.json format");
   return json.list;
@@ -48,12 +50,12 @@ export async function fetchExecutiveStatusByName(companyName, bsns_year, reprt_c
   const code = REPRT_CODE_MAP[reprt_code] || String(reprt_code);
   if (!["11011","11012","11013","11014"].includes(code)) {
     throw new Error("유효하지 않은 reprt_code입니다. (business/half/q1/q3 또는 11011/11012/11013/11014)");
-    }
+  }
   const corpList = await loadCorpCodeJson();
   const matched = findBestCorpMatch(companyName, corpList);
   if (!matched?.corp_code) throw new Error(`회사명을 corp_code로 매핑하지 못했습니다: ${companyName}`);
 
-  // Try once, then one retry on 504
+  // One retry on 504
   try {
     return await callProxy("execStatus", { corp_code: matched.corp_code, bsns_year, reprt_code: code });
   } catch (e) {
