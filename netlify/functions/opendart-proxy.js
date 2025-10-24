@@ -7,7 +7,7 @@ import { XMLParser } from "fast-xml-parser";
 const DEFAULT_TIMEOUT_MS = 20000;
 const ATTEMPTS_EXEC = 2;
 const CACHE_TTL_MS = 1000 * 60 * 60;
-const CORP_CODE_TTL_MS = 1000 * 60 * 30;
+const CORP_CODE_TTL_MS = 1000 * 60 * 60 * 6;
 
 const API_KEY = process.env.OPENDART_API_KEY;
 
