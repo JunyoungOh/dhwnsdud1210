@@ -1,13 +1,20 @@
 // netlify/functions/opendart-proxy.js
+import { promises as fs } from "fs";
+import path from "path";
+
 const DEFAULT_TIMEOUT_MS = 20000;
 const ATTEMPTS_EXEC = 2;
 const CACHE_TTL_MS = 1000 * 60 * 60;
+const CORP_CODE_TTL_MS = 1000 * 60 * 30;
 
 const API_KEY = process.env.OPENDART_API_KEY;
 
 const cache = new Map();
 const VALID_REPRT = new Set(["11011","11012","11013","11014"]);
 const MIN_YEAR = 2015;
+const CORP_CODE_FILE = path.resolve(process.cwd(), "public", "corp-code.json");
+
+let corpCodeCache = null;
 
 const withTimeout = (ms, controller) => setTimeout(() => controller.abort(), ms);
 
@@ -27,16 +34,76 @@ function errJSON(status, message, extra={}) {
   return { statusCode: status, headers: { "content-type":"application/json; charset=utf-8" }, body: JSON.stringify({ ok:false, message, ...extra }) };
 }
 
+async function loadCorpCodeList() {
+  if (corpCodeCache && corpCodeCache.expires > Date.now()) {
+    return corpCodeCache.data;
+  }
+
+  let raw;
+  try {
+    raw = await fs.readFile(CORP_CODE_FILE, "utf-8");
+  } catch (err) {
+    throw new Error(`corp-code.json을 읽는 데 실패했습니다. (${err.message})`);
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`corp-code.json 형식을 해석하지 못했습니다. (${err.message})`);
+  }
+
+  const list = Array.isArray(parsed?.list) ? parsed.list : [];
+  const mapped = list.map((item) => ({
+    corpCode: item.corp_code,
+    corpName: item.corp_name,
+    stockCode: item.stock_code || "",
+    modifyDate: item.modify_date || "",
+  }));
+
+  corpCodeCache = {
+    expires: Date.now() + CORP_CODE_TTL_MS,
+    data: {
+      data: mapped,
+      meta: {
+        updatedAt: parsed?.updated_at || null,
+        count: mapped.length,
+      },
+    },
+  };
+
+  return corpCodeCache.data;
+}
+
+function normalizeAction(action) {
+  const value = (action || "").toString().trim();
+  if (!value) return "";
+  const lower = value.toLowerCase();
+  if (lower === "execstatus") return "executives";
+  return lower;
+}
+
 export const handler = async (event) => {
   const t0 = Date.now();
   try {
     if (event.httpMethod !== "POST") return errJSON(405, "Method Not Allowed");
-    const { mode, payload } = JSON.parse(event.body || "{}");
+    const body = JSON.parse(event.body || "{}");
+    const action = normalizeAction(body?.action || body?.mode);
+    const params = body?.params || body?.payload || {};
 
-    if (mode === "ping") return okJSON({ ok:true, pong:true }, { "x-elapsed-ms": `${Date.now()-t0}` });
+    if (action === "ping") return okJSON({ ok:true, pong:true }, { "x-elapsed-ms": `${Date.now()-t0}` });
 
-    if (mode === "execStatus") {
-      const { corp_code, bsns_year, reprt_code } = payload || {};
+    if (action === "corpcode") {
+      try {
+        const data = await loadCorpCodeList();
+        return okJSON({ ok:true, ...data }, { "x-elapsed-ms": `${Date.now()-t0}` });
+      } catch (err) {
+        return errJSON(500, err.message || "corp-code.json 로드 실패");
+      }
+    }
+
+    if (action === "executives") {
+      const { corp_code, bsns_year, reprt_code } = params || {};
       if (!API_KEY) return errJSON(500, "Missing env OPENDART_API_KEY");
       if (!corp_code) return errJSON(400, "Missing corp_code");
       if (!bsns_year || +bsns_year < MIN_YEAR) return errJSON(400, `bsns_year must be >= ${MIN_YEAR}`);
@@ -67,7 +134,7 @@ export const handler = async (event) => {
       }
     }
 
-    return errJSON(400, "Unknown mode");
+    return errJSON(400, "Unknown action");
   } catch (e) {
     return errJSON(500, `Internal Error: ${e.message}`);
   }
