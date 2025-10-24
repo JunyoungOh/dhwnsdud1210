@@ -90,9 +90,33 @@ export async function fetchCorpCodeMap({ forceRefresh = false } = {}) {
 }
 
 export function findBestCorpMatch(companyName, list = []) {
-  const norm = (value) => (value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+  const clean = (value) => (value ?? '').toString().trim()
+  const norm = (value) => clean(value).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
   const target = norm(companyName)
   if (!target) return null
+
+    const rawTarget = clean(companyName)
+  const numericTarget = rawTarget.replace(/[^0-9]/g, '')
+
+  if (rawTarget) {
+    const byCorpCode = list.find((item) => {
+      const corpCode = clean(item.corpCode)
+      if (!corpCode) return false
+      if (corpCode === rawTarget) return true
+      if (numericTarget && corpCode.replace(/^0+/, '') === numericTarget.replace(/^0+/, '')) return true
+      return false
+    })
+    if (byCorpCode) return byCorpCode
+
+    const byStockCode = list.find((item) => {
+      const stockCode = clean(item.stockCode)
+      if (!stockCode) return false
+      if (stockCode === rawTarget) return true
+      if (numericTarget && stockCode.replace(/^0+/, '') === numericTarget.replace(/^0+/, '')) return true
+      return norm(stockCode) === target
+    })
+    if (byStockCode) return byStockCode
+  }
 
   const exact = list.find((item) => norm(item.corpName) === target)
   if (exact) return exact
