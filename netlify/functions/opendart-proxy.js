@@ -1,7 +1,7 @@
 // netlify/functions/opendart-proxy.js
 import { promises as fs } from "fs";
 import path from "path";
-import JSZip from "jszip";
+import { extractXmlFromZip } from "../../lib/extract-xml-from-zip.mjs";
 import { XMLParser } from "fast-xml-parser";
 
 const DEFAULT_TIMEOUT_MS = 20000;
@@ -57,13 +57,7 @@ async function fetchCorpCodesFromApi() {
   }
 
   const buffer = Buffer.from(await response.arrayBuffer());
-  const zip = await JSZip.loadAsync(buffer);
-  const xmlEntry = Object.keys(zip.files).find((name) => name.toLowerCase().endsWith(".xml"));
-  if (!xmlEntry) {
-    throw new Error("corpCode.zip에서 XML 파일을 찾지 못했습니다.");
-  }
-
-  const xml = await zip.file(xmlEntry).async("text");
+  const xml = extractXmlFromZip(buffer);
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: "",
